@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Supplier Product and Process Change Notification | PCN Portal System</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="pcn-page is-loading">
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="pcn-header-brand">
+          <img class="pcn-header-logo" src="tokin-header-logo.png" alt="TOKIN a YAGEO company" />
+          <div>
+            <p class="eyebrow">NSN-000244</p>
+            <h1>PCN Portal System</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-button" id="signOutButton" type="button">Sign out</button>
+          <a class="ghost-link" href="/admin">Admin</a>
+          <button class="ghost-button" id="loadDemoButton" type="button">Load Demo</button>
+          <button class="primary-button" id="submitButton" type="button">Submit PCN</button>
+        </div>
+      </header>
+
+      <div class="app-notice" id="appNotice" hidden>
+        <strong id="appNoticeTitle"></strong>
+        <span id="appNoticeMessage"></span>
+      </div>
+      <div class="app-toast-stack" id="appToastStack" aria-live="polite" aria-atomic="true"></div>
+      <div class="pcn-save-overlay" id="pcnSaveOverlay" aria-live="polite" aria-label="Saving PCN" hidden>
+        <div class="pcn-progress-circle" aria-hidden="true">
+          <span></span>
+        </div>
+        <strong>Saving PCN</strong>
+      </div>
+
+      <main class="workspace workspace-normal">
+        <section class="form-panel" aria-label="PCN submission form">
+          <div class="submission-skeleton" aria-hidden="true">
+            <div class="skeleton-tabs">
+              <span></span>
+              <span></span>
+            </div>
+            <div class="skeleton-sheet">
+              <div class="skeleton-title"></div>
+              <div class="skeleton-header-grid">
+                <div class="skeleton-stack">
+                  <span class="skeleton-line skeleton-line-wide"></span>
+                  <span class="skeleton-line"></span>
+                  <span class="skeleton-line skeleton-line-mid"></span>
+                </div>
+                <div class="skeleton-signatures">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+              </div>
+              <div class="skeleton-change-table">
+                <span class="skeleton-line skeleton-line-title"></span>
+                <span class="skeleton-line"></span>
+                <span class="skeleton-line skeleton-line-wide"></span>
+                <span class="skeleton-line skeleton-line-mid"></span>
+                <span class="skeleton-line"></span>
+              </div>
+              <div class="skeleton-field-grid">
+                <span></span>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+          <nav class="tabs" aria-label="Form sections">
+            <button class="tab is-active" data-view="submission" type="button">Submission</button>
+            <button class="tab" data-view="workflow" type="button">Workflow</button>
+          </nav>
+
+          <div class="view is-active" id="submissionView">
+            <form id="pcnForm" class="pcn-form">
+              <div class="supplier-sheet">
+                <div class="supplier-left-rail" aria-hidden="true">
+                  <div class="supplier-vertical">SUPPLIER</div>
+                </div>
+
+                <div class="supplier-main">
+                  <div class="pcn-excel-header" aria-label="Supplier process change notification header">
+                    <div class="pcn-title-bar">SUPPLIER PROCESS CHANGE NOTIFICATION (PCN)</div>
+                    <div class="pcn-header-body">
+                      <div class="pcn-header-info">
+                        <label class="header-line">
+                          <span>Supplier name :</span>
+                          <input id="supplierName" name="supplierName" type="text" autocomplete="organization" />
+                        </label>
+                        <label class="header-line header-line-indent">
+                          <span>Manufacture:</span>
+                          <input id="manufacturerName" name="manufacturerName" type="text" />
+                        </label>
+                        <label class="header-line">
+                          <span>Material/Chemical name:</span>
+                          <input id="materialName" name="materialName" type="text" />
+                        </label>
+                        <div class="header-controls">
+                          <label>
+                            <span>Change form</span>
+                            <select id="changeForm" name="changeForm"></select>
+                          </label>
+                          <label>
+                            <span>Risk level</span>
+                            <select id="riskLevel" name="riskLevel"></select>
+                          </label>
+                          <span class="source-pill" id="sourcePill">Form-1</span>
+                        </div>
+                      </div>
+
+                      <div class="pcn-header-signatures" aria-label="Supplier approval">
+                        <div class="header-signature-cell">
+                          <div class="signature-title">Approved</div>
+                          <label class="header-signature-check excel-check">
+                            <input class="internal-check" data-internal-field="supplierSignoff.approved.checked" type="checkbox" />
+                            <span></span>
+                          </label>
+                          <label class="signature-date">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="supplierSignoff.approved.date" type="text" />
+                          </label>
+                        </div>
+                        <div class="header-signature-cell">
+                          <div class="signature-title">Checked</div>
+                          <label class="header-signature-check excel-check">
+                            <input class="internal-check" data-internal-field="supplierSignoff.checked.checked" type="checkbox" />
+                            <span></span>
+                          </label>
+                          <label class="signature-date">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="supplierSignoff.checked.date" type="text" />
+                          </label>
+                        </div>
+                        <div class="header-signature-cell">
+                          <div class="signature-title">Prepared</div>
+                          <label class="header-signature-check excel-check">
+                            <input class="internal-check" data-internal-field="supplierSignoff.prepared.checked" type="checkbox" />
+                            <span></span>
+                          </label>
+                          <label class="signature-date">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="supplierSignoff.prepared.date" type="text" />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="change-options">
+                    <div class="section-label">Content of changes</div>
+                    <div id="changeOptions" class="option-list"></div>
+                  </div>
+
+                  <div class="supplier-detail-grid">
+                    <label class="detail-reason">
+                      <span>Reason for the change :</span>
+                      <textarea id="reason" name="reason" rows="2"></textarea>
+                    </label>
+
+                    <label class="detail-desired">
+                      <span>Desire date(or Lot No.) to start the change (New condition) :</span>
+                      <input id="desiredStart" name="desiredStart" type="text" />
+                    </label>
+
+                    <label class="detail-identification">
+                      <span>How to identify the changed material :</span>
+                      <textarea id="identification" name="identification" rows="2"></textarea>
+                    </label>
+
+                    <div class="detail-sample">
+                      <span>Did you submit the sample of new condition to TOKIN?</span>
+                      <div class="sample-choice-row">
+                        <label class="excel-check"><input name="sampleSubmittedChoice" value="yes" type="radio" /><span>Yes</span></label>
+                        <span>/</span>
+                        <label class="excel-check"><input name="sampleSubmittedChoice" value="no" type="radio" /><span>No</span></label>
+                      </div>
+                      <label class="if-yes-line">
+                        <span>(If Yes, When :</span>
+                        <input id="sampleWhen" name="sampleWhen" type="text" />
+                        <span>)</span>
+                      </label>
+                      <input id="sampleSubmitted" name="sampleSubmitted" type="hidden" />
+                    </div>
+
+                    <label class="detail-location">
+                      <span>Location of Sample manufacturing :</span>
+                      <input id="sampleLocation" name="sampleLocation" type="text" />
+                    </label>
+
+                    <div class="detail-price">
+                      <span>Price Level:</span>
+                      <label class="excel-check"><input name="priceLevelChoice" value="no-change" type="radio" /><span>No Change</span></label>
+                      <label class="excel-check"><input name="priceLevelChoice" value="decreasing" type="radio" /><span>Decreasing</span></label>
+                      <label class="excel-check"><input name="priceLevelChoice" value="increasing" type="radio" /><span>Increasing</span></label>
+                      <input id="priceLevel" name="priceLevel" type="hidden" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="approval-sheet" aria-label="TOKIN review and approval">
+                <div class="approval-main">
+                  <div class="approval-section">
+                    <div class="approval-section-rail" aria-hidden="true">
+                      <div class="tokin-vertical">TOKIN Electronics (Thailand) Co., Ltd.</div>
+                    </div>
+
+                    <div class="approval-section-body">
+                      <div class="approval-meta-row">
+                        <label>
+                          <span>Material Code/Description : (TOKIN part No./ Model/ Type)</span>
+                          <input class="internal-field" data-internal-field="materialCodeDescription" type="text" />
+                        </label>
+                        <label>
+                          <span>PCN Code :</span>
+                          <input class="internal-field generated-code-field" data-internal-field="pcnCode" type="text" readonly />
+                        </label>
+                      </div>
+
+                      <div class="approval-review-grid">
+                        <section class="approval-box">
+                          <h3>TOKIN request the following document/data from Supplier</h3>
+                          <p>The supplier should submit the document/data to TOKIN-GSC within ____________ for the items checked in the checkbox.</p>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="docs.hazardousReport" type="checkbox" />
+                            <span>Supplier's Hazardous substance tested Report</span>
+                          </label>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="docs.greenProcurement" type="checkbox" />
+                            <span>Green Procurement declaration</span>
+                          </label>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="docs.qmsEmsCertificate" type="checkbox" />
+                            <span>Certificate of QMS / EMS</span>
+                          </label>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="docs.supplierDocument" type="checkbox" />
+                            <span>Supplier's document (Specify)</span>
+                          </label>
+                          <input class="approval-line internal-field" data-internal-field="docs.supplierDocumentNote" type="text" />
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="docs.otherRequirement" type="checkbox" />
+                            <span>Other requirement (Specify)</span>
+                          </label>
+                          <input class="approval-line internal-field" data-internal-field="docs.otherRequirementNote" type="text" />
+                        </section>
+
+                        <section class="approval-box">
+                          <h3>TOKIN's decision of this PCN</h3>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="decision.agreed" type="checkbox" />
+                            <span>Agreed</span>
+                          </label>
+                          <p>(The supplier should inform delivery date of first lot to TOKIN in advance about the new condition material.)</p>
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="decision.agreedAfterQualification" type="checkbox" />
+                            <span>Agreed after TOKIN's qualification change review step completed.</span>
+                          </label>
+                          <p>In case of <span class="red-text">RL0</span>, TOKIN's verification review step complete.</p>
+                          <input class="approval-line internal-field" data-internal-field="decision.qualificationDue" type="text" placeholder="TOKIN will contact supplier after finished qualification within" />
+                          <label class="excel-check">
+                            <input class="internal-check" data-internal-field="decision.rejected" type="checkbox" />
+                            <span>Rejected Supplier's change notification</span>
+                          </label>
+                          <label class="approval-line-label">
+                            <span>Reason :</span>
+                            <input class="approval-line internal-field" data-internal-field="decision.rejectReason" type="text" />
+                          </label>
+                        </section>
+                      </div>
+
+                      <div class="signoff-grid">
+                      <div class="signoff-dept">GSC/TET</div>
+                      <div class="signoff-dept">Prod.Eng/TET</div>
+                      <div class="signoff-dept">QA/TET</div>
+
+                      <div class="signoff-box" data-role="gscTet">
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.gscTet.approved" type="checkbox" /><span>Approved</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.gscTet.checked" type="checkbox" /><span>Checked</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.gscTet.prepared" type="checkbox" /><span>Prepared</span></label>
+                        <input class="internal-field" data-internal-field="signoff.gscTet.date" type="text" placeholder="Date :" />
+                        <input class="internal-field" data-internal-field="signoff.gscTet.comment" type="text" placeholder="Comment :" />
+                      </div>
+
+                      <div class="signoff-box" data-role="prodEngTet">
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.prodEngTet.approved" type="checkbox" /><span>Approved</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.prodEngTet.checked" type="checkbox" /><span>Checked</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.prodEngTet.prepared" type="checkbox" /><span>Prepared</span></label>
+                        <input class="internal-field" data-internal-field="signoff.prodEngTet.date" type="text" placeholder="Date :" />
+                        <input class="internal-field" data-internal-field="signoff.prodEngTet.comment" type="text" placeholder="Comment :" />
+                      </div>
+
+                      <div class="signoff-box" data-role="qaTet">
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.qaTet.approved" type="checkbox" /><span>Approved</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.qaTet.checked" type="checkbox" /><span>Checked</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="signoff.qaTet.prepared" type="checkbox" /><span>Prepared</span></label>
+                        <input class="internal-field" data-internal-field="signoff.qaTet.date" type="text" placeholder="Date :" />
+                        <input class="internal-field" data-internal-field="signoff.qaTet.comment" type="text" placeholder="Comment :" />
+                      </div>
+                      </div>
+
+                      <div class="tapbu-row">
+                        <span>Need for approve by TaPBU</span>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.need" type="checkbox" /><span>Need (RL3,2,<span class="red-text">1</span>)</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.noNeed" type="checkbox" /><span>No Need (<span class="red-text">RL0</span>)</span></label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="approval-section">
+                    <div class="approval-section-rail" aria-hidden="true">
+                      <div class="tokin-vertical">TOKIN TaPBU</div>
+                    </div>
+                    <div class="approval-section-body">
+                      <div class="tapbu-grid">
+                      <div class="signoff-dept">GSC/TaPBU</div>
+                      <div class="signoff-dept">QA/TaPBU</div>
+                      <div class="signoff-dept">Comment :</div>
+                      <div class="signoff-box">
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.gsc.approved" type="checkbox" /><span>Approved</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.gsc.checked" type="checkbox" /><span>Checked</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.gsc.prepared" type="checkbox" /><span>Prepared</span></label>
+                        <input class="internal-field" data-internal-field="tapbu.gsc.date" type="text" placeholder="Date :" />
+                      </div>
+                      <div class="signoff-box">
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.qa.approved" type="checkbox" /><span>Approved</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.qa.checked" type="checkbox" /><span>Checked</span></label>
+                        <label class="excel-check"><input class="internal-check" data-internal-field="tapbu.qa.prepared" type="checkbox" /><span>Prepared</span></label>
+                        <input class="internal-field" data-internal-field="tapbu.qa.date" type="text" placeholder="Date :" />
+                      </div>
+                        <textarea class="internal-field tapbu-comment" data-internal-field="tapbu.comment" rows="4"></textarea>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="approval-route-row">
+                    <div class="approval-route-spacer" aria-hidden="true"></div>
+                    <div class="approval-route-band">ROUTE: GSC/TET (Receive info) -> Prod.Eng./TET (Review) -> QA Dept./TET (Approve) -> GSC&amp;QA/TaPBU (Approve, if any) -> GSC/TET (Inform to supplier) -> QOD-206(qualification)</div>
+                  </div>
+
+                  <div class="approval-section">
+                    <div class="approval-section-rail" aria-hidden="true">
+                      <div class="tokin-vertical">TOKIN Electronics (Thailand) Co., Ltd.</div>
+                    </div>
+                    <div class="approval-section-body">
+                      <div class="qate-final-grid">
+                        <section class="qate-final-main">
+                          <h3>&lt;QA/TET&gt; Final Judgment (After completed qualification of QOD-206 Change Review step , or Verification Review step in case of <span class="red-text">RL0</span>)</h3>
+                          <div class="qate-judgment-row">
+                            <label class="excel-check"><input class="internal-check" data-internal-field="qateFinal.approve" type="checkbox" /><span>Approve</span></label>
+                            <label class="excel-check"><input class="internal-check" data-internal-field="qateFinal.reject" type="checkbox" /><span>Reject</span></label>
+                            <label class="qate-inline-field">
+                              <span>QOD-206#</span>
+                              <input class="internal-field" data-internal-field="qateFinal.qod206Number" type="text" />
+                            </label>
+                            <label class="qate-inline-field">
+                              <span>Completed Date :</span>
+                              <input class="internal-field" data-internal-field="qateFinal.completedDate" type="text" />
+                            </label>
+                          </div>
+                          <p>Requirements to suppliers regarding delivery of changed materials.</p>
+                        </section>
+
+                        <div class="qate-signoff-grid" aria-label="QA/TET final signoff">
+                          <div class="qate-signoff-head">Approved</div>
+                          <div class="qate-signoff-head">Checked</div>
+                          <div class="qate-signoff-head">Prepared</div>
+                          <label class="qate-signoff-box qate-signoff-check">
+                            <input class="internal-check" data-internal-field="qateFinal.signoff.approved" type="checkbox" />
+                          </label>
+                          <label class="qate-signoff-box qate-signoff-check">
+                            <input class="internal-check" data-internal-field="qateFinal.signoff.checked" type="checkbox" />
+                          </label>
+                          <label class="qate-signoff-box qate-signoff-check">
+                            <input class="internal-check" data-internal-field="qateFinal.signoff.prepared" type="checkbox" />
+                          </label>
+                          <label class="qate-date-cell">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="qateFinal.signoff.approvedDate" type="text" />
+                          </label>
+                          <label class="qate-date-cell">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="qateFinal.signoff.checkedDate" type="text" />
+                          </label>
+                          <label class="qate-date-cell">
+                            <span>Date :</span>
+                            <input class="internal-field" data-internal-field="qateFinal.signoff.preparedDate" type="text" />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="approval-route-row">
+                    <div class="approval-route-spacer" aria-hidden="true"></div>
+                    <div class="approval-route-band approval-route-band-bottom">ROUTE: QOD-206 (qualification) -> QA Dept./TET (Final Judgment) -> GSC/TET (Inform to supplier)</div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div class="view" id="workflowView">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Internal route</p>
+                <h2>Approval Workflow</h2>
+              </div>
+              <span class="source-pill">Agenda + Excel route</span>
+            </div>
+            <div id="workflowSteps" class="workflow-steps"></div>
+          </div>
+
+        </section>
+
+        <aside class="summary-panel" aria-label="Submission summary">
+          <div class="summary-skeleton" aria-hidden="true">
+            <div class="skeleton-summary-head">
+              <span></span>
+              <span></span>
+            </div>
+            <span class="skeleton-summary-card"></span>
+            <span class="skeleton-summary-card"></span>
+            <span class="skeleton-summary-card skeleton-summary-card-tall"></span>
+            <span class="skeleton-summary-card"></span>
+          </div>
+          <div class="panel-header">
+            <h2>Summary</h2>
+            <span class="status-badge" id="statusBadge">Draft</span>
+          </div>
+          <dl class="summary-list" id="summaryList"></dl>
+          <div class="document-box">
+            <div class="section-label">Required documents</div>
+            <ul id="documentList"></ul>
+          </div>
+          <div class="payload-box">
+            <div class="section-label">Record preview</div>
+            <pre id="payloadPreview"></pre>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/session-client.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

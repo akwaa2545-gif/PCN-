@@ -1,0 +1,12 @@
+﻿.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f4f6f9; }
+.auth-card { width: min(100%, 440px); padding: 32px; border-radius: 18px; background: white; box-shadow: 0 12px 40px #12294a12; }
+.auth-card h1 { margin: 16px 0 8px; }
+.auth-card form { display: grid; gap: 12px; }
+.auth-card form[hidden] { display: none; }
+.auth-card input:not([type="checkbox"]) { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #8b99aa; border-radius: 7px; font: inherit; }
+.auth-card button { min-height: 44px; }
+.auth-card label { font-weight: 600; }
+.auth-checkbox { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+.auth-card input:focus-visible, .auth-card button:focus-visible { outline: 3px solid #176ec9; outline-offset: 3px; }
+#authMessage { min-height: 24px; color: #9a2424; }
+#passwordHelp { margin: 0; font-size: 14px; }

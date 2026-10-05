@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PCN Administration</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="admin-page">
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="admin-header-brand">
+          <img class="admin-header-logo" src="tokin-header-logo.png" alt="TOKIN a YAGEO company" />
+          <div>
+            <p class="eyebrow">NSN-000244</p>
+            <h1>PCN Portal System</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <button class="ghost-button" id="signOutButton" type="button">Sign out</button>
+          <button class="ghost-button admin-nav-button" id="adminRecordsButton" type="button">PCN Records</button>
+          <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button">Mail Routing</button>
+          <a class="ghost-link" href="/create">Create PCN</a>
+          <button class="primary-button" id="adminRefreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <div class="app-notice admin-notice" id="adminNotice" hidden>
+        <strong id="adminNoticeTitle"></strong>
+        <span id="adminNoticeMessage"></span>
+      </div>
+      <div class="admin-toast-stack" id="adminToastStack" aria-live="polite" aria-atomic="true"></div>
+      <div class="admin-confirm-backdrop" id="adminRemoveDialog" role="dialog" aria-modal="true" aria-labelledby="adminRemoveTitle" hidden>
+        <div class="admin-confirm-card">
+          <div class="admin-confirm-mark" aria-hidden="true">!</div>
+          <div>
+            <p class="eyebrow">Remove PCN</p>
+            <h2 id="adminRemoveTitle">Confirm removal</h2>
+            <p id="adminRemoveMessage">This PCN will be removed from the records list.</p>
+          </div>
+          <div class="admin-confirm-summary">
+            <span>PCN Code</span>
+            <strong id="adminRemoveCode">-</strong>
+          </div>
+          <div class="admin-confirm-actions">
+            <button class="ghost-button" id="adminRemoveCancelButton" type="button">Cancel</button>
+            <button class="danger-button admin-confirm-danger" id="adminRemoveConfirmButton" type="button">Remove PCN</button>
+          </div>
+        </div>
+      </div>
+      <div class="admin-loading-bar" id="adminLoadingBar" hidden>
+        <span></span>
+        <strong id="adminLoadingText">Loading admin data...</strong>
+      </div>
+
+      <main>
+        <section class="admin-view" id="pcnAdminView" aria-label="PCN management">
+          <div class="admin-overview">
+            <div>
+              <span class="section-label">Records</span>
+              <strong id="adminOverviewRecords">0 PCNs</strong>
+            </div>
+            <div>
+              <span class="section-label">Selected</span>
+              <strong id="adminOverviewSelected">None</strong>
+            </div>
+            <div>
+              <span class="section-label">Workflow</span>
+              <strong id="adminOverviewWorkflow">Waiting</strong>
+            </div>
+          </div>
+
+          <div class="admin-workspace">
+            <section class="admin-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>PCN Records</h2>
+                  <p class="admin-message" id="adminMessage">Loading records...</p>
+                </div>
+                <span class="count-badge" id="adminCount">0</span>
+              </div>
+
+              <div class="admin-table-toolbar" aria-label="PCN table controls">
+                <label class="admin-search-control">
+                  <span>Search</span>
+                  <input id="adminSearchInput" type="search" placeholder="PCN code, supplier, material" autocomplete="off" />
+                </label>
+                <label>
+                  <span>Status</span>
+                  <select id="adminStatusFilter">
+                    <option value="">All statuses</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Risk</span>
+                  <select id="adminRiskFilter">
+                    <option value="">All risks</option>
+                    <option value="RL0">RL0</option>
+                    <option value="RL1">RL1</option>
+                    <option value="RL2">RL2</option>
+                    <option value="RL3">RL3</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="admin-table-wrap">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th>PCN Code</th>
+                      <th>Status</th>
+                      <th>Risk</th>
+                      <th>Supplier</th>
+                      <th>Material</th>
+                      <th>Updated</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="adminPcnRows"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="admin-detail-panel" aria-label="Selected PCN detail">
+              <div class="panel-header">
+                <h2>Selected PCN</h2>
+                <span class="status-badge" id="adminDetailStatus">None</span>
+              </div>
+              <div class="progress-summary" id="adminProgressSummary">
+                <div>
+                  <span class="section-label">Current owner</span>
+                  <strong id="adminCurrentOwner">Select a PCN</strong>
+                </div>
+                <div>
+                  <span class="section-label">Next action</span>
+                  <p id="adminNextAction">Click a PCN code to see workflow progress.</p>
+                </div>
+                <div class="progress-meter" aria-label="Workflow completion">
+                  <span id="adminProgressFill"></span>
+                </div>
+                <span class="progress-percent" id="adminProgressPercent">0%</span>
+              </div>
+
+              <div class="admin-status-control">
+                <label>
+                  Move workflow status
+                  <select id="adminStatusSelect"></select>
+                </label>
+                <button class="primary-button" id="adminStatusButton" type="button">Update Status</button>
+              </div>
+
+              <div class="progress-steps" id="adminProgressSteps"></div>
+
+              <details class="record-details">
+                <summary>Record data</summary>
+                <pre id="adminDetailPreview">Select a PCN row to view details.</pre>
+              </details>
+            </aside>
+          </div>
+        </section>
+
+        <section class="admin-view" id="mailRoutingView" aria-label="Workflow mail configuration">
+          <div class="mail-routing-layout">
+            <section class="admin-panel mail-routing-panel">
+              <div class="panel-header">
+                <div>
+                  <h2>Mail Routing</h2>
+                  <p class="admin-message" id="mailRoutingMessage">Loading routing...</p>
+                </div>
+                <button class="primary-button" id="notificationSaveButton" type="button">Save Mail</button>
+              </div>
+
+              <div class="mail-routing-summary">
+                <div>
+                  <span class="section-label">Saved format</span>
+                  <strong>Semicolon separated recipients</strong>
+                </div>
+                <div>
+                  <span class="section-label">Validation</span>
+                  <strong>Email format checked on save</strong>
+                </div>
+                <div>
+                  <span class="section-label">Scope</span>
+                  <strong>Workflow approval groups</strong>
+                </div>
+              </div>
+
+              <div class="webhook-config">
+                <div class="webhook-config-label">Email and directory services</div>
+                <p>Connections are configured on the server. Email recipients start empty; notifications require a saved recipient.</p>
+                <div class="webhook-actions">
+                  <span class="webhook-status" id="powerAutomateStatus">Not tested</span>
+                  <span class="webhook-status" id="directoryLookupStatus">Directory lookup not configured</span>
+                  <button class="ghost-button" id="powerAutomateTestButton" type="button">Test Email</button>
+                </div>
+              </div>
+
+              <div class="notification-groups" id="notificationGroups"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/session-client.js"></script>
+    <script src="/admin.js"></script>
+  </body>
+</html>

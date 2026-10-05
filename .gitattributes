@@ -1,0 +1,2 @@
+# Preserve migration bytes: applied SQL migrations are identified by SHA-256.
+sql/migrations/*.sql -text

@@ -1,0 +1,41 @@
+node_modules/
+.firebase/
+.firebaserc
+*.log
+data/*.tmp
+.env
+.env.*
+!.env.example
+coverage/
+test-results/
+*.credential.xml
+
+# Local agent state and private data
+.agents/
+.claude-flow/
+.swarm/
+*.db
+*.db-*
+*.sqlite*
+data/
+
+# Source workbooks and local reference materials
+*.xlsx
+*.xlsm
+*.pdf
+*.zip
+enterprise/
+agenda.md
+
+# Obsolete Firebase/JSON prototype; SQL runtime does not load these files
+functions/
+firebase-client.js
+firebase.json
+firebase.blaze.json
+firestore.indexes.json
+firestore.rules
+storage.rules
+.firebaserc.example
+master-data.js
+src/pcnRepository.js
+src/powerAutomateMailer.js

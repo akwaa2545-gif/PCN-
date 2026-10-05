@@ -1,0 +1,40 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in | PCN Portal</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/auth.css" />
+</head>
+<body class="auth-page">
+  <main class="auth-card" aria-labelledby="authTitle">
+    <img class="admin-header-logo" src="/tokin-header-logo.png" alt="TOKIN a YAGEO company" />
+    <p class="eyebrow">PCN Portal System</p>
+    <h1 id="authTitle">Sign in</h1>
+    <p id="authDescription">Sign in to create and review product change notifications.</p>
+    <p id="authMessage" role="status" aria-live="polite"></p>
+    <form id="loginForm">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" maxlength="100" required />
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
+      <label class="auth-checkbox"><input id="remember" type="checkbox" /> Remember me on this device</label>
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+    <form id="passwordChangeForm" hidden>
+      <label for="currentPassword">Current password</label>
+      <input id="currentPassword" type="password" autocomplete="current-password" required />
+      <label for="newPassword">New password</label>
+      <input id="newPassword" type="password" autocomplete="new-password" maxlength="128" required aria-describedby="passwordHelp" />
+      <p id="passwordHelp">Choose a password different from your current password.</p>
+      <label for="confirmPassword">Confirm new password</label>
+      <input id="confirmPassword" type="password" autocomplete="new-password" maxlength="128" required />
+      <button class="primary-button" type="submit">Change password</button>
+      <button class="ghost-button" id="signOutButton" type="button">Sign out</button>
+    </form>
+  </main>
+  <script src="/session-client.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>
