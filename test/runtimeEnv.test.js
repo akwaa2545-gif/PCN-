@@ -29,19 +29,53 @@ async function workspace(t) {
   return directory;
 }
 
-function childEnvironment(extra = {}) {
+const windowsProfileKeys = new Set([
+  'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'PATH', 'PATHEXT', 'COMSPEC', 'USERPROFILE',
+  'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH',
+  'USERNAME', 'USERDOMAIN', 'USERDOMAIN_ROAMINGPROFILE', 'OS',
+  'PROGRAMDATA', 'ALLUSERSPROFILE', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
+  'PROGRAMW6432', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'COMMONPROGRAMW6432',
+  'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'PROCESSOR_LEVEL',
+  'PROCESSOR_REVISION', 'NUMBER_OF_PROCESSORS', 'PSMODULEPATH'
+]);
+
+function childEnvironment(extra = {}, source = process.env) {
   return {
-    ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-    ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
-    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+    ...Object.fromEntries(Object.entries(source).filter(([key]) => windowsProfileKeys.has(key.toUpperCase()))),
     ...extra
   };
 }
 
 async function load(cwd, extra = {}) {
-  const result = await run(process.execPath, ['-e', childSource], { cwd, env: childEnvironment(extra), windowsHide: true, timeout: 20000 });
+  // Keep the real Windows profile for DPAPI, but never inspect its application credential file.
+  const environment = childEnvironment({ PCN_SQL_CREDENTIAL_PATH: path.join(cwd, 'absent-test-credential.xml'), ...extra });
+  const result = await run(process.execPath, ['-e', childSource], { cwd, env: environment, windowsHide: true, timeout: 20000 });
   return JSON.parse(result.stdout);
 }
+
+test('child environment preserves cold Windows profile variables without inherited application configuration', () => {
+  const profile = {
+    SystemRoot: 'C:\\Windows', WINDIR: 'C:\\Windows', Path: 'C:\\Windows\\System32',
+    USERPROFILE: 'C:\\Users\\RUNNERADMIN', APPDATA: 'C:\\Users\\RUNNERADMIN\\AppData\\Roaming',
+    LOCALAPPDATA: 'C:\\Users\\RUNNERADMIN\\AppData\\Local', TEMP: 'C:\\Windows\\Temp', TMP: 'C:\\Windows\\Temp',
+    HOMEDRIVE: 'C:', HOMEPATH: '\\Users\\RUNNERADMIN', USERNAME: 'RUNNERADMIN', USERDOMAIN: 'host',
+    OS: 'Windows_NT', COMSPEC: 'C:\\Windows\\System32\\cmd.exe', PATHEXT: '.EXE;.CMD',
+    SystemDrive: 'C:', PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules',
+    SQL_PASSWORD: 'synthetic-inherited-secret', SQL_USER: 'inherited-user',
+    PCN_ENV_FILE: 'C:\\private\\service.env', PCN_SQL_CREDENTIAL_PATH: 'C:\\private\\credential.xml',
+    PCN_RELEASE_SIGNING_KEY: 'synthetic-private-key', PSExecutionPolicyPreference: 'InheritedPolicy'
+  };
+  const environment = childEnvironment({ PSExecutionPolicyPreference: 'Restricted' }, profile);
+  for (const key of ['SystemRoot', 'SystemDrive', 'WINDIR', 'Path', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'USERDOMAIN', 'OS', 'COMSPEC', 'PATHEXT', 'PSModulePath']) {
+    assert.equal(environment[key], profile[key]);
+  }
+  assert.equal(environment.SQL_PASSWORD, undefined);
+  assert.equal(environment.SQL_USER, undefined);
+  assert.equal(environment.PCN_ENV_FILE, undefined);
+  assert.equal(environment.PCN_SQL_CREDENTIAL_PATH, undefined);
+  assert.equal(environment.PCN_RELEASE_SIGNING_KEY, undefined);
+  assert.equal(environment.PSExecutionPolicyPreference, 'Restricted');
+});
 
 test('default .env loads from current directory and process environment takes precedence', async t => {
   const directory = await workspace(t);
