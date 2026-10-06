@@ -15,6 +15,20 @@ function emailList(value) {
   return [...new Set(emails)].join('; ');
 }
 
+function directoryProfileText(value) {
+  return typeof value === 'string' ? value.trim().slice(0, 120) : '';
+}
+
+function directoryPhoto(value) {
+  if (typeof value !== 'string') return '';
+  const match = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/= \t\r\n]+)$/i.exec(value.trim());
+  if (!match) return '';
+  const encoded = match[2].replace(/[ \t\r\n]/g, '');
+  if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return '';
+  const photo = `data:image/${match[1].toLowerCase()};base64,${encoded}`;
+  return photo.length <= 100 * 1024 ? photo : '';
+}
+
 class IntegrationService {
   constructor(options = {}) {
     this.mailUrl = options.mailUrl || '';
@@ -86,14 +100,18 @@ class IntegrationService {
   async directory(query) {
     const search = text(query, 'Search', 100);
     if (search.length < 2) throw new ApiError(400, 'Search must contain at least two characters');
-    const result = await this.request(this.directoryUrl, { query: search }, true);
-    const entries = Array.isArray(result) ? result : result.users || result.value;
+    const result = await this.request(this.directoryUrl, { query: search, searchTerm: search }, true);
+    const entries = Array.isArray(result) ? result : result?.users || result?.value || result?.results;
     if (!Array.isArray(entries)) throw new ApiError(502, 'Directory returned an invalid response');
     const users = entries.slice(0, 50).filter((entry) => entry && typeof entry === 'object').flatMap((entry) => {
       try {
         const email = emailList(entry.email || entry.mail || entry.userPrincipalName);
         if (email.includes(';')) return [];
-        return [{ id: text(entry.id || '', 'Id', 200, false), displayName: text(entry.displayName || email, 'Name', 200), email, photo: '' }];
+        return [{
+          id: text(entry.id || '', 'Id', 200, false), displayName: text(entry.displayName || email, 'Name', 200), email,
+          jobTitle: directoryProfileText(entry.jobTitle), department: directoryProfileText(entry.department),
+          photo: directoryPhoto(entry.photo)
+        }];
       } catch { return []; }
     });
     return { users };

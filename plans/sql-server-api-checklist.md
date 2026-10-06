@@ -1,6 +1,6 @@
 ﻿# SQL Server API inventory and checklist
 
-Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. Implemented code, live release checks and future features are distinguished below. The restored mail HTML and notification-health API/UI on `develop` passed local tests and specialist reviews but are not yet merged/deployed or verified in CI/live acceptance.
+Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. Implemented code, live release checks and future features are distinguished below. The restored mail HTML, directory compatibility and compact mail-status UI passed local tests and specialist reviews; release CI/live acceptance is separate evidence.
 
 Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups are empty. Real SQL smoke checks and isolated browser E2E passed. The earlier SQL pilot/pipeline deployment is recorded in [the Windows runbook](windows-test-deployment.md); those checks do not verify the current mail-health changes. Existing Firebase data import remains pending.
 
@@ -33,8 +33,8 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `POST /api/admin/logout` | Compatibility logout alias | SQL revocation |
 | `GET /api/admin/users` | Admin safe account list | No pagination/UI |
 | `POST /api/admin/users` | Admin creates user/roles/password | Normal password policy, forced change, optional email; no invitation |
-| `GET /api/admin/directory-users?query=...` | Admin directory lookup | Server HTTPS host allowlist |
-| `GET /api/admin/notifications/health` | Admin read-only local endpoint validation + SQL queue/worker outcomes | Develop change; no fetch, flow invocation, queue mutation or email; normal session required |
+| `GET /api/admin/directory-users?query=...` | Admin backend directory lookup with distinct private endpoint | query/searchTerm payload; profile fields and safe inline photos; no Firebase runtime |
+| `GET /api/admin/notifications/health` | Admin read-only local endpoint validation + SQL queue/worker outcomes | No fetch, flow invocation, queue mutation or email; normal session required |
 | `POST /api/admin/notifications/test` | Admin compatibility mail test using recipient/groupId | Explicit admin recipient allowed; invokes mail only when explicitly requested; not called by health UI |
 | `GET /api/master-data` | Authenticated active SQL master | Historical-version endpoint pending |
 | `GET /api/notification-settings` | Admin routing/configured flags | No signed URLs; fixed server endpoint is not a UI setting |
@@ -56,7 +56,7 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 
 Schema roles: `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa`, `tapbu`. Department review permissions are enforced; admin/reviewer can manage all review fields. Supplier ownership is per user, not display name/email domain.
 
-## Notification health and original mail contract — develop
+## Notification health and original mail contract
 
 `GET /api/admin/notifications/health` requires a valid admin session that has completed any forced password change. It returns the normal success/data envelope. It validates the server endpoint locally and performs a read-only SQL aggregate; it never fetches the flow, sends test mail or changes queued jobs. SQL/health failure returns a generic 503.
 
@@ -71,18 +71,52 @@ Schema roles: `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `
 | queue.latestAcceptedAt | Latest accepted job timestamp or null |
 | deliveryVerified | Always false; no delivery receipt/probe is performed |
 
-The UI's **Check Notification Health** action replaces the test-email button while preserving recipient mapping, directory-assisted recipient selection and routing saves. No health action calls the compatibility `POST /api/admin/notifications/test` endpoint. A configured status does not establish DNS/network reachability, a successful remote flow, valid flow credentials or delivered email.
+The UI is simplified to one compact **Mail service** row with a badge and **Check status** button. Recipient mapping, directory-assisted selection and routing saves remain editable. Queue counts, worker/timestamp details and a delivery paragraph are not displayed in this row; the backend health response above is unchanged. The button does not call the compatibility `POST /api/admin/notifications/test` endpoint or send mail.
+
+| Compact UI result | Meaning |
+|---|---|
+| Ready | Configuration is valid, with no known worker error/uncertain outcome or uncertain queued jobs; not proof of delivered email |
+| Not configured | Mail endpoint is absent |
+| Needs attention | Invalid configuration, worker error/uncertain outcome or uncertain queue |
+| Unavailable | Health fetch failed or the response is malformed |
+
+Compact-row validation passed 16/16 isolated browser checks and 14/14 focused frontend tests; a reviewer independently passed 14 notification-health API tests. Code, JavaScript and accessibility reviews approved with no findings, and screenshot inspection confirmed one row without metrics. The latest overall coverage run passed 155/155 tests with 95.03% lines, 88.27% branches and 94.70% functions. A configured/Ready state does not probe DNS/network reachability, remote-flow credentials or delivery; local results do not establish release CI/deployment/live-email acceptance.
 
 The signed endpoint remains fixed in private server `POWER_AUTOMATE_MAIL_URL` configuration with an exact allowlisted hostname. The Windows service reads it through its protected external `PCN_ENV_FILE`. Neither health/settings responses nor UI edits expose or change the URL. Committed templates contain empty placeholders; GitHub Actions and public releases never receive it.
 
 Workflow mail preserves the pre-migration JSON keys exactly: `to`, `subject`, `message`, `senderName`. The restored escaped HTML message contains the Supplier PCN Workflow card, PCN/supplier/material/risk details, Current Status, Next To Check and Open PCN link. The server resolves recipients, groups and canonical portal URL; client values cannot replace them. Empty recipient groups remain empty with no old hardcoded fallback. The queue's accepted outcome denotes upstream HTTP acceptance, not delivery.
 
 - [x] Complete develop branch local tests/review for payload, HTML escaping, health auth and read-only behavior: 148/148 tests, 95.00% line / 87.54% branch / 94.67% function coverage; 14 isolated browser checks with no SQL/flow calls. Backend, JavaScript, code and security reviews approved.
+- [x] Complete compact Mail service row local tests/review: 16 browser checks, 14 focused frontend tests and independent 14 health API tests; code/JavaScript/accessibility approved. Health API remains unchanged.
 - [ ] Run CI for these changes before merge/deployment; previous pilot CI is separate evidence.
 - [ ] Verify the deployed health UI and local/SQL status behavior without invoking the flow or sending test mail.
 - [ ] Record any future explicit send/delivery verification separately; health always reports deliveryVerified=false.
 
 Private host configuration is staged for the next service start. Before its update, a read-only SQL check found zero pending/sending jobs. The environment file was replaced atomically under the deployment mutex, with its existing ACL retained and a protected backup. No database writes, service restart or flow invocation occurred. This records configuration staging, not live acceptance of the new endpoint/UI.
+
+## Directory lookup compatibility
+
+`GET /api/admin/directory-users?query=...` requires an admin session that has completed any forced password change. A trimmed search is 2–100 characters. The backend calls the distinct private `POWER_AUTOMATE_DIRECTORY_URL` using HTTPS with an exact allowlisted hostname; the directory endpoint must not be replaced by the mail endpoint. The original configuration was recovered through a one-time read-only inspection of legacy Firestore settings. Runtime lookup calls Power Automate directly and does not use Firebase.
+
+| Contract | Behavior |
+|---|---|
+| Flow request JSON | Identical trimmed text in `query` and `searchTerm` |
+| Accepted flow responses | Direct array, or array in users, value or results |
+| API response | Normal success/data envelope containing users; at most 50 entries; malformed profiles skipped |
+| Profile fields | id/displayName/email, plus jobTitle and department limited to 120 characters each |
+| Photos | Inline PNG/JPEG/GIF/WebP data URIs only, total URI length at most 100 KiB; remote URLs and unsupported images omitted |
+| Request bounds | Existing 10-second timeout, 256 KiB response cap, rejected redirects and local HTTPS/host checks |
+
+The ignored local `.env` enables only directory lookup; local mail remains disabled by this change. Private configuration is external to releases. Actual signed endpoint URLs, hosts/signatures and profile identifiers are not documented or published.
+
+- [x] Unit/API suite: latest 155/155 passes; focused directory integration 14/14, 100% lines / 93.81% branches / 94.44% functions.
+- [x] Original directory flow lookup returned one matching user with name/job title/department/photo; identifying data remains private.
+- [x] Local SQL readiness returned 200 after watch reload.
+- [x] Enhanced directory browser checks: 16/16 passed; dropdown rendering of name/email/title/department/photo was inspected. Earlier mail-health browser results are separate.
+- [x] Final code/security reviews approved with no critical/high findings.
+- [ ] Record release CI and deployed acceptance for this enhancement separately from local results; private configuration stays external to releases.
+
+The earlier mail-health run's 148-test coverage above is historical evidence for that change. The latest overall coverage run passes 155/155 with 95.03% lines, 88.27% branches and 94.70% functions.
 
 ## Implemented browser/integration changes
 

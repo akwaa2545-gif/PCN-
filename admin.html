@@ -194,22 +194,11 @@
               </div>
 
               <section class="webhook-config" id="notificationHealthPanel" aria-labelledby="notificationHealthTitle" aria-busy="false">
-                <h3 id="notificationHealthTitle">Notification health</h3>
+                <h3 id="notificationHealthTitle">Mail service</h3>
                 <div class="webhook-actions">
-                  <button class="ghost-button" id="notificationHealthRefreshButton" type="button">Check Notification Health</button>
-                  <span class="webhook-status" id="notificationHealthStatus" role="status" aria-live="polite">Not checked</span>
+                  <span class="webhook-status" id="notificationHealthStatus" role="status" aria-live="polite" aria-atomic="true" aria-label="Mail service status">Not checked</span>
+                  <button class="ghost-button" id="notificationHealthRefreshButton" type="button">Check status</button>
                 </div>
-                <p id="notificationHealthMessage" aria-live="polite">Workflow acceptance does not confirm email delivery. Delivery is not verified.</p>
-                <dl class="notification-health-details">
-                  <div><dt>Server configuration</dt><dd id="notificationHealthConfiguration">Unknown</dd></div>
-                  <div><dt>Worker outcome</dt><dd id="notificationHealthWorker">Unknown</dd></div>
-                  <div><dt>Last worker check</dt><dd id="notificationHealthCheckedAt">Not yet</dd></div>
-                  <div><dt>Pending</dt><dd id="notificationHealthPending">—</dd></div>
-                  <div><dt>Sending</dt><dd id="notificationHealthSending">—</dd></div>
-                  <div><dt>Accepted by workflow</dt><dd id="notificationHealthAccepted">—</dd></div>
-                  <div><dt>Uncertain — needs review</dt><dd id="notificationHealthUncertain">—</dd></div>
-                  <div><dt>Latest workflow acceptance</dt><dd id="notificationHealthAcceptedAt">Not yet</dd></div>
-                </dl>
               </section>
 
               <div class="notification-groups" id="notificationGroups"></div>

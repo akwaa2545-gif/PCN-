@@ -61,6 +61,14 @@ Mail routing starts empty. Leave `POWER_AUTOMATE_MAIL_URL`, `POWER_AUTOMATE_DIRE
 
 ## Run
 
+For local development, restart the server automatically when its JavaScript files change:
+
+```powershell
+npm run dev
+```
+
+This uses the same SQL and private configuration as `npm start`. Refresh the browser after frontend changes. For a regular run:
+
 ```powershell
 npm start
 ```
@@ -95,13 +103,17 @@ Back up and freeze the source for final cutover. Reconcile counts, hydrated fiel
 
 Administrators configure recipients in **Mail Routing**; recipient mapping and directory-assisted recipient selection remain editable. The signed Power Automate mail URL is fixed in private server configuration and cannot be edited through the UI or routing API. On the Windows host, set `POWER_AUTOMATE_MAIL_URL` and its exact hostname in `INTEGRATION_ALLOWED_HOSTS` inside the protected file selected by `PCN_ENV_FILE`. The actual URL must never enter source control, GitHub Actions, release archives or browser responses. Integration endpoints require HTTPS and exact allowed hosts. Empty mapping still skips notifications: no fallback recipient is restored.
 
-The mail update on `develop` restores the original Power Automate JSON contract with exactly `to`, `subject`, `message` and `senderName`. The message is the escaped **Supplier PCN Workflow** HTML card with PCN, supplier, material, risk, Current Status, Next To Check and an Open PCN button. Recipients, review groups and the portal link are resolved by the server. Workflow requests enqueue deduplicated SQL jobs; the worker polls every five seconds when mail is configured.
+Workflow mail preserves the original Power Automate JSON contract with exactly `to`, `subject`, `message` and `senderName`. The message is the escaped **Supplier PCN Workflow** HTML card with PCN, supplier, material, risk, Current Status, Next To Check and an Open PCN button. Recipients, review groups and the portal link are resolved by the server. Workflow requests enqueue deduplicated SQL jobs; the worker polls every five seconds when mail is configured.
 
-The updated admin UI replaces the test-email button with **Check Notification Health** while retaining routing edits. Its admin-only `GET /api/admin/notifications/health` validates local configuration and reads SQL queue/worker outcomes. It does not call Power Automate, enqueue jobs or send email. `configured` means the stored endpoint passes local validation, not that the remote flow was contacted. `accepted` means the upstream HTTP request was accepted, not that an email arrived; `deliveryVerified` is always false, and ambiguous outcomes require operator review. The compatibility test-mail POST remains callable by administrators but is not invoked by the health UI.
+The compact admin **Mail service** row has a status badge and **Check status** button while retaining recipient routing edits. **Ready** means valid configuration with no known worker error/uncertain outcome or uncertain queued jobs; it does not confirm email delivery. Other results are **Not configured**, **Needs attention** or **Unavailable**. The unchanged admin-only `GET /api/admin/notifications/health` reads configuration and SQL/worker details without invoking Power Automate, changing jobs or sending email. Queue/timestamp details remain in the API response, not the compact UI. The compatibility test-mail POST is not invoked by this button.
 
-These mail/health changes on `develop` passed local verification and backend, JavaScript, code and security reviews. The local coverage run passed all 148 tests with 95.00% line, 87.54% branch and 94.67% function coverage; isolated browser tests passed all 14 checks without SQL or flow calls. This feature has not yet been merged, deployed or run through CI/live acceptance. These results are separate from the earlier deployed release's 134 tests and seven browser checks.
+The earlier mail/health change passed local verification and backend, JavaScript, code and security reviews: its coverage run passed 148 tests with 95.00% line, 87.54% branch and 94.67% function coverage, plus 14 isolated browser checks without SQL or flow calls. These are historical results, separate from the latest full-suite results below and the earlier deployed release's 134 tests/seven browser checks. Release CI and live acceptance are separate from local verification.
 
 The requested private mail configuration is saved in the host's protected external environment file and will be read on the next service start. A read-only SQL check found zero pending/sending jobs before the update. The update retained file permissions and a protected backup; it made no SQL mutations, restarted no service and invoked no flow. No test request or email is part of configuration or health checking. Normal queued workflow jobs are still processed by the worker when mail is configured.
+
+Directory lookup uses a distinct private `POWER_AUTOMATE_DIRECTORY_URL`, with its exact hostname in `INTEGRATION_ALLOWED_HOSTS`; it is different from the mail endpoint. The original directory configuration was recovered once through a read-only lookup of legacy Firestore settings. The SQL app now calls Power Automate directly from the backend, with no Firebase runtime dependency. The ignored local `.env` enables directory lookup only and does not enable local mail. Private configuration remains external to release files.
+
+The admin directory API sends the same search text as both `query` and `searchTerm` and accepts an array or `users`, `value` or `results` response. It returns bounded profile fields, including job title/department, and permits inline PNG/JPEG/GIF/WebP photos whose complete data URI is at most 100 KiB; remote image URLs are dropped. A live lookup of the original flow returned one matching profile with those fields. Browser checks confirmed the dropdown displays name, email, title/department and photo. Identifying values and signed endpoint details stay private. Local SQL readiness returned 200 after watch reload; deployed feature acceptance must be recorded separately.
 
 Attachment APIs store PDF, PNG, JPEG or UTF-8 text in SQL, capped at 10 MiB per file and 20 files / 50 MiB per PCN. Upload/delete require the PCN version and atomically recheck permissions/stage, advance the version and record an audit. Uploads are `pendingScan`; downloads return 423 until a trusted scanner marks them clean. Scanner integration and the attachment upload interface are pending. Form document checkboxes are requirement/history flags, not proof of scanned content.
 
@@ -113,6 +125,8 @@ npm run test:coverage
 npx playwright install chromium
 npm run test:e2e
 ```
+
+The latest full-suite coverage run passed 155/155 tests with 95.03% line, 88.27% branch and 94.70% function coverage. Focused directory integration passed 14/14; all 16 isolated browser checks passed. The compact row also passed 14 focused frontend tests, and a reviewer independently passed 14 notification-health API tests. Code, JavaScript and accessibility reviews approved with no findings; screenshot inspection confirmed one row without metrics. These local checks do not establish release CI, deployed authenticated use or email delivery.
 
 The release's Windows CI run passed all 134 tests and seven isolated browser checks. An earlier local coverage run measured 93.84% lines and 86.41% branches; this is separate from the final CI test count. The corrected Windows DPAPI fixtures are included in the successful CI run. SQL-backed HTTPS readiness and unauthenticated access boundaries also passed on the deployed host.
 

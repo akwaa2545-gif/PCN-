@@ -49,15 +49,6 @@
       "mailRoutingMessage",
       "notificationHealthPanel",
       "notificationHealthStatus",
-      "notificationHealthMessage",
-      "notificationHealthConfiguration",
-      "notificationHealthWorker",
-      "notificationHealthCheckedAt",
-      "notificationHealthPending",
-      "notificationHealthSending",
-      "notificationHealthAccepted",
-      "notificationHealthUncertain",
-      "notificationHealthAcceptedAt",
       "directoryLookupStatus",
       "notificationHealthRefreshButton",
       "adminSearchInput",
@@ -477,32 +468,20 @@
 
   function renderNotificationHealth() {
     const health = state.notificationHealth;
-    const configuration = { configured: "Configured", not_configured: "Not configured", invalid: "Invalid configuration" };
-    const outcomes = { idle: "Idle", accepted: "Accepted by workflow", uncertain: "Uncertain — needs review", error: "Worker error" };
+    const needsAttention = health?.configuration.status === "invalid"
+      || (health?.configuration.status === "configured"
+        && (["error", "uncertain"].includes(health.worker.lastOutcome) || health.queue.uncertain > 0));
     els.notificationHealthPanel.setAttribute("aria-busy", String(state.healthLoading));
     els.notificationHealthRefreshButton.disabled = state.healthLoading;
-    els.notificationHealthRefreshButton.textContent = state.healthLoading ? "Checking..." : "Check Notification Health";
-    els.notificationHealthStatus.textContent = state.healthLoading ? "Checking notification health..."
-      : state.healthUnavailable ? "Unavailable" : health ? configuration[health.configuration.status] : "Not checked";
-    const tone = state.healthUnavailable || health?.configuration.status === "invalid" ? "is-error"
-      : health?.configuration.status === "configured" ? "is-success" : "is-muted";
+    els.notificationHealthRefreshButton.textContent = "Check status";
+    els.notificationHealthStatus.textContent = state.healthLoading ? "Checking..."
+      : state.healthUnavailable ? "Unavailable" : !health ? "Not checked"
+        : needsAttention ? "Needs attention"
+          : health.configuration.status === "configured" ? "Ready" : "Not configured";
+    const tone = state.healthLoading ? "is-busy"
+      : state.healthUnavailable || needsAttention ? "is-error"
+        : health?.configuration.status === "configured" ? "is-success" : "is-muted";
     els.notificationHealthStatus.className = `webhook-status ${tone}`;
-    els.notificationHealthMessage.textContent = state.healthUnavailable
-      ? health ? "Health check unavailable. Last successful health data is stale; refresh to try again." : "Health check unavailable. Refresh to try again."
-      : "Workflow acceptance does not confirm email delivery. Delivery is not verified.";
-    els.notificationHealthConfiguration.textContent = health ? configuration[health.configuration.status] : "Unknown";
-    els.notificationHealthWorker.textContent = health ? outcomes[health.worker.lastOutcome] || "Not checked yet" : "Unknown";
-    els.notificationHealthCheckedAt.textContent = formatHealthDate(health?.worker.lastCheckedAt);
-    ["Pending", "Sending", "Accepted", "Uncertain"].forEach((label) => {
-      els[`notificationHealth${label}`].textContent = health ? String(health.queue[label.toLowerCase()]) : "—";
-    });
-    els.notificationHealthAcceptedAt.textContent = formatHealthDate(health?.queue.latestAcceptedAt);
-  }
-
-  function formatHealthDate(value) {
-    if (!value) return "Not yet";
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
   }
 
   function renderTableFilters() {

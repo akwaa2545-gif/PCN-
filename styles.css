@@ -7823,8 +7823,10 @@ body.admin-dialog-open {
 }
 
 body.admin-page #notificationHealthPanel {
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
 }
 
 #notificationHealthPanel .webhook-actions {
@@ -7832,27 +7834,19 @@ body.admin-page #notificationHealthPanel {
   flex-wrap: wrap;
 }
 
-#notificationHealthPanel h3,
-#notificationHealthPanel p {
+#notificationHealthPanel h3 {
   margin: 0;
+  font-size: 14px;
 }
 
-.notification-health-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
-  margin: 0;
+#notificationHealthRefreshButton {
+  min-height: 44px;
+  padding: 8px 12px;
 }
 
-.notification-health-details dt {
-  color: #475467;
-  font-size: 12px;
-}
-
-.notification-health-details dd {
-  margin: 4px 0 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+#notificationHealthRefreshButton:focus-visible {
+  outline: 2px solid #001a7a;
+  outline-offset: 2px;
 }
 
 .webhook-password-card {
