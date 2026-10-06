@@ -61,6 +61,13 @@ async function handleApi(req, res, url, context, requestId) {
       if (!context.integrationService) throw new ApiError(503,'Directory lookup is not configured');
       return send(await context.integrationService.directory(url.searchParams.get('query') || ''));
     }
+    if (route === '/api/admin/notifications/health' && method === 'GET') {
+      try {
+        const status = context.integrationService.mailConfigurationStatus();
+        const { worker, queue } = await context.notificationWorker.health();
+        return send({ configuration: { status }, worker, queue, deliveryVerified: false });
+      } catch { throw new ApiError(503, 'Notification health is unavailable'); }
+    }
     if (route === '/api/admin/notifications/test' && method === 'POST') {
       if (!context.integrationService) throw new ApiError(503,'Mail integration is not configured');
       const body = await readJsonBody(req);

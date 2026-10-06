@@ -32,6 +32,12 @@ class IntegrationService {
     return url.toString();
   }
 
+  mailConfigurationStatus() {
+    if (!this.mailUrl) return 'not_configured';
+    try { this.endpoint(this.mailUrl); return 'configured'; }
+    catch { return 'invalid'; }
+  }
+
   async request(url, payload, parseResult = false) {
     const endpoint = this.endpoint(url);
     const controller = new AbortController();

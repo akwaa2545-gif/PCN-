@@ -2,9 +2,25 @@ const crypto = require('node:crypto');
 const sql = require('mssql');
 
 class NotificationWorker {
-  constructor(pool, options = {}) { this.pool = pool; this.integrationService = options.integrationService; }
+  constructor(pool, options = {}) {
+    this.pool = pool;
+    this.integrationService = options.integrationService;
+    this.clock = options.clock || (() => new Date());
+    this.lastCheck = { lastCheckedAt: null, lastOutcome: null };
+  }
 
   async runOnce() {
+    try {
+      const result = await this.processNext();
+      this.lastCheck = { lastCheckedAt: this.clock().toISOString(), lastOutcome: result.status === 'sent' ? 'accepted' : result.status };
+      return result;
+    } catch (error) {
+      this.lastCheck = { lastCheckedAt: this.clock().toISOString(), lastOutcome: 'error' };
+      throw error;
+    }
+  }
+
+  async processNext() {
     const claimToken = crypto.randomUUID();
     // An expired sending lease is ambiguous: the previous sender may have delivered mail.
     const result = await this.pool.request().input('token', sql.UniqueIdentifier, claimToken).query(`
@@ -28,6 +44,22 @@ class NotificationWorker {
         SentAt=CASE WHEN @status=N'sent' THEN SYSUTCDATETIME() ELSE NULL END,LeaseExpiresAt=NULL
         WHERE Id=@id AND ClaimToken=@token AND Status=N'sending';`);
     return { jobId: job.Id, status };
+  }
+
+  async health() {
+    const result = await this.pool.request().query(`SELECT
+      COALESCE(SUM(CASE WHEN Status=N'pending' THEN 1 ELSE 0 END),0) AS pending,
+      COALESCE(SUM(CASE WHEN Status=N'sending' THEN 1 ELSE 0 END),0) AS sending,
+      COALESCE(SUM(CASE WHEN Status=N'sent' THEN 1 ELSE 0 END),0) AS accepted,
+      COALESCE(SUM(CASE WHEN Status=N'uncertain' THEN 1 ELSE 0 END),0) AS uncertain,
+      MAX(CASE WHEN Status=N'sent' THEN SentAt ELSE NULL END) AS latestAcceptedAt
+      FROM pcn.NotificationJobs;`);
+    const totals = result.recordset[0] || {};
+    return { worker: { ...this.lastCheck }, queue: {
+      pending: totals.pending || 0, sending: totals.sending || 0,
+      accepted: totals.accepted || 0, uncertain: totals.uncertain || 0,
+      latestAcceptedAt: totals.latestAcceptedAt ? totals.latestAcceptedAt.toISOString() : null
+    } };
   }
 
   async status() {

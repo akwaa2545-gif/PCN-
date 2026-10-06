@@ -7822,11 +7822,37 @@ body.admin-dialog-open {
   color: #047857;
 }
 
-body.admin-page .webhook-config #powerAutomateUrl:disabled {
-  border-color: #d0d5dd;
-  background: #eef1f5;
-  color: #667085;
-  cursor: not-allowed;
+body.admin-page #notificationHealthPanel {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+#notificationHealthPanel .webhook-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+#notificationHealthPanel h3,
+#notificationHealthPanel p {
+  margin: 0;
+}
+
+.notification-health-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.notification-health-details dt {
+  color: #475467;
+  font-size: 12px;
+}
+
+.notification-health-details dd {
+  margin: 4px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .webhook-password-card {

@@ -2,6 +2,23 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { IntegrationService } = require('../src/integrationService');
 
+test('mail configuration health validates locally and discloses only an allowlisted status', () => {
+  let requests = 0;
+  const cases = [
+    [undefined, 'not_configured'], [null, 'not_configured'], ['', 'not_configured'],
+    ['https://mail.example/send?sig=private-health-test', 'configured'],
+    ['http://mail.example/send?sig=private-health-test', 'invalid'],
+    ['https://evil.example/send?sig=private-health-test', 'invalid'],
+    ['https://name:private-health-test@mail.example/send', 'invalid'],
+    ['https://mail.example:444/send', 'invalid'], ['not a url', 'invalid'], [123, 'invalid']
+  ];
+  for (const [mailUrl, expected] of cases) {
+    const service = new IntegrationService({ mailUrl, allowedHosts: ['mail.example'], fetchImpl: () => { requests++; throw new Error('private-health-test'); } });
+    assert.equal(service.mailConfigurationStatus(), expected);
+  }
+  assert.equal(requests, 0);
+});
+
 test('empty mappings never invoke mail or fallback to a recipient', async () => {
   let calls = 0;
   const service = new IntegrationService({ mailUrl: 'https://mail.example/send', allowedHosts: ['mail.example'], fetchImpl: async () => { calls++; } });
@@ -40,4 +57,14 @@ test('mail rejects malformed recipients and maps upstream errors without exposin
   const service = new IntegrationService({ mailUrl: 'https://mail.example/send?secret=hidden', allowedHosts: ['mail.example'], fetchImpl: async () => { throw new Error('secret=hidden'); } });
   await assert.rejects(service.sendMail({ to: 'qa@example.com\r\nbcc:x@example.com', subject: 'Test', message: 'Test' }), { statusCode: 400 });
   await assert.rejects(service.sendMail({ to: 'qa@example.com', subject: 'Test', message: 'Test' }), (error) => error.statusCode === 502 && !error.message.includes('hidden'));
+});
+
+test('mail transports the restored HTML with the original four JSON fields unchanged', async () => {
+  const { buildWorkflowNotificationMessage } = require('../src/notificationTemplate');
+  const message = buildWorkflowNotificationMessage({ id: 'PCN-2026-0001', supplierName: 'Supplier ไทย', materialName: 'Copper', riskLevel: 'RL2' },
+    { completedGroup: 'GSC/TET', nextGroup: 'Prod.Eng/TET', pcnUrl: 'https://pcn.example/form.html?id=PCN-2026-0001' }).trim();
+  let payload;
+  const service = new IntegrationService({ mailUrl: 'https://mail.example/send', allowedHosts: ['mail.example'], fetchImpl: async (url, options) => { payload = JSON.parse(options.body); return { ok: true }; } });
+  await service.sendMail({ to: 'qa@example.com', subject: '[PCN] PCN-2026-0001 - GSC/TET completed', message, senderName: 'QA' });
+  assert.deepEqual(payload, { to: 'qa@example.com', subject: '[PCN] PCN-2026-0001 - GSC/TET completed', message, senderName: 'QA' });
 });

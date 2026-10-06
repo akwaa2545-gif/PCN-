@@ -34,7 +34,7 @@ async function main() {
   await repository.readiness();
   const integrationService = new IntegrationService({mailUrl:process.env.POWER_AUTOMATE_MAIL_URL,directoryUrl:process.env.POWER_AUTOMATE_DIRECTORY_URL,allowedHosts:(process.env.INTEGRATION_ALLOWED_HOSTS || '').split(',').map(value=>value.trim()).filter(Boolean)});
   const worker = new NotificationWorker(pool,{integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService:new AuthService(new SqlAuthRepository(pool)),integrationService,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService:new AuthService(new SqlAuthRepository(pool)),integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;

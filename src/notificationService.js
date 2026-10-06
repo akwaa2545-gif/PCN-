@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const sql = require('mssql');
 const { ApiError } = require('./apiError');
 const { emailList } = require('./integrationService');
+const { buildWorkflowNotificationMessage } = require('./notificationTemplate');
 
 const groups = [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'],
@@ -46,7 +47,7 @@ class NotificationService {
       link = new URL(`/form.html?id=${encodeURIComponent(record.id)}`, origin.origin).toString();
     }
     const payload = { to, subject: `[PCN] ${record.id} - ${route[index][1]} completed`,
-      message: `PCN ${record.id}\n${route[index][1]} signoff is complete.\nNext review: ${nextLabel}${link ? `\n${link}` : ''}`,
+      message: buildWorkflowNotificationMessage(record, { completedGroup: route[index][1], nextGroup: nextLabel, pcnUrl: link }),
       senderName: typeof user.displayName === 'string' ? user.displayName.slice(0, 120) : 'Supplier PCN Workflow' };
     const eventKey = `${record.id}:${record.version}:${completedKey}:completed`;
     const result = await this.pool.request()

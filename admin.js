@@ -5,7 +5,9 @@
     progress: null,
     notificationSettings: { flowConfigured: false, directoryConfigured: false, groups: [] },
     filters: { search: "", status: "", risk: "" },
-    webhookStatus: "Not tested",
+    notificationHealth: null,
+    healthLoading: false,
+    healthUnavailable: false,
     directoryLookupStatus: "Directory lookup not configured",
     hasMailChanges: false,
     view: getViewFromHash(),
@@ -45,9 +47,19 @@
       "adminRecordsButton",
       "adminMailRoutingButton",
       "mailRoutingMessage",
-      "powerAutomateStatus",
+      "notificationHealthPanel",
+      "notificationHealthStatus",
+      "notificationHealthMessage",
+      "notificationHealthConfiguration",
+      "notificationHealthWorker",
+      "notificationHealthCheckedAt",
+      "notificationHealthPending",
+      "notificationHealthSending",
+      "notificationHealthAccepted",
+      "notificationHealthUncertain",
+      "notificationHealthAcceptedAt",
       "directoryLookupStatus",
-      "powerAutomateTestButton",
+      "notificationHealthRefreshButton",
       "adminSearchInput",
       "adminStatusFilter",
       "adminRiskFilter",
@@ -87,6 +99,7 @@
       if (!session) return;
       state.user = session.user;
       initializeAdminControls();
+      refreshNotificationHealth();
       await loadPcns();
     } catch (error) {
       stopBusy();
@@ -103,7 +116,7 @@
     els.adminRefreshButton.addEventListener("click", () => loadPcns("Records refreshed.", "refresh"));
     els.adminStatusButton.addEventListener("click", updateSelectedStatus);
     els.notificationSaveButton.addEventListener("click", saveNotificationSettings);
-    els.powerAutomateTestButton.addEventListener("click", testPowerAutomateWebhook);
+    els.notificationHealthRefreshButton.addEventListener("click", refreshNotificationHealth);
     els.adminSearchInput.addEventListener("input", updateTableFilters);
     els.adminStatusFilter.addEventListener("change", updateTableFilters);
     els.adminRiskFilter.addEventListener("change", updateTableFilters);
@@ -187,7 +200,6 @@
         body: JSON.stringify(payload)
       });
       state.routingMessage = "Mail routing saved.";
-      state.webhookStatus = state.notificationSettings.flowConfigured ? "Saved" : "Not configured";
       state.directoryLookupStatus = state.notificationSettings.directoryConfigured ? "Directory lookup saved" : "Directory lookup not configured";
       state.hasMailChanges = false;
       showAdminNotice("success", "Mail routing saved", "Workflow notifications and directory lookup will use the updated settings.");
@@ -214,29 +226,28 @@
     };
   }
 
-  async function testPowerAutomateWebhook() {
-    const recipient = getFirstConfiguredRecipient();
-    if (!recipient) {
-      showAdminNotice("warning", "No email recipient configured", "Email mapping is empty. Add and save a recipient before sending a test.");
-      return;
-    }
-    if (state.hasMailChanges) {
-      showAdminNotice("warning", "Save email mapping first", "Save the recipients before testing notifications.");
-      return;
-    }
-    startBusy("mail-test", "Sending test email...", false);
-    renderLoadingState();
+  async function refreshNotificationHealth() {
+    if (state.healthLoading) return;
+    state.healthLoading = true;
+    renderNotificationHealth();
     try {
-      await apiFetch("/api/admin/notifications/test", { method: "POST", body: JSON.stringify({ recipient }) });
-      state.webhookStatus = `Last tested ${new Date().toLocaleTimeString()}`;
-      showAdminNotice("success", "Test submitted", "The server submitted the test email.");
-    } catch (error) {
-      state.webhookStatus = "Test failed";
-      showAdminNotice("error", "Email test failed", error.message);
+      const health = await apiFetch("/api/admin/notifications/health");
+      if (!isNotificationHealth(health)) throw new Error("Invalid health response");
+      state.notificationHealth = health;
+      state.healthUnavailable = false;
+    } catch {
+      state.healthUnavailable = true;
     } finally {
-      stopBusy();
-      render();
+      state.healthLoading = false;
+      renderNotificationHealth();
     }
+  }
+
+  function isNotificationHealth(health) {
+    return ["configured", "not_configured", "invalid"].includes(health?.configuration?.status)
+      && health.worker && [null, "idle", "accepted", "uncertain", "error"].includes(health.worker.lastOutcome)
+      && health.queue && ["pending", "sending", "accepted", "uncertain"].every((key) => Number.isSafeInteger(health.queue[key]) && health.queue[key] >= 0)
+      && health.deliveryVerified === false;
   }
 
   function updateTableFilters() {
@@ -254,13 +265,6 @@
     if (!isAnyBusy() && els.notificationSaveButton) {
       els.notificationSaveButton.textContent = "Save Changes";
     }
-  }
-
-  function getFirstConfiguredRecipient() {
-    const input = [...els.notificationGroups.querySelectorAll("[data-recipient-email]")]
-      .find((entry) => entry.value.trim());
-
-    return input ? input.value.trim() : "";
   }
 
   async function loadDetail(id) {
@@ -467,12 +471,38 @@
   }
 
   function syncWebhookControls() {
-    const configured = Boolean(state.notificationSettings.flowConfigured);
-    els.powerAutomateStatus.textContent = configured ? state.webhookStatus : "Email service not configured on server";
-    els.powerAutomateStatus.className = `webhook-status ${getWebhookStatusClass(els.powerAutomateStatus.textContent)}`;
     els.directoryLookupStatus.textContent = state.notificationSettings.directoryConfigured ? state.directoryLookupStatus : "Directory lookup not configured on server";
-    els.powerAutomateTestButton.disabled = isAnyBusy() || !configured;
-    els.powerAutomateTestButton.textContent = isBusy("mail-test") ? "Testing..." : "Test Email";
+    renderNotificationHealth();
+  }
+
+  function renderNotificationHealth() {
+    const health = state.notificationHealth;
+    const configuration = { configured: "Configured", not_configured: "Not configured", invalid: "Invalid configuration" };
+    const outcomes = { idle: "Idle", accepted: "Accepted by workflow", uncertain: "Uncertain — needs review", error: "Worker error" };
+    els.notificationHealthPanel.setAttribute("aria-busy", String(state.healthLoading));
+    els.notificationHealthRefreshButton.disabled = state.healthLoading;
+    els.notificationHealthRefreshButton.textContent = state.healthLoading ? "Checking..." : "Check Notification Health";
+    els.notificationHealthStatus.textContent = state.healthLoading ? "Checking notification health..."
+      : state.healthUnavailable ? "Unavailable" : health ? configuration[health.configuration.status] : "Not checked";
+    const tone = state.healthUnavailable || health?.configuration.status === "invalid" ? "is-error"
+      : health?.configuration.status === "configured" ? "is-success" : "is-muted";
+    els.notificationHealthStatus.className = `webhook-status ${tone}`;
+    els.notificationHealthMessage.textContent = state.healthUnavailable
+      ? health ? "Health check unavailable. Last successful health data is stale; refresh to try again." : "Health check unavailable. Refresh to try again."
+      : "Workflow acceptance does not confirm email delivery. Delivery is not verified.";
+    els.notificationHealthConfiguration.textContent = health ? configuration[health.configuration.status] : "Unknown";
+    els.notificationHealthWorker.textContent = health ? outcomes[health.worker.lastOutcome] || "Not checked yet" : "Unknown";
+    els.notificationHealthCheckedAt.textContent = formatHealthDate(health?.worker.lastCheckedAt);
+    ["Pending", "Sending", "Accepted", "Uncertain"].forEach((label) => {
+      els[`notificationHealth${label}`].textContent = health ? String(health.queue[label.toLowerCase()]) : "—";
+    });
+    els.notificationHealthAcceptedAt.textContent = formatHealthDate(health?.queue.latestAcceptedAt);
+  }
+
+  function formatHealthDate(value) {
+    if (!value) return "Not yet";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
   }
 
   function renderTableFilters() {
@@ -601,24 +631,6 @@
     }
 
     return "neutral";
-  }
-
-  function getWebhookStatusClass(value) {
-    const text = String(value || "").toLowerCase();
-
-    if (text.includes("failed") || text.includes("invalid")) {
-      return "is-error";
-    }
-
-    if (text.includes("tested") || text.includes("saved") || text.includes("copied")) {
-      return "is-success";
-    }
-
-    if (text.includes("testing") || text.includes("searching")) {
-      return "is-busy";
-    }
-
-    return "is-muted";
   }
 
   function renderNotificationSettings() {
