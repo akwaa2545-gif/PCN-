@@ -1,8 +1,8 @@
 ﻿# SQL Server API inventory and checklist
 
-Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. Implemented code, live release checks and future features are distinguished below. The restored mail HTML, directory compatibility and compact mail-status UI passed local tests and specialist reviews; release CI/live acceptance is separate evidence.
+Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. The restored mail HTML, directory compatibility and compact mail-status UI are on main and deployed in signed release pcn-test-6-1. [Actions 37426439232](https://github.com/akwaa2545-gif/PCN-/actions/runs/37426439232) passed 155 tests, 16 isolated browser checks and the dependency audit gate. Host process identity, HTTPS SQL readiness and backend directory lookup passed; authenticated client UI and email delivery remain unverified.
 
-Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups are empty. Real SQL smoke checks and isolated browser E2E passed. The earlier SQL pilot/pipeline deployment is recorded in [the Windows runbook](windows-test-deployment.md); those checks do not verify the current mail-health changes. Existing Firebase data import remains pending.
+Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups were initialized empty. Real SQL smoke checks and isolated browser E2E passed. Current deployment evidence is recorded in [the Windows runbook](windows-test-deployment.md). Existing Firebase data import remains pending.
 
 ## Shared contract
 
@@ -80,7 +80,7 @@ The UI is simplified to one compact **Mail service** row with a badge and **Chec
 | Needs attention | Invalid configuration, worker error/uncertain outcome or uncertain queue |
 | Unavailable | Health fetch failed or the response is malformed |
 
-Compact-row validation passed 16/16 isolated browser checks and 14/14 focused frontend tests; a reviewer independently passed 14 notification-health API tests. Code, JavaScript and accessibility reviews approved with no findings, and screenshot inspection confirmed one row without metrics. The latest overall coverage run passed 155/155 tests with 95.03% lines, 88.27% branches and 94.70% functions. A configured/Ready state does not probe DNS/network reachability, remote-flow credentials or delivery; local results do not establish release CI/deployment/live-email acceptance.
+Compact-row validation passed 16/16 isolated browser checks and 14/14 focused frontend tests; a reviewer independently passed 14 notification-health API tests. Code, JavaScript and accessibility reviews approved with no findings. Local coverage passed 155/155 with 95.03% lines, 88.27% branches and 94.70% functions; release CI separately passed 155 tests/16 browser checks, and deployed HTML contains the compact row. A configured/Ready state does not probe remote reachability or delivery. Actual authenticated use of the deployed health row and email delivery remain unverified.
 
 The signed endpoint remains fixed in private server `POWER_AUTOMATE_MAIL_URL` configuration with an exact allowlisted hostname. The Windows service reads it through its protected external `PCN_ENV_FILE`. Neither health/settings responses nor UI edits expose or change the URL. Committed templates contain empty placeholders; GitHub Actions and public releases never receive it.
 
@@ -88,11 +88,12 @@ Workflow mail preserves the pre-migration JSON keys exactly: `to`, `subject`, `m
 
 - [x] Complete develop branch local tests/review for payload, HTML escaping, health auth and read-only behavior: 148/148 tests, 95.00% line / 87.54% branch / 94.67% function coverage; 14 isolated browser checks with no SQL/flow calls. Backend, JavaScript, code and security reviews approved.
 - [x] Complete compact Mail service row local tests/review: 16 browser checks, 14 focused frontend tests and independent 14 health API tests; code/JavaScript/accessibility approved. Health API remains unchanged.
-- [ ] Run CI for these changes before merge/deployment; previous pilot CI is separate evidence.
-- [ ] Verify the deployed health UI and local/SQL status behavior without invoking the flow or sending test mail.
+- [x] Main commit 359e1c43e39b30ec8ef1ebfbed30daa0bd54d939 passed CI and deployed as signed pcn-test-6-1.
+- [x] Verify deployed compact HTML, exact service identity and HTTPS SQL readiness without sending test mail.
+- [ ] Verify the health row in an actual authenticated pilot browser session; isolated browser checks are separate.
 - [ ] Record any future explicit send/delivery verification separately; health always reports deliveryVerified=false.
 
-Private host configuration is staged for the next service start. Before its update, a read-only SQL check found zero pending/sending jobs. The environment file was replaced atomically under the deployment mutex, with its existing ACL retained and a protected backup. No database writes, service restart or flow invocation occurred. This records configuration staging, not live acceptance of the new endpoint/UI.
+Private host mail/directory configuration was updated atomically under the deployment mutex with zero pending/sending jobs, original ACLs and protected backup retained. The directory update preserved existing mail/SQL values and made no SQL writes, service restart or flow invocation. The subsequent release restart loaded that configuration; mail configuration validates locally and a host backend directory lookup returned a matching inline-photo profile. No test email or delivery check was performed.
 
 ## Directory lookup compatibility
 
@@ -114,7 +115,8 @@ The ignored local `.env` enables only directory lookup; local mail remains disab
 - [x] Local SQL readiness returned 200 after watch reload.
 - [x] Enhanced directory browser checks: 16/16 passed; dropdown rendering of name/email/title/department/photo was inspected. Earlier mail-health browser results are separate.
 - [x] Final code/security reviews approved with no critical/high findings.
-- [ ] Record release CI and deployed acceptance for this enhancement separately from local results; private configuration stays external to releases.
+- [x] Release CI 155 tests/16 browser checks passed; pcn-test-6-1 deployed with verified process identity and HTTPS SQL readiness. Host backend lookup returned one matching profile with inline photo; private configuration stays external to releases.
+- [ ] Verify actual authenticated directory UI on a client; isolated browser rendering tests do not establish that result.
 
 The earlier mail-health run's 148-test coverage above is historical evidence for that change. The latest overall coverage run passes 155/155 with 95.03% lines, 88.27% branches and 94.70% functions.
 

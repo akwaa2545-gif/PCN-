@@ -14,7 +14,7 @@ Push main -> Windows Actions tests -> production runtime ZIP -> signed prereleas
 
 ## Build and signing contract
 
-[pcn-test-deploy.yml](../.github/workflows/pcn-test-deploy.yml) runs on pushes to `main` and manual dispatch on `main`. Pull requests and other branches do not publish deployment releases. Actions dependencies are pinned to commit hashes. The job uses Node 26.10.0 to match the pilot host, installs locked dependencies, checks for high/critical dependency advisories, runs unit/API tests and isolated browser tests, then removes development dependencies.
+[pcn-test-deploy.yml](../.github/workflows/pcn-test-deploy.yml) runs on runtime-changing pushes to `main` and manual dispatch on `main`; README/plans-only changes are ignored. Pull requests and other branches do not publish deployment releases. Actions dependencies are pinned to commit hashes. The job uses Node 26.10.0 to match the pilot host, installs locked dependencies, checks for high/critical dependency advisories, runs unit/API tests and isolated browser tests, then removes development dependencies.
 
 The build runs [package-release.js](../scripts/package-release.js) with the private Ed25519 key from GitHub Actions secret `PCN_RELEASE_SIGNING_KEY`. This secret belongs to the repository's deployment workflow; it must never be checked into source, included in an artifact or printed in logs. The server receives only the corresponding public key. Repository administrators and anyone able to change `main` or its workflow are deployment authorities; protect `main` and restrict those permissions accordingly.
 
@@ -85,6 +85,16 @@ For a signing-key rotation, disable the task, update the Actions secret and pinn
 The workflow is scoped to the established test service and existing `Scn_DB`. Application saves and password changes still affect that database. Deployment checks do not reset passwords or create test PCN records there.
 
 ## Acceptance evidence
+
+### Current deployment — pcn-test-6-1
+
+[Actions run 37426439232](https://github.com/akwaa2545-gif/PCN-/actions/runs/37426439232) succeeded with 155 tests, 16 isolated browser checks, the high/critical dependency audit gate, packaging/signing and publication. It released [pcn-test-6-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-6-1) from main commit `359e1c43e39b30ec8ef1ebfbed30daa0bd54d939`. The ZIP SHA-256 is `025e8eb72c849b09b97e5f68e7bdd2d3adc2de672136542bf6674af885935829`.
+
+The host recorded deployment at `2026-10-06T07:06:27.3234975Z`; last-deployed state matches that release/commit. The SYSTEM task is Ready with result 0 and the service is Running. Independent checks confirmed the exact `C:\SupplierPCN\releases\pcn-test-6-1\server.js` command, LocalService owner, WinSW service parent, exclusive `127.0.0.1:3000` listener and pinned-certificate HTTPS SQL readiness.
+
+Private directory configuration was updated separately under the deployment mutex, retaining its ACL/backup and existing mail/SQL values after a zero queued-job check. That configuration update caused no flow invocation, SQL mutation or restart; deployment then restarted the service with the protected external configuration. Mail configuration validates locally, a host backend directory lookup returned one matching profile with an inline photo, and compact Mail service HTML was checked. No test email/delivery verification or actual authenticated client health/directory UI is claimed. Signed URLs and identifying profile data remain private.
+
+### First pipeline history — pcn-test-5-1
 
 The first live pipeline completed on 2026-10-06. [Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) passed all 134 unit/API tests, all seven isolated browser checks, the high/critical dependency audit gate, packaging, signing and publication. It published [pcn-test-5-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-5-1) from commit `6170a0fe80d249314dfe2e50d5378490ef9107fd`.
 

@@ -1,6 +1,6 @@
 # Windows HTTPS test deployment
 
-Updated: 2026-10-06. Status: signed release `pcn-test-5-1` built and deployed successfully through the outbound pipeline. HTTPS/readiness, service restart, active process identity, loopback isolation, unauthenticated boundary checks and a repeated no-op poll passed. Client browser trust and actual authenticated pilot login remain unverified.
+Updated: 2026-10-06. Current signed release `pcn-test-6-1` is deployed from main commit `359e1c43e39b30ec8ef1ebfbed30daa0bd54d939`. CI passed 155 tests/16 isolated browser checks and the dependency audit gate. Exact process identity, loopback listener and pinned-certificate HTTPS SQL readiness passed independently. Authenticated client health/directory UI, observed browser trust and email delivery remain unverified.
 
 ## Scope and components
 
@@ -16,13 +16,13 @@ This is a limited pilot. IIS on Windows 10 Professional permits ten concurrent r
 
 The host has Node.js 26.10 installed. A real Node 26 service process running as LocalService, its loopback listener and SQL-backed readiness were observed. These startup checks do not replace the full host compatibility/test suite. The service wrapper is pinned to stable WinSW 2.12.0; upstream identifies 2.x as the stable line. [WinSW project](https://github.com/winsw/winsw), [v2.12.0 release](https://github.com/winsw/winsw/releases/tag/v2.12.0)
 
-The pilot connects to the existing `Scn_DB`. Saves and password changes persist in that database and may affect its users. No separate sandbox database is implied. Deployment must not run `db:migrate`, `db:import`, bootstrap account creation or live smoke scripts that alter initial-account state. Existing tables/master data/accounts are reused. Routing and integration secrets remain unconfigured unless separately authorized.
+The pilot connects to the existing `Scn_DB`. Saves and password changes persist there; no separate sandbox database is implied. Deployment does not run migrations, imports, bootstrap or initial-account smoke scripts. Existing data/accounts are reused, and recipient routing is maintained separately. The authorized mail/directory endpoints are configured privately outside releases. Deployment checks made no SQL mutations or test mail calls.
 
 ## Release, configuration and service isolation
 
 | Component | Required deployment layout |
 |---|---|
-| Current pilot release | `C:\SupplierPCN\releases\pcn-test-5-1` |
+| Current pilot release | `C:\SupplierPCN\releases\pcn-test-6-1` |
 | Future pipeline release files | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>`; record the selected directory for each rollout |
 | WinSW executable/XML and service artifacts | `C:\SupplierPCN\service` |
 | Service logs | `C:\SupplierPCN\logs` |
@@ -80,11 +80,13 @@ Remove the same thumbprint from the client's Current User trusted-root store aft
 
 The user requested an automated pipeline. Its [separate runbook](github-deployment.md) describes GitHub-hosted Windows CI tests, an Ed25519-signed public prerelease containing only production runtime files, and the `SupplierPCNTestDeployment` SYSTEM task with highest privileges, scheduled every ten minutes and at startup. This design uses neither an internet-facing deployment listener nor a self-hosted GitHub runner. GitHub holds the release-signing secret; SQL credentials remain on the deployment host.
 
-[Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) completed all steps, including 134/134 tests and seven isolated browser checks. It published signed release `pcn-test-5-1` from commit `6170a0fe80d249314dfe2e50d5378490ef9107fd` at `2026-10-06T04:03:30Z`. The SYSTEM task logged deployment of that release at `2026-10-06T04:13:57.8149751Z`; the last-deployed state records the same commit and release ID. The task is Ready with LastTaskResult 0.
+[Actions run 37426439232](https://github.com/akwaa2545-gif/PCN-/actions/runs/37426439232) passed all steps, including 155 tests, 16 isolated browser checks and the high/critical dependency audit gate. It published signed [pcn-test-6-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-6-1) from main commit `359e1c43e39b30ec8ef1ebfbed30daa0bd54d939`. The host recorded deployment at `2026-10-06T07:06:27.3234975Z`; last-deployed state matches that release/commit. The task is Ready with LastTaskResult 0 and the service is Running.
 
-External HTTPS probes with the pinned certificate and verified IP identity passed after deployment: readiness/login page/anonymous session returned 200, unauthenticated PCNs returned JSON 401, and source/.env/src paths returned 404. IIS overwrote caller-supplied client-IP headers and foreign Origin requests returned 403. These checks did not perform authenticated pilot login or database writes.
+The current release passed pinned-certificate HTTPS `/api/ready` with SQL readiness and serves the compact Mail service HTML. A host-side backend directory lookup returned one matching profile with an inline photo; mail configuration passes local validation. Private directory configuration was replaced atomically under the deployment mutex with a protected backup and original ACLs, preserving existing mail/SQL values after a zero queued-job check. That update invoked no flow/restart/SQL mutation; the subsequent deployment loaded the configuration. No authenticated client health UI or mail delivery was tested.
 
-An independent host check confirmed the running command is `C:\SupplierPCN\releases\pcn-test-5-1\server.js`, owned by `NT AUTHORITY\LOCAL SERVICE`, with its parent process matching the WinSW service. Node listens exclusively on `127.0.0.1:3000` and SQL readiness succeeds. A second manual SYSTEM-task poll returned result 0 and logged `already_current` at `2026-10-06T04:15:53.5310931Z`; the service PID and last-deployed file hash were unchanged, confirming no unnecessary restart.
+An independent check confirmed `C:\SupplierPCN\releases\pcn-test-6-1\server.js` runs as LocalService with its WinSW service parent, exclusively on `127.0.0.1:3000`. The release ZIP SHA-256 is `025e8eb72c849b09b97e5f68e7bdd2d3adc2de672136542bf6674af885935829`.
+
+First-pipeline history: `pcn-test-5-1` passed 134 tests/seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. Its repeated poll logged `already_current` without changing the service PID/state. Initial HTTPS login/session, unauthenticated/source denials, overwritten client-IP header and foreign-origin checks passed; those historical checks did not perform authenticated pilot login or database writes.
 
 ## Acceptance record
 
@@ -93,8 +95,8 @@ The following table records only supplied deployment evidence. Local browser smo
 | Check | Required evidence | Status |
 |---|---|---|
 | Host and listener | THCHA-WEBHOST01; IIS PCNTest HTTPS :8443; Node 127.0.0.1:3000 only; workstation cannot connect to :3000 | Verified |
-| Runtime compatibility | Windows Node 26 CI: 134/134 tests and seven isolated browser checks; deployed SQL readiness | Verified CI/startup; full suite not rerun against live database |
-| Service identity and ACLs | SupplierPCNTest Running/Automatic; exact pcn-test-5-1 server.js command, LOCAL SERVICE owner and WinSW parent; service-SID config/release ACLs | Verified after cutover |
+| Runtime compatibility | Windows Node 26 CI: 155 tests/16 isolated browser checks; deployed SQL readiness | Verified CI/startup; tests use isolated adapters |
+| Service identity and ACLs | SupplierPCNTest Running; exact pcn-test-6-1 server.js command, LocalService owner/WinSW parent; service-SID configuration/release ACLs | Verified after cutover |
 | External configuration | Absolute PCN_ENV_FILE external to release, protected service-specific configuration | Installed; missing-file startup behavior verified by focused runtime-env tests |
 | Health/readiness | HTTPS health/readiness return 200 through IIS with certificate/IP verification | Verified |
 | Certificate | Binding thumbprint/expiry and pinned-certificate TLS IP check | TLS verified; user reports client trust done, actual browser trust not observed |
@@ -102,13 +104,14 @@ The following table records only supplied deployment evidence. Local browser smo
 | Unauthenticated API/static boundaries | PCNs return JSON 401; environment/source/src paths return 404 | Verified |
 | Origin and proxy header | Foreign Origin rejected 403; duplicate forged X-PCN-Client-IP overwritten by IIS | Verified; remaining authenticated CSRF/throttling checks pending |
 | PCN navigation | Admin, create, saved PCN deep links and browser refresh through IIS | Pending |
-| Data behavior | Existing Scn_DB reused; deployment runs no migration/import/bootstrap | Database readiness verified; no pilot save/login claimed |
+| Data behavior | Existing Scn_DB reused; no migration/import/bootstrap or SQL writes by deployment checks | SQL readiness verified; no pilot save/login claimed |
 | Isolation | Existing Default Web Site `*:80` binding unchanged | Verified binding; broader site regression pending |
 | Restart | Service restart returns Running/Automatic LocalService with loopback listener and SQL readiness | Verified |
-| Polling task | SupplierPCNTestDeployment SYSTEM/Highest, every ten minutes plus startup; Ready/result 0, deployed state matches pcn-test-5-1; second poll already_current with unchanged PID/state hash | Verified deployment and no-op poll |
-| Pipeline | Actions 37411798943 all steps successful; signed pcn-test-5-1 installed from commit 6170a0fe80d249314dfe2e50d5378490ef9107fd | Verified |
+| Polling task | SupplierPCNTestDeployment SYSTEM/Highest, every ten minutes plus startup; Ready/result 0, deployed state matches pcn-test-6-1 | Verified current deployment; prior 5-1 no-op poll retained as history |
+| Pipeline | Actions 37426439232 passed; signed pcn-test-6-1 installed from commit 359e1c43e39b30ec8ef1ebfbed30daa0bd54d939 | Verified |
+| Mail/directory configuration | Private endpoints loaded on release restart; valid local mail configuration and one matching inline-photo profile from host backend lookup | Verified backend configuration/lookup; no test email or real client UI claim |
 
-The final Windows CI run passes 134 tests and seven isolated browser checks. The earlier local coverage measurement is 93.84% lines and 86.41% branches; it is not a coverage measurement of the deployed live SQL database. Browser test adapters isolate test state from Scn_DB.
+Current Windows CI passed 155 tests and 16 isolated browser checks. Local coverage was 95.03% lines, 88.27% branches and 94.70% functions. Neither measures a live authenticated client session or email delivery; browser adapters isolate test state from Scn_DB.
 
 For save testing, record the test PCN identifiers and distinguish test records from operational records because writes persist in the existing database.
 
