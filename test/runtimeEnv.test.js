@@ -140,11 +140,27 @@ test('Windows DPAPI credential fallback survives env-file selection and preserve
   const script = path.join(directory, 'seed-fixture.ps1');
   await fs.writeFile(script, `param([string]$CredentialPath)
 $ErrorActionPreference = 'Stop'
+function Write-FixtureStage([string]$Stage) {
+  [Console]::Out.WriteLine("PCN_DPAPI_FIXTURE:$Stage")
+  [Console]::Out.Flush()
+}
+Write-FixtureStage 'start'
+Write-FixtureStage 'before-security-import'
 $testSecret = ConvertTo-SecureString 'runtime-env-test-only' -AsPlainText -Force
+Write-FixtureStage 'after-secure-string'
 $testCredential = New-Object System.Management.Automation.PSCredential('fixture-user', $testSecret)
+Write-FixtureStage 'before-export'
 @{Credential=$testCredential;TrustServerCertificate=$true} | Export-Clixml -LiteralPath $CredentialPath
+Write-FixtureStage 'after-export'
 `);
-  await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-CredentialPath', credential], { windowsHide: true, timeout: 20000, env: childEnvironment({ PSExecutionPolicyPreference: 'Restricted' }) });
+  const fixtureStartedAt = performance.now();
+  const fixture = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-CredentialPath', credential], { windowsHide: true, timeout: 60000, env: childEnvironment({ PSExecutionPolicyPreference: 'Restricted' }) });
+  t.diagnostic(`DPAPI seed fixture duration: ${Math.round(performance.now() - fixtureStartedAt)} ms`);
+  assert.deepEqual(fixture.stdout.trim().split(/\r?\n/), [
+    'PCN_DPAPI_FIXTURE:start', 'PCN_DPAPI_FIXTURE:before-security-import',
+    'PCN_DPAPI_FIXTURE:after-secure-string', 'PCN_DPAPI_FIXTURE:before-export', 'PCN_DPAPI_FIXTURE:after-export'
+  ]);
+  assert.equal(fixture.stderr, '');
   const external = path.join(directory, 'service.env');
   await fs.writeFile(external, 'RUNTIME_ENV_TEST_MARKER=external\n');
   const result = await load(directory, { PCN_ENV_FILE: external, PCN_SQL_CREDENTIAL_PATH: credential, SQL_USER: 'process-user' });
