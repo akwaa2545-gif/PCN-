@@ -8,6 +8,7 @@ const { promisify } = require('node:util');
 
 const run = promisify(execFile);
 const modulePath = path.resolve(__dirname, '../src/runtimeEnv.js');
+const { windowsPowerShellEnvironment } = require('../src/runtimeEnv');
 const childSource = `
   require(${JSON.stringify(modulePath)}).loadRuntimeEnv().then(() => {
     process.stdout.write(JSON.stringify({
@@ -36,7 +37,7 @@ const windowsProfileKeys = new Set([
   'PROGRAMDATA', 'ALLUSERSPROFILE', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
   'PROGRAMW6432', 'COMMONPROGRAMFILES', 'COMMONPROGRAMFILES(X86)', 'COMMONPROGRAMW6432',
   'PROCESSOR_ARCHITECTURE', 'PROCESSOR_IDENTIFIER', 'PROCESSOR_LEVEL',
-  'PROCESSOR_REVISION', 'NUMBER_OF_PROCESSORS', 'PSMODULEPATH'
+  'PROCESSOR_REVISION', 'NUMBER_OF_PROCESSORS'
 ]);
 
 function childEnvironment(extra = {}, source = process.env) {
@@ -60,13 +61,13 @@ test('child environment preserves cold Windows profile variables without inherit
     LOCALAPPDATA: 'C:\\Users\\RUNNERADMIN\\AppData\\Local', TEMP: 'C:\\Windows\\Temp', TMP: 'C:\\Windows\\Temp',
     HOMEDRIVE: 'C:', HOMEPATH: '\\Users\\RUNNERADMIN', USERNAME: 'RUNNERADMIN', USERDOMAIN: 'host',
     OS: 'Windows_NT', COMSPEC: 'C:\\Windows\\System32\\cmd.exe', PATHEXT: '.EXE;.CMD',
-    SystemDrive: 'C:', PSModulePath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules',
+    SystemDrive: 'C:', PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules',
     SQL_PASSWORD: 'synthetic-inherited-secret', SQL_USER: 'inherited-user',
     PCN_ENV_FILE: 'C:\\private\\service.env', PCN_SQL_CREDENTIAL_PATH: 'C:\\private\\credential.xml',
     PCN_RELEASE_SIGNING_KEY: 'synthetic-private-key', PSExecutionPolicyPreference: 'InheritedPolicy'
   };
   const environment = childEnvironment({ PSExecutionPolicyPreference: 'Restricted' }, profile);
-  for (const key of ['SystemRoot', 'SystemDrive', 'WINDIR', 'Path', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'USERDOMAIN', 'OS', 'COMSPEC', 'PATHEXT', 'PSModulePath']) {
+  for (const key of ['SystemRoot', 'SystemDrive', 'WINDIR', 'Path', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'HOMEDRIVE', 'HOMEPATH', 'USERNAME', 'USERDOMAIN', 'OS', 'COMSPEC', 'PATHEXT']) {
     assert.equal(environment[key], profile[key]);
   }
   assert.equal(environment.SQL_PASSWORD, undefined);
@@ -74,6 +75,20 @@ test('child environment preserves cold Windows profile variables without inherit
   assert.equal(environment.PCN_ENV_FILE, undefined);
   assert.equal(environment.PCN_SQL_CREDENTIAL_PATH, undefined);
   assert.equal(environment.PCN_RELEASE_SIGNING_KEY, undefined);
+  assert.equal(environment.PSModulePath, undefined);
+  assert.equal(environment.PSExecutionPolicyPreference, 'Restricted');
+});
+
+test('Windows PowerShell helper removes inherited Core module paths in every Windows key casing', () => {
+  const environment = windowsPowerShellEnvironment({
+    SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\Users\\RUNNERADMIN',
+    PSModulePath: 'C:\\Program Files\\PowerShell\\7\\Modules',
+    PSMODULEPATH: 'C:\\Users\\RUNNERADMIN\\Documents\\PowerShell\\Modules',
+    PSExecutionPolicyPreference: 'Restricted'
+  });
+  assert.equal(environment.PSModulePath, undefined);
+  assert.equal(Object.keys(environment).filter(key => key.toUpperCase() === 'PSMODULEPATH').length, 0);
+  assert.equal(environment.USERPROFILE, 'C:\\Users\\RUNNERADMIN');
   assert.equal(environment.PSExecutionPolicyPreference, 'Restricted');
 });
 
@@ -137,10 +152,22 @@ $testCredential = New-Object System.Management.Automation.PSCredential('fixture-
   assert.equal(result.dpapiPasswordMatches, true);
   assert.equal(result.user, 'process-user');
   assert.equal(result.trust, 'true');
+  const coreModules = path.join(directory, 'incompatible-Core-modules');
+  const utilityModule = path.join(coreModules, 'Microsoft.PowerShell.Utility');
+  await fs.mkdir(utilityModule, { recursive: true });
+  await fs.writeFile(path.join(utilityModule, 'Microsoft.PowerShell.Utility.psd1'), `@{
+    RootModule='core-only.psm1'; ModuleVersion='7.0.0';
+    FunctionsToExport=@('Import-Clixml','ConvertTo-Json'); CmdletsToExport=@()
+  }`);
+  await fs.writeFile(path.join(utilityModule, 'core-only.psm1'), `throw 'Incompatible Core-only module fixture was loaded'
+function Import-Clixml {}
+function ConvertTo-Json {}
+`);
   const restricted = await load(directory, {
     PCN_ENV_FILE: external,
     PCN_SQL_CREDENTIAL_PATH: credential,
-    PSExecutionPolicyPreference: 'Restricted'
+    PSExecutionPolicyPreference: 'Restricted',
+    PSModulePath: coreModules
   });
   assert.equal(restricted.dpapiPasswordMatches, true);
   assert.equal(restricted.user, 'fixture-user');

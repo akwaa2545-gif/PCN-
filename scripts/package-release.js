@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { validateManifest } = require('./verify-release');
+const { windowsPowerShellEnvironment: runtimePowerShellEnvironment } = require('../src/runtimeEnv');
 const run = promisify(execFile);
 
 const ROOT_FILES = new Set([
@@ -48,7 +49,13 @@ async function copyRegularTree(source, target) {
   } else throw new Error('Unsupported release file type');
 }
 
-async function packageRelease({ root, output, commit, runNumber, runAttempt, signingKey }) {
+function windowsPowerShellEnvironment(env, extras = {}) {
+  // Node cannot remove pwsh's Core-only module directories from PSModulePath.
+  // Omitting this variable lets Windows PowerShell rebuild its own module defaults.
+  return runtimePowerShellEnvironment({ ...env, ...extras });
+}
+
+async function packageRelease({ root, output, commit, runNumber, runAttempt, signingKey, env = process.env }) {
   if (process.platform !== 'win32') throw new Error('Release must be built on Windows');
   // Validate metadata and key before packaging; never write the signing key to disk.
   createManifest({ archive: Buffer.alloc(0), commit, runNumber, runAttempt });
@@ -87,7 +94,7 @@ try {
 } finally { $zip.Dispose(); $archiveStream.Dispose() }
 `;
   await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    windowsHide: true, env: { ...process.env, PCN_PACKAGE_STAGE: stage, PCN_PACKAGE_ARCHIVE: archivePath },
+    windowsHide: true, env: windowsPowerShellEnvironment(env, { PCN_PACKAGE_STAGE: stage, PCN_PACKAGE_ARCHIVE: archivePath }),
     timeout: 300000, maxBuffer: 1024 * 1024,
   });
   const archive = await fs.readFile(archivePath);
@@ -108,4 +115,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(() => { console.error('Release packaging failed'); process.exitCode = 1; });
-module.exports = { createManifest, signManifest, selectRuntimeFiles, copyRegularTree, packageRelease };
+module.exports = { createManifest, signManifest, selectRuntimeFiles, copyRegularTree, windowsPowerShellEnvironment, packageRelease };

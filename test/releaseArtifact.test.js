@@ -6,7 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
-const { createManifest, signManifest, selectRuntimeFiles, packageRelease, copyRegularTree } = require('../scripts/package-release');
+const { createManifest, signManifest, selectRuntimeFiles, packageRelease, copyRegularTree, windowsPowerShellEnvironment } = require('../scripts/package-release');
 const { verifyRelease, parseArguments } = require('../scripts/verify-release');
 const run = promisify(execFile);
 
@@ -79,6 +79,14 @@ test('manifest-only CLI mode requires exactly metadata paths and rejects archive
   assert.throws(() => parseArguments(['--manifest-only', ...paths, '--manifest', 'evil']), /arguments/);
 });
 
+test('Windows PowerShell child environment drops inherited Core module paths without mutating the parent', () => {
+  const parent = { SystemRoot: 'C:\\Windows', USERPROFILE: 'C:\\Users\\fixture', Path: 'unchanged', PSModulePath: 'Core7/modules', psmodulepath: 'other/Core7' };
+  const child = windowsPowerShellEnvironment(parent, { PCN_PACKAGE_STAGE: 'fixture' });
+  assert.deepEqual(child, { SystemRoot: parent.SystemRoot, USERPROFILE: parent.USERPROFILE, Path: 'unchanged', PCN_PACKAGE_STAGE: 'fixture' });
+  assert.equal(parent.PSModulePath, 'Core7/modules');
+  assert.equal(parent.psmodulepath, 'other/Core7');
+});
+
 test('Windows packaging and verifier CLI round trip excludes untracked private config', { skip: process.platform !== 'win32' }, async t => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'pcn-artifact-test-'));
   t.after(async () => {
@@ -98,7 +106,8 @@ test('Windows packaging and verifier CLI round trip excludes untracked private c
   })) await fs.writeFile(path.join(root, file), content);
   await run('git', ['init', '--quiet'], { cwd: root, windowsHide: true });
   await run('git', ['add', 'server.js', 'package.json', 'package-lock.json', 'src/httpServer.js', 'src/runtimeEnv.js', 'login.html'], { cwd: root, windowsHide: true });
-  const manifest = await packageRelease({ root, output, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1, signingKey: keys.privateKey });
+  const inheritedCoreEnvironment = { ...process.env, PSModulePath: path.join(temporary, 'pcn-artifact-bad-core-modules') };
+  const manifest = await packageRelease({ root, output, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1, signingKey: keys.privateKey, env: inheritedCoreEnvironment });
   assert.equal(manifest.releaseId, 'pcn-test-42-1');
   assert.deepEqual((await fs.readdir(path.join(output, 'runtime'))).sort(), ['login.html', 'node_modules', 'package-lock.json', 'package.json', 'server.js', 'src']);
   const publicKeyPath = path.join(temporary, 'public.pem');
@@ -113,13 +122,15 @@ test('Windows packaging and verifier CLI round trip excludes untracked private c
   assert.deepEqual(JSON.parse(manifestOnly.stdout), manifest);
   const extractScript = `
 $ErrorActionPreference='Stop'
+if ($env:PSModulePath -like '*pcn-artifact-bad-core-modules*') { throw 'Inherited Core modules must not reach Windows PowerShell' }
 . $env:PCN_FIXTURE_EXTRACTOR
 $script:Base = [IO.Path]::GetFullPath($env:PCN_FIXTURE_BASE)
 Expand-VerifiedArchive $env:PCN_FIXTURE_ARCHIVE (Join-Path $script:Base 'extracted')
 `;
   await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', extractScript], {
-    windowsHide: true, env: { ...process.env, PCN_FIXTURE_EXTRACTOR: path.resolve(__dirname, '../scripts/deploy-pcn-release.ps1'),
-      PCN_FIXTURE_BASE: temporary, PCN_FIXTURE_ARCHIVE: path.join(output, 'pcn.zip'), PSExecutionPolicyPreference: 'Restricted' },
+    windowsHide: true, env: windowsPowerShellEnvironment(inheritedCoreEnvironment, {
+      PCN_FIXTURE_EXTRACTOR: path.resolve(__dirname, '../scripts/deploy-pcn-release.ps1'),
+      PCN_FIXTURE_BASE: temporary, PCN_FIXTURE_ARCHIVE: path.join(output, 'pcn.zip'), PSExecutionPolicyPreference: 'Restricted' }),
   });
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/src/runtimeEnv.js'), 'utf8'), '// isolated fixture');
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/node_modules/fixture/index.js'), 'utf8'), 'module.exports = {};');
