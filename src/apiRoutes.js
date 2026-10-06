@@ -1,4 +1,5 @@
 const { ApiError } = require('./apiError');
+const { getClientAddress } = require('./clientAddress');
 const { readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal } = require('./authHttp');
 const { hasRole, isInternal, assertRecordAccess } = require('./workflowAccess');
 const { buildWorkflow } = require('./masterData');
@@ -18,7 +19,7 @@ async function handleApi(req, res, url, context, requestId) {
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     const body = await readJsonBody(req);
-    const session = await authService.login(body, {ip:req.socket.remoteAddress});
+    const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
     if (route === '/api/admin/login' && !hasRole(session.user, 'admin')) {
       await authService.logout(session.token);
       throw new ApiError(403, 'Administrator access required');

@@ -1,0 +1,63 @@
+name: PCN test deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+      - plans/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pcn-test-main
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main' && github.repository == 'akwaa2545-gif/PCN-'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install server-compatible Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '26.10.0'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --no-fund --no-audit
+      - name: Block high and critical dependency advisories
+        run: npm audit --audit-level=high
+      - name: Unit and isolated API integration tests
+        run: npm test
+      - name: Install browser
+        run: npx playwright install chromium
+      - name: Isolated browser workflow tests
+        run: npm run test:e2e
+      - name: Retain production dependencies
+        run: npm prune --omit=dev --no-fund --no-audit
+      - name: Sign immutable Windows runtime archive
+        env:
+          PCN_RELEASE_SIGNING_KEY: ${{ secrets.PCN_RELEASE_SIGNING_KEY }}
+          PCN_RELEASE_OUTPUT: ${{ runner.temp }}\pcn-release-${{ github.run_number }}-${{ github.run_attempt }}
+        run: node scripts/package-release.js
+      - name: Publish signed prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PCN_RELEASE_OUTPUT: ${{ runner.temp }}\pcn-release-${{ github.run_number }}-${{ github.run_attempt }}
+        run: |
+          $releaseTag = "pcn-test-$env:GITHUB_RUN_NUMBER-$env:GITHUB_RUN_ATTEMPT"
+          $assets = @('pcn.zip', 'manifest.json', 'manifest.sig') | ForEach-Object { Join-Path $env:PCN_RELEASE_OUTPUT $_ }
+          gh release create $releaseTag @assets --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --prerelease --title $releaseTag --notes "Verified Windows runtime for PCN test deployment. SQL migrations and bootstrap are excluded."
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

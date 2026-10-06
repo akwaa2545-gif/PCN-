@@ -6,6 +6,7 @@ const { ApiError } = require('./apiError');
 const { PcnService } = require('./pcnService');
 const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
+const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 
 const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','login.js','session-client.js','auth.css','styles.css','tokin-header-logo.png','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.otf':'font/otf' };
@@ -13,7 +14,7 @@ const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');
   if (!options.authService) throw new Error('A SQL authentication service is required');
-  const context = { ...options, service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
+  const context = { ...options, trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
   const rateLimiter = options.rateLimiter || new ApiRateLimiter();
   return async (req, res) => {
@@ -24,7 +25,11 @@ function createRequestHandler(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     try {
       const url = new URL(req.url, 'http://localhost');
-      if (url.pathname.startsWith('/api/')) { rateLimiter.check(req); await handleApi(req, res, url, context, requestId); }
+      if (url.pathname.startsWith('/api/')) {
+        const clientAddress = getClientAddress(req, {trustProxy:context.trustProxy});
+        rateLimiter.check(req, {clientAddress});
+        await handleApi(req, res, url, {...context,clientAddress}, requestId);
+      }
       else await serveStatic(req, res, url, rootDir);
     } catch (error) {
       const status = error instanceof ApiError ? error.statusCode : 500;

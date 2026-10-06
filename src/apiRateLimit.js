@@ -1,4 +1,5 @@
 const { ApiError } = require('./apiError');
+const { getClientAddress } = require('./clientAddress');
 
 class ApiRateLimiter {
   constructor({clock=Date.now,requests=600,writes=60,windowMs=60000,maxClients=10000} = {}) {
@@ -10,9 +11,9 @@ class ApiRateLimiter {
     this.clients=new Map();
   }
 
-  check(req) {
+  check(req, { clientAddress } = {}) {
     const now=this.clock();
-    const key=req.socket?.remoteAddress || 'unknown';
+    const key=clientAddress || getClientAddress(req);
     let state=this.clients.get(key);
     if (!state || now>=state.expiresAt) {
       if (this.clients.size>=this.maxClients) {

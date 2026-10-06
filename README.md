@@ -1,6 +1,6 @@
 ﻿# Supplier PCN workflow — SQL Server
 
-Updated: 2026-10-05.
+Updated: 2026-10-06.
 
 The Node API stores PCN form data, internal review, comments, approvals, audit history, routing settings and application accounts in SQL Server. The browser calls the API; the active application does not use Firebase Authentication or Firestore. The existing target is `svr120a / Scn_DB`.
 
@@ -70,6 +70,14 @@ Open `http://localhost:3000` for the configured local port. Login is `/login`, a
 The server checks schema and master data before listening. Production requires `NODE_ENV=production` and an HTTPS `PUBLIC_ORIGIN` matching the browser origin; use an HTTPS reverse proxy. Authentication uses an HttpOnly, SameSite cookie and CSRF headers for mutations. Secure cookies are enabled in production. Serve through Node so its asset allowlist protects source, configuration and exports.
 
 `npm run start:windows` is an additional Windows credential launcher. Use `npm start` with the runtime's configurable credential location or environment configuration.
+
+## Windows HTTPS pilot
+
+The HTTPS pilot is deployed on `THCHA-WEBHOST01` at `https://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. TLS checks with the pinned public certificate and IP verification passed; health/readiness and the login page return 200. Unauthenticated PCN requests are denied. Actual authenticated login, service restart and remaining remote checks are still pending. See [the Windows test deployment runbook](plans/windows-test-deployment.md) for exact release/configuration paths, certificate trust and acceptance evidence.
+
+This pilot uses the existing `svr120a / Scn_DB`: PCN saves are real persistent database writes. Deployment reuses the applied schema and accounts; it does not run migration, import or bootstrap. Mail mappings remain empty. Windows 10 Pro has a small IIS concurrency limit, so this host is for a limited pilot; wider use requires an appropriate Windows Server deployment.
+
+The requested [GitHub deployment pipeline](plans/github-deployment.md) is being built separately: hosted Windows CI tests and signs an Ed25519 release, then a protected SYSTEM task on the host polls outbound every ten minutes. It needs no public inbound deployment endpoint or self-hosted CI runner. GitHub holds the provisioned release-signing key, not SQL credentials. Its first actual workflow/deployment run remains pending.
 
 ## Import existing PCN data
 
