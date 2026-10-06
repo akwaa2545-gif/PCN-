@@ -1,6 +1,6 @@
 # Windows HTTPS test deployment
 
-Updated: 2026-10-06. Status: pilot deployed; HTTPS/readiness and unauthenticated boundary checks passed. Service restart, remaining remote checks, client browser trust and actual authenticated login remain pending. Pipeline implementation is in progress and its first actual workflow run is unverified.
+Updated: 2026-10-06. Status: signed release `pcn-test-5-1` built and deployed successfully through the outbound pipeline. HTTPS/readiness, service restart, active process identity, loopback isolation, unauthenticated boundary checks and a repeated no-op poll passed. Client browser trust and actual authenticated pilot login remain unverified.
 
 ## Scope and components
 
@@ -22,8 +22,8 @@ The pilot connects to the existing `Scn_DB`. Saves and password changes persist 
 
 | Component | Required deployment layout |
 |---|---|
-| Current pilot release | `C:\SupplierPCN\releases\pcn-test-20261006T031522Z` |
-| Future versioned release files | `C:\SupplierPCN\releases\<sourceSHA>-<UTCtimestamp>`; record the selected directory for each rollout |
+| Current pilot release | `C:\SupplierPCN\releases\pcn-test-5-1` |
+| Future pipeline release files | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>`; record the selected directory for each rollout |
 | WinSW executable/XML and service artifacts | `C:\SupplierPCN\service` |
 | Service logs | `C:\SupplierPCN\logs` |
 | Private environment file | `C:\ProgramData\SupplierPCN\config\pcn.env` |
@@ -76,9 +76,15 @@ Remove the same thumbprint from the client's Current User trusted-root store aft
 6. Verify client access, certificate trust, auth/CSRF and deep links. Recheck other sites after pilot changes.
 7. Record the actual release/service/binding names and completed acceptance evidence below. Only then report the pilot URL as working.
 
-## Deployment pipeline in progress
+## Verified deployment pipeline
 
-The user requested an automated pipeline. Its [separate runbook](github-deployment.md) describes GitHub-hosted Windows CI tests, an Ed25519-signed public production release, and a protected SYSTEM scheduled task that polls outbound every ten minutes. This design uses neither an internet-facing deployment listener nor a self-hosted GitHub runner. The GitHub release-signing secret has been provisioned; SQL credentials remain on the deployment host. The first actual Actions run and automated deployment are pending; do not report the pipeline as proven until those checks pass.
+The user requested an automated pipeline. Its [separate runbook](github-deployment.md) describes GitHub-hosted Windows CI tests, an Ed25519-signed public prerelease containing only production runtime files, and the `SupplierPCNTestDeployment` SYSTEM task with highest privileges, scheduled every ten minutes and at startup. This design uses neither an internet-facing deployment listener nor a self-hosted GitHub runner. GitHub holds the release-signing secret; SQL credentials remain on the deployment host.
+
+[Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) completed all steps, including 134/134 tests and seven isolated browser checks. It published signed release `pcn-test-5-1` from commit `6170a0fe80d249314dfe2e50d5378490ef9107fd` at `2026-10-06T04:03:30Z`. The SYSTEM task logged deployment of that release at `2026-10-06T04:13:57.8149751Z`; the last-deployed state records the same commit and release ID. The task is Ready with LastTaskResult 0.
+
+External HTTPS probes with the pinned certificate and verified IP identity passed after deployment: readiness/login page/anonymous session returned 200, unauthenticated PCNs returned JSON 401, and source/.env/src paths returned 404. IIS overwrote caller-supplied client-IP headers and foreign Origin requests returned 403. These checks did not perform authenticated pilot login or database writes.
+
+An independent host check confirmed the running command is `C:\SupplierPCN\releases\pcn-test-5-1\server.js`, owned by `NT AUTHORITY\LOCAL SERVICE`, with its parent process matching the WinSW service. Node listens exclusively on `127.0.0.1:3000` and SQL readiness succeeds. A second manual SYSTEM-task poll returned result 0 and logged `already_current` at `2026-10-06T04:15:53.5310931Z`; the service PID and last-deployed file hash were unchanged, confirming no unnecessary restart.
 
 ## Acceptance record
 
@@ -86,20 +92,23 @@ The following table records only supplied deployment evidence. Local browser smo
 
 | Check | Required evidence | Status |
 |---|---|---|
-| Host and listener | THCHA-WEBHOST01; IIS PCNTest HTTPS :8443; Node 127.0.0.1:3000 observed | Verified listener/binding; remote :3000 denial pending |
-| Runtime compatibility | Real Node 26 process and SQL-backed API readiness | Startup verified; full host suite pending |
-| Service identity and ACLs | SupplierPCNTest runs as LocalService; secret read access must be service-SID-specific | Process identity verified; final ACL evidence pending |
-| External configuration | Absolute PCN_ENV_FILE; no release secrets; missing-file startup behavior | Pending |
+| Host and listener | THCHA-WEBHOST01; IIS PCNTest HTTPS :8443; Node 127.0.0.1:3000 only; workstation cannot connect to :3000 | Verified |
+| Runtime compatibility | Windows Node 26 CI: 134/134 tests and seven isolated browser checks; deployed SQL readiness | Verified CI/startup; full suite not rerun against live database |
+| Service identity and ACLs | SupplierPCNTest Running/Automatic; exact pcn-test-5-1 server.js command, LOCAL SERVICE owner and WinSW parent; service-SID config/release ACLs | Verified after cutover |
+| External configuration | Absolute PCN_ENV_FILE external to release, protected service-specific configuration | Installed; missing-file startup behavior verified by focused runtime-env tests |
 | Health/readiness | HTTPS health/readiness return 200 through IIS with certificate/IP verification | Verified |
-| Certificate | Binding thumbprint/expiry and pinned-certificate TLS IP check | Verified; manual browser trust/public file check pending |
+| Certificate | Binding thumbprint/expiry and pinned-certificate TLS IP check | TLS verified; user reports client trust done, actual browser trust not observed |
 | Public login/session | Login page 200; anonymous session endpoint 200 | Verified; actual authenticated login/logout/cookies pending |
 | Unauthenticated API/static boundaries | PCNs return JSON 401; environment/source/src paths return 404 | Verified |
 | Origin and proxy header | Foreign Origin rejected 403; duplicate forged X-PCN-Client-IP overwritten by IIS | Verified; remaining authenticated CSRF/throttling checks pending |
 | PCN navigation | Admin, create, saved PCN deep links and browser refresh through IIS | Pending |
 | Data behavior | Existing Scn_DB reused; deployment runs no migration/import/bootstrap | Database readiness verified; no pilot save/login claimed |
 | Isolation | Existing Default Web Site `*:80` binding unchanged | Verified binding; broader site regression pending |
-| Restart | Service restart restores healthy TLS/API response | Pending |
-| Pipeline | First GitHub Actions test/sign/release and outbound polling deployment | Pending |
+| Restart | Service restart returns Running/Automatic LocalService with loopback listener and SQL readiness | Verified |
+| Polling task | SupplierPCNTestDeployment SYSTEM/Highest, every ten minutes plus startup; Ready/result 0, deployed state matches pcn-test-5-1; second poll already_current with unchanged PID/state hash | Verified deployment and no-op poll |
+| Pipeline | Actions 37411798943 all steps successful; signed pcn-test-5-1 installed from commit 6170a0fe80d249314dfe2e50d5378490ef9107fd | Verified |
+
+The final Windows CI run passes 134 tests and seven isolated browser checks. The earlier local coverage measurement is 93.84% lines and 86.41% branches; it is not a coverage measurement of the deployed live SQL database. Browser test adapters isolate test state from Scn_DB.
 
 For save testing, record the test PCN identifiers and distinguish test records from operational records because writes persist in the existing database.
 

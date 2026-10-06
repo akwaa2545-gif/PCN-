@@ -73,11 +73,11 @@ The server checks schema and master data before listening. Production requires `
 
 ## Windows HTTPS pilot
 
-The HTTPS pilot is deployed on `THCHA-WEBHOST01` at `https://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. TLS checks with the pinned public certificate and IP verification passed; health/readiness and the login page return 200. Unauthenticated PCN requests are denied. Actual authenticated login, service restart and remaining remote checks are still pending. See [the Windows test deployment runbook](plans/windows-test-deployment.md) for exact release/configuration paths, certificate trust and acceptance evidence.
+The HTTPS pilot is deployed on `THCHA-WEBHOST01` at `https://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. TLS checks with the pinned public certificate and IP verification passed; health/readiness and the login page return 200. Service restart passed, and port 3000 is unreachable from the workstation. Unauthenticated PCN requests are denied. Actual authenticated pilot login and browser certificate validation are still pending. See [the Windows test deployment runbook](plans/windows-test-deployment.md) for exact release/configuration paths, certificate trust and acceptance evidence.
 
 This pilot uses the existing `svr120a / Scn_DB`: PCN saves are real persistent database writes. Deployment reuses the applied schema and accounts; it does not run migration, import or bootstrap. Mail mappings remain empty. Windows 10 Pro has a small IIS concurrency limit, so this host is for a limited pilot; wider use requires an appropriate Windows Server deployment.
 
-The requested [GitHub deployment pipeline](plans/github-deployment.md) is being built separately: hosted Windows CI tests and signs an Ed25519 release, then a protected SYSTEM task on the host polls outbound every ten minutes. It needs no public inbound deployment endpoint or self-hosted CI runner. GitHub holds the provisioned release-signing key, not SQL credentials. Its first actual workflow/deployment run remains pending.
+The requested [GitHub deployment pipeline](plans/github-deployment.md) has successfully built and deployed signed release `pcn-test-5-1`. [Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) passed all 134 tests and seven isolated browser checks. The protected SYSTEM task deployed the release to `C:\SupplierPCN\releases\pcn-test-5-1`; external HTTPS readiness and access-boundary probes passed afterward. The active release runs as LocalService on loopback, and a repeated poll returned `already_current` without restarting it. The task polls outbound every ten minutes and at startup, with no public inbound deployment endpoint or self-hosted CI runner. GitHub holds the release-signing key, not SQL credentials.
 
 ## Import existing PCN data
 
@@ -106,7 +106,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-109 automated tests pass. The migration coverage run measured 95.91% line and 86.47% branch coverage across loaded server modules; the later short-password regression also passes. Browser smoke checks passed for forced password change, re-login, empty routing, a blank supplier form, creation and reload using isolated test adapters. `scripts/live-sql-smoke.js` separately verified the real database, authentication, Unicode workbook persistence, stale writes, attachment quarantine/audit and soft deletion inside a rolled-back transaction. It accepts the bootstrap password only through `PCN_SMOKE_BOOTSTRAP_PASSWORD` and is intended for initial setup.
+The release's Windows CI run passed all 134 tests and seven isolated browser checks. An earlier local coverage run measured 93.84% lines and 86.41% branches; this is separate from the final CI test count. The corrected Windows DPAPI fixtures are included in the successful CI run. SQL-backed HTTPS readiness and unauthenticated access boundaries also passed on the deployed host.
+
+Browser smoke checks passed for forced password change, re-login, empty routing, a blank supplier form, creation and reload using isolated test adapters. They do not establish actual authenticated browser use of the HTTPS pilot. `scripts/live-sql-smoke.js` separately verified the real database, authentication, Unicode workbook persistence, stale writes, attachment quarantine/audit and soft deletion inside a rolled-back transaction. It accepts the bootstrap password only through `PCN_SMOKE_BOOTSTRAP_PASSWORD` and is intended for initial setup, not routine deployment.
 
 See [API inventory](plans/sql-server-api-checklist.md), [table mapping](plans/sql-server-table-mapping.md), and [migration plan](plans/sql-server-migration.md). The migration plan includes future acceptance criteria, not a declaration that every proposed feature exists.
 
