@@ -138,7 +138,7 @@ test('Windows DPAPI credential fallback survives env-file selection and preserve
   const directory = await workspace(t);
   const credential = path.join(directory, 'credential.xml');
   const script = path.join(directory, 'seed-fixture.ps1');
-  await fs.writeFile(script, `param([string]$CredentialPath)
+  await fs.writeFile(script, String.raw`param([string]$CredentialPath)
 $ErrorActionPreference = 'Stop'
 function Write-FixtureStage([string]$Stage) {
   [Console]::Out.WriteLine("PCN_DPAPI_FIXTURE:$Stage")
@@ -146,6 +146,11 @@ function Write-FixtureStage([string]$Stage) {
 }
 Write-FixtureStage 'start'
 Write-FixtureStage 'before-security-import'
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1" -ErrorAction Stop
+Write-FixtureStage 'after-security-import'
+Write-FixtureStage 'before-utility-import'
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
+Write-FixtureStage 'after-utility-import'
 $testSecret = ConvertTo-SecureString 'runtime-env-test-only' -AsPlainText -Force
 Write-FixtureStage 'after-secure-string'
 $testCredential = New-Object System.Management.Automation.PSCredential('fixture-user', $testSecret)
@@ -158,6 +163,7 @@ Write-FixtureStage 'after-export'
   t.diagnostic(`DPAPI seed fixture duration: ${Math.round(performance.now() - fixtureStartedAt)} ms`);
   assert.deepEqual(fixture.stdout.trim().split(/\r?\n/), [
     'PCN_DPAPI_FIXTURE:start', 'PCN_DPAPI_FIXTURE:before-security-import',
+    'PCN_DPAPI_FIXTURE:after-security-import', 'PCN_DPAPI_FIXTURE:before-utility-import', 'PCN_DPAPI_FIXTURE:after-utility-import',
     'PCN_DPAPI_FIXTURE:after-secure-string', 'PCN_DPAPI_FIXTURE:before-export', 'PCN_DPAPI_FIXTURE:after-export'
   ]);
   assert.equal(fixture.stderr, '');
@@ -179,6 +185,15 @@ Write-FixtureStage 'after-export'
 function Import-Clixml {}
 function ConvertTo-Json {}
 `);
+  const reader = await run('powershell.exe', [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.resolve(__dirname, '../scripts/read-sql-credential.ps1'), '-CredentialPath', credential
+  ], { windowsHide: true, timeout: 10000, env: childEnvironment({ PSModulePath: coreModules }) });
+  const readerResult = JSON.parse(reader.stdout);
+  assert.equal(readerResult.username, 'fixture-user');
+  assert.equal(readerResult.password === 'runtime-env-test-only', true);
+  assert.equal(readerResult.trustServerCertificate, true);
+  assert.equal(reader.stderr, '');
   const restricted = await load(directory, {
     PCN_ENV_FILE: external,
     PCN_SQL_CREDENTIAL_PATH: credential,

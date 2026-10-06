@@ -1,5 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$CredentialPath)
 $ErrorActionPreference = 'Stop'
+Import-Module -Name "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1" -ErrorAction Stop
 $config = Import-Clixml -LiteralPath $CredentialPath
 if ($config -is [System.Management.Automation.PSCredential]) { $credential=$config; $trust=$false }
 else { $credential=$config.Credential; $trust=[bool]$config.TrustServerCertificate }
