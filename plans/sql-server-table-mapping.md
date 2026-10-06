@@ -1,8 +1,8 @@
 ﻿# SQL Server source-to-table mapping
 
-Updated: 2026-10-05. Target: existing `svr120a / Scn_DB`. Source of truth: `sql/migrations/001_core.sql`, `src/sqlPcnRepository.js`, `src/sqlPcnHydration.js`, auth/document modules. Names below use the `pcn` schema. This describes migration code, not proof that a target deployment has applied it.
+Updated: 2026-10-06. Target: existing `svr120a / Scn_DB`. Sources: `sql/migrations/001_core.sql`, repository/hydration/auth/document/routing modules. Names use the `pcn` schema. Department/action routing-v2 below is local, not yet pushed/deployed; it adds no DDL and makes no live SQL/mail change.
 
-The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are Unicode text parsed/validated in Node; the migration avoids unavailable SQL JSON functions. Migration 001 is applied, with 21 application tables plus migration history, master-data version 1 and a hashed, forced-change `itadmin` account. All seven routing groups are empty. Live SQL verification writes were rolled back. Existing Firebase records have not been imported.
+The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are Unicode text parsed/validated in Node; the migration avoids unavailable SQL JSON functions. Migration 001 is applied, with 21 application tables plus migration history, master-data version 1 and a hashed, forced-change `itadmin` account. Seven routing groups were initialized empty. Live SQL verification writes were rolled back. Existing Firebase records have not been imported.
 
 ## PCN aggregate
 
@@ -24,7 +24,7 @@ SQL normalizes parent fields and ordered child tables while retaining complete n
 | priceLevel | PriceLevel nvarchar(20) | Existing price option |
 | sourceTemplate/changeType | SourceTemplate/ChangeType nvarchar(max) | Historical template/change snapshots |
 | createdAt/updatedAt/submittedAt | CreatedAt/UpdatedAt/SubmittedAt datetime2(3), nullable | Machine timestamps hydrate as UTC ISO strings |
-| sampleSubmittedDate and other non-column fields | LegacyExtrasJson nvarchar(max) | Preserve unknown/top-level fields; new edits use allowlist |
+| sampleSubmittedDate and other non-column fields | LegacyExtrasJson nvarchar(max) | Preserve unknown fields; local v2 stores server-owned mailRoutingPolicyVersion/mailRoutingState here, with no new column |
 | Presence and null shape | PresentFieldsJson nvarchar(max) | Preserve omitted vs explicit-null nested/array fields |
 | version | RowVersion rowversion | Hydrated 16-character hex concurrency token, not a date |
 | Deletion state | DeletedAt datetime2(3), DeletedBy nvarchar(256) | Soft delete; parent/children/history remain |
@@ -68,11 +68,11 @@ Review dates stay text. Checkbox snapshots do not prove a historical approver id
 | MasterDataVersions | Id int identity; DefinitionHash char(64) unique; DefinitionJson nvarchar(max); IsActive/CreatedAt | Seed formDefinitions/commonDocuments/workflowBase/statusDefinitions/adminItems; unique active version |
 | PcnCounters | Year int PK; LastSequence int | Serializable code allocation in create transaction; overflow guarded |
 | AuditLogs | Id nvarchar(128) PK; PcnCode nvarchar(128); Action nvarchar(80); Actor nvarchar(256); MetadataJson; CreatedAt; optional SourceJson | Supports PCNs, deleted records and notification-settings targets; no mandatory parent FK |
-| NotificationSettings | Singleton Id=1; SettingsJson nvarchar(max); UpdatedAt | Complete normalized routing settings; URLs omitted from API |
-| NotificationGroups | GroupKey nvarchar(80) PK; SortOrder/Label/Emails | Seven groups; empty mapping by default |
+| NotificationSettings | Singleton Id=1; SettingsJson nvarchar(max); UpdatedAt | Local v2 stores schemaVersion=2, 16 groups and preserved seven legacyGroups in JSON; Node-computed SHA-256 version, no new column; no URL exposure |
+| NotificationGroups | GroupKey nvarchar(80) PK; SortOrder/Label/Emails | Current-group mirror: deployed legacy seven, local v2 sixteen; legacyGroups stay in SettingsJson |
 | NotificationRecipients | GroupKey + SortOrder composite PK; Email nvarchar(320); ProfileJson | Ordered optional recipient profiles |
 | MigrationSourceRecords | SourceKey nvarchar(256) PK; SourceHash char(64); SourceJson; ImportedAt | Idempotent import evidence; private source data requires restricted access |
-| NotificationJobs | Id uniqueidentifier; EventKey nvarchar(200) unique; PCN code/version/group/action; recipient/payload; status/attempt/lease/claim/timestamps/error | Deduplicated explicit enqueue and lease-based mail worker; ambiguous sends need operator review |
+| NotificationJobs | Id uniqueidentifier; EventKey nvarchar(200) unique; PCN code/version/group/action; recipient/payload; status/attempt/lease/claim/timestamps/error | Local policy 2 atomically inserts with PCN/audit using code:activationId:handoff; legacy explicit enqueue and ambiguity handling retained |
 | PcnDocumentFiles | Id uniqueidentifier; PcnCode FK; FileName/ContentType; Bytes varbinary(max); SizeBytes; ScanStatus/CreatedAt | Actual content, 10 MiB limit, pendingScan quarantine; clean scan required for download |
 | SchemaMigrations | MigrationId nvarchar(120) PK; Checksum char(64); AppliedAt datetime2(3) | Created by migration runner; checksum mismatch rejects modified applied migrations |
 
@@ -80,15 +80,16 @@ There are 21 application tables in the core migration plus SchemaMigrations. The
 
 The SQL connection account `scndb` is not an end-user identity. Bootstrap creates `itadmin` with optional email and forced password change when private environment values are supplied. Runtime user creation follows normal password policy. No plaintext application password is stored in SQL.
 
-Mail groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tapbu.qa, qateFinal.signoff, supplierNotification. Signed integration URLs remain backend configuration. Imported routing is excluded to preserve the requested empty mapping.
+Legacy groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tapbu.qa, qateFinal.signoff, supplierNotification. Local schema 2 uses department.{gscTet,prodEngTet,qaTet,gscTapbu,qaTapbu}.{approved,checked,prepared} plus supplierNotification; QA final judgment reuses QA/TET lists. Legacy contacts are preserved server-side and explicitly copied by an administrator. Signed URLs remain backend configuration; import excludes routing. See [routing design](mail-routing-design.md).
 
 ## Transaction and import behavior
 
 - Create allocates the annual counter, parent, review, ordered children and audit together.
 - Updates lock/compare the parent version, validate actor/fields/state, save aggregate/audit, then return the new version. Comments/approvals use the same aggregate transaction.
 - Soft delete preserves evidence and hides ordinary reads. Attachment writes lock the parent, check ownership/stage/version, enforce quotas and update the parent version/audit atomically. File deletion removes content; a retention policy is pending.
-- Settings save updates singleton/groups/profiles and audit transactionally; PUT/PATCH normalize complete settings, not sparse per-group patches.
-- Notification enqueue is deduplicated and transactional by itself; save and enqueue are separate HTTP calls. Automatic atomic outbox coupling is pending.
+- Settings save updates singleton/groups/profiles/audit transactionally. Local schema-2 PUT/PATCH require all 16 groups and a fetched hash version compared under SQL lock; server-owned legacyGroups remain in JSON.
+- Local policy 2 calls notification prepare/persist hooks inside PCN create/update transactions, stores activation state in LegacyExtrasJson and a unique EventKey in NotificationJobs. The transient response is not persisted. Existing/absent-policy PCNs retain separate legacy enqueue; no routing-event/snapshot table exists.
+- Missing recipients/configuration persist a blocked handoff, not a job. Later settings edits do not release it. Supplier action/reset cancels only pending jobs; status-only closure retains a queued final supplier notice. Sending/accepted/uncertain jobs are not recalled.
 - Import preserves records, child order, unknown fields/null shape, audits and annual counters; unchanged source hashes skip, conflicts reject, no history mail is sent.
 - Import accepts reviewed application JSON, not native Firestore export files. The three records in data/pcn-db.json are synthetic and must not be assumed authoritative.
 

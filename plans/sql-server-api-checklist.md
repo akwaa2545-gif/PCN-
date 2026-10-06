@@ -4,6 +4,8 @@ Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, wor
 
 Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups were initialized empty. Real SQL smoke checks and isolated browser E2E passed. Current deployment evidence is recorded in [the Windows runbook](windows-test-deployment.md). Existing Firebase data import remains pending.
 
+Department/action routing-v2 is implemented locally, not pushed/deployed. Existing pcn-test-6-1 acceptance predates it. See [routing design](mail-routing-design.md): no new DDL or live SQL/mail action occurred for this change.
+
 ## Shared contract
 
 - JSON success: `{success:true,data}`; errors: `{success:false,error,details?,code?,requestId}`. Download returns file bytes.
@@ -12,7 +14,7 @@ Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master
 - Mutations require the configured origin and `X-CSRF-Token`. Login requires the origin; logout checks CSRF when authenticated.
 - PCN update/delete/comment/approval requires a fetched 16-character hex `version`; stale versions return 409. PUT and PATCH both merge PCN updates.
 - Suppliers are scoped by `ownerUserId`; internal roles currently see broader records. Company membership/assignment scope is pending. Actors/roles are server-derived.
-- Parent/children/review/audit changes are transactional. Workflow-mail enqueue is separate from PCN save.
+- Parent/children/review/audit changes are transactional. Local policy 2 commits eligible mail jobs in the PCN save transaction; legacy policy 1 retains a separate compatibility enqueue.
 - JSON limit is 1 MB; file upload has a separate 15 MB JSON cap and 10 MiB decoded limit.
 - Errors include 400 invalid input, 401 no session, 403 denied, 404 unavailable record, 409 conflict, 413 excessive body, 423 unscanned download, 429 login throttling, 503 readiness/configuration failure. Unexpected backend failures return generic 500.
 
@@ -37,8 +39,8 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `GET /api/admin/notifications/health` | Admin read-only local endpoint validation + SQL queue/worker outcomes | No fetch, flow invocation, queue mutation or email; normal session required |
 | `POST /api/admin/notifications/test` | Admin compatibility mail test using recipient/groupId | Explicit admin recipient allowed; invokes mail only when explicitly requested; not called by health UI |
 | `GET /api/master-data` | Authenticated active SQL master | Historical-version endpoint pending |
-| `GET /api/notification-settings` | Admin routing/configured flags | No signed URLs; fixed server endpoint is not a UI setting |
-| `PUT/PATCH /api/notification-settings` | Admin full normalized recipient/settings save + audit | Recipient mappings remain editable; omitted groups become empty; send complete settings; signed URL supplied by server only |
+| `GET /api/notification-settings` | Admin routing/configured flags | Local v2: schemaVersion=2, hash version, 16 groups and seven safe legacyGroups; no signed URLs |
+| `PUT/PATCH /api/notification-settings` | Admin full versioned recipient save + audit | Local v2 requires schemaVersion=2, fetched version/all 16 groups; missing/duplicate/unknown groups 400, stale version 409; legacyGroups server-owned |
 | `GET /api/pcns?status=...` | Owner-scoped supplier/internal list | Array response, no pagination |
 | `POST /api/pcns` | Validated create, SQL counter, audit | Server owner/master version; initial draft/submitted |
 | `GET /api/pcns/:id` | Authorized hydrated aggregate | Nested payload and rowversion |
@@ -49,7 +51,7 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `GET /api/pcns/:id/workflow` | Authorized risk-derived route | RL0 omits TaPBU |
 | `GET /api/pcns/:id/progress` | Authorized derived progress | Current rule definition |
 | `GET /api/pcns/:id/audit` | Internal audit read | Suppliers denied |
-| `POST /api/pcns/:id/notifications/workflow` | Internal next-group enqueue, 202 | Event dedup; empty routing returns queued:false; server recipient/link |
+| `POST /api/pcns/:id/notifications/workflow` | Internal legacy-policy whole-department enqueue, 202 | Uses legacyGroups under schema 2; policy 2 returns handled_on_save without enqueueing again |
 | `POST /api/pcns/:id/documents` | Authorized fileName/contentType/base64 upload | Supplier stage restrictions, pendingScan; UI pending |
 | `GET /api/pcns/:id/documents/:uuid` | Authorized same-PCN download | Clean scan required |
 | `DELETE /api/pcns/:id/documents/:uuid` | Authorized hard deletion | Required version, locked owner/stage check, atomic parent version and audit |
@@ -95,6 +97,14 @@ Workflow mail preserves the pre-migration JSON keys exactly: `to`, `subject`, `m
 
 Private host mail/directory configuration was updated atomically under the deployment mutex with zero pending/sending jobs, original ACLs and protected backup retained. The directory update preserved existing mail/SQL values and made no SQL writes, service restart or flow invocation. The subsequent release restart loaded that configuration; mail configuration validates locally and a host backend directory lookup returned a matching inline-photo profile. No test email or delivery check was performed.
 
+## Department/action routing-v2 — local implementation
+
+The editor has five department cards with Approved/Checked/Prepared lists plus supplierNotification. QA/TET review/final judgment reuse lists with distinct messages. The first Save Mail persists schema 2; only newly created PCNs select policy 2. Existing records retain policy 1 when policy is absent. GET returns a 64-character settings hash as version; full PUT/PATCH sends that version, not an expectedVersion JSON field. SQL locks/rechecks it before settings/profile/audit writes. The UI keeps drafts on 409, confirms reload and supports explicit legacy-contact copying without editing legacyGroups.
+
+Policy-2 PCN saves atomically persist server-owned activation state and an eligible job with parent/audit. A transient notification response reports queued=true with jobId/status, queued=false with a blocked reason, or no_transition; app.js uses it instead of a second POST. Unchanged saves and settings edits do not enqueue. Blocked handoffs are not released by later recipient/config changes. Supplier action/signoff reset cancels only pending jobs; status-only closure preserves the queued final supplier notice. Explicit blocked retry and legacy opt-in APIs are not implemented.
+
+Local verification: 184/184 tests, 95.33% lines / 88.87% branches / 95.32% functions, and 26/26 browser checks. Final code, JavaScript, security and accessibility reviews approved with no findings. The local served admin.js returned 200 with separated department/step/versioned-save UI. These checks performed no live SQL/mail/test send or deployment.
+
 ## Directory lookup compatibility
 
 `GET /api/admin/directory-users?query=...` requires an admin session that has completed any forced password change. A trimmed search is 2–100 characters. The backend calls the distinct private `POWER_AUTOMATE_DIRECTORY_URL` using HTTPS with an exact allowlisted hostname; the directory endpoint must not be replaced by the mail endpoint. The original configuration was recovered through a one-time read-only inspection of legacy Firestore settings. Runtime lookup calls Power Automate directly and does not use Firebase.
@@ -110,7 +120,7 @@ Private host mail/directory configuration was updated atomically under the deplo
 
 The ignored local `.env` enables only directory lookup; local mail remains disabled by this change. Private configuration is external to releases. Actual signed endpoint URLs, hosts/signatures and profile identifiers are not documented or published.
 
-- [x] Unit/API suite: latest 155/155 passes; focused directory integration 14/14, 100% lines / 93.81% branches / 94.44% functions.
+- [x] Earlier directory unit/API suite: 155/155; focused integration 14/14, 100% lines / 93.81% branches / 94.44% functions.
 - [x] Original directory flow lookup returned one matching user with name/job title/department/photo; identifying data remains private.
 - [x] Local SQL readiness returned 200 after watch reload.
 - [x] Enhanced directory browser checks: 16/16 passed; dropdown rendering of name/email/title/department/photo was inspected. Earlier mail-health browser results are separate.
@@ -118,7 +128,7 @@ The ignored local `.env` enables only directory lookup; local mail remains disab
 - [x] Release CI 155 tests/16 browser checks passed; pcn-test-6-1 deployed with verified process identity and HTTPS SQL readiness. Host backend lookup returned one matching profile with inline photo; private configuration stays external to releases.
 - [ ] Verify actual authenticated directory UI on a client; isolated browser rendering tests do not establish that result.
 
-The earlier mail-health run's 148-test coverage above is historical evidence for that change. The latest overall coverage run passes 155/155 with 95.03% lines, 88.27% branches and 94.70% functions.
+The earlier 148-test mail-health and 155-test directory coverage are historical. Current local routing verification is 184/184 with 95.33% lines, 88.87% branches and 95.32% functions; deployed pcn-test-6-1 evidence remains separate.
 
 ## Implemented browser/integration changes
 
@@ -141,7 +151,7 @@ The earlier mail-health run's 148-test coverage above is historical evidence for
 - [ ] Master-version endpoint and historical rendering/validation against pinned definition.
 - [ ] Bounded paginated SQL lists and coordinated frontend pagination.
 - [ ] General create/comment/approval idempotency; mail event dedup covers only notification jobs.
-- [ ] Immutable signoff events, atomic save/outbox coupling, deletion cancellation, mail status/retry APIs.
+- [ ] Immutable signoff events, legacy-policy opt-in, explicit blocked retry, cancellation beyond pending handoffs and mail status/retry APIs. Local policy-2 save/outbox coupling is implemented.
 - [ ] Trusted malware scan, attachment UI, audited retention/deletion and requirement/file association.
 - [ ] Distributed throttling and deployment request limits. Current API throttles source IPs to 600 requests / 60 mutations per minute, with bounded tracking; attachment quotas also apply.
 

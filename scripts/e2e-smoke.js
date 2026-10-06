@@ -11,6 +11,7 @@ const masterData = require('../src/masterData');
 
 async function main() {
   const repository = memoryRepository();
+  await repository.saveNotificationSettings({groups:[{key:'signoff.gscTet',label:'GSC/TET',emails:'legacy@example.test',recipients:[{email:'legacy@example.test',displayName:'Legacy Contact'}]}]});
   repository.getMasterData = async()=>({...masterData,versionId:1});
   class BrowserPcnService extends PcnService {
     async getNotificationSettings() { return {...await super.getNotificationSettings(),directoryConfigured:true}; }
@@ -31,6 +32,7 @@ async function main() {
       assert.equal(options.method,'POST');
       assert.equal(options.redirect,'error');
       const payload=JSON.parse(options.body);
+      if(payload.query!=='Browser Reviewer') return new Response(JSON.stringify({users:[]}));
       assert.deepEqual(payload,{query:'Browser Reviewer',searchTerm:'Browser Reviewer'});
       directoryRequests.push(payload);
       // Exercise both response envelopes used by the original Power Automate directory flow.
@@ -79,13 +81,23 @@ async function main() {
     await page.waitForURL('**/admin#mail-routing');
     await page.locator('[data-notification-group]').first().waitFor();
     const emails=await page.locator('[data-recipient-email]').evaluateAll(inputs=>inputs.map(input=>input.value));
-    assert.equal(emails.length,7);
+    assert.equal(emails.length,16);
     assert(emails.every(email=>email===''));
+    assert.equal(await page.locator('#notificationReloadButton').isVisible(),false,'Reload is offered only after a conflict');
+    assert.equal(await page.locator('.notification-department').count(),5);
+    for(const department of ['gscTet','prodEngTet','qaTet','gscTapbu','qaTapbu']) {
+      assert.deepEqual(await page.locator(`[data-department="${department}"] [data-notification-group]`).evaluateAll(groups=>groups.map(group=>group.dataset.notificationGroup)),['approved','checked','prepared'].map(action=>`department.${department}.${action}`));
+    }
+    assert.match(await page.locator('[data-department=qaTet]').textContent(),/initial review and final judgment/);
+    assert.equal(await page.locator('[data-notification-group="qateFinal.signoff"]').count(),0);
+    const legacySource=page.locator('[data-legacy-source="signoff.gscTet"]');
+    assert.match(await legacySource.textContent(),/legacy@example.test/);
+    assert.equal(await legacySource.locator('input').count(),0,'Legacy contacts are read-only');
     assert.equal(await page.locator('#notificationHealthRefreshButton').count(),1,'Health refresh replaces outbound test email');
     await page.locator('#notificationHealthStatus').filter({hasText:'Ready'}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Test Email',exact:true}).count(),0);
     assert.equal(await page.locator('#mailRoutingView input[type=url]').count(),0);
-    assert.equal(await page.locator('[data-recipient-email]:enabled').count(),7);
+    assert.equal(await page.locator('[data-recipient-email]:enabled').count(),16);
     assert.equal(await page.locator('#notificationHealthTitle').textContent(),'Mail service');
     assert.equal(await page.getByRole('button',{name:'Check status',exact:true}).count(),1);
     assert.equal(await page.locator('#notificationHealthPanel dl, #notificationHealthPanel p').count(),0,'Mail service has a compact status without metrics or delivery text');
@@ -102,7 +114,8 @@ async function main() {
       assert.equal(await suggestion.locator('img').getAttribute('src'),directoryPhoto);
       await suggestion.locator('img').evaluate(image=>image.decode());
       if(lookup===0) await page.screenshot({path:path.resolve('test-results/directory-suggestions-browser-smoke.png'),fullPage:true});
-      await suggestion.click();
+      if(lookup===0) await suggestion.click();
+      else { await firstRecipient.focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter'); }
       assert.equal(await firstRecipient.inputValue(),'reviewer@example.test');
       const recipientRow=page.locator('.notification-person').first();
       assert.equal(await recipientRow.locator('.notification-person-meta').textContent(),'Quality Reviewer - Supplier Quality');
@@ -111,6 +124,16 @@ async function main() {
     }
     assert.equal(directoryRequests.length,2,'Both original directory response envelopes are exercised');
     assert.equal(await firstRecipient.inputValue(),'reviewer@example.test');
+    const checkedList=page.locator('[data-notification-group="department.gscTet.checked"]');
+    await legacySource.locator('select').selectOption('department.gscTet.checked');
+    page.once('dialog',dialog=>dialog.accept());
+    await legacySource.getByRole('button',{name:'Copy contacts to list from GSC/TET'}).click();
+    assert.equal(await checkedList.locator('input').inputValue(),'legacy@example.test');
+    assert.equal(await firstRecipient.inputValue(),'reviewer@example.test','Copy affects only the selected step list');
+    page.once('dialog',dialog=>dialog.accept());
+    await legacySource.getByRole('button',{name:'Copy contacts to list from GSC/TET'}).click();
+    assert.equal(await checkedList.locator('input').count(),1,'Copy merges duplicate contacts');
+    assert.match(await legacySource.textContent(),/legacy@example.test/);
     for(const [status,label] of [['not_configured','Not configured'],['invalid','Needs attention'],['configured','Ready']]) {
       configuration=status;
       await page.locator('#notificationHealthRefreshButton').click();
@@ -141,6 +164,32 @@ async function main() {
     const savedRouting=(await repository.getNotificationSettings()).groups[0];
     assert.equal(savedRouting.emails,'reviewer@example.test');
     assert.deepEqual(savedRouting.recipients,[{email:'reviewer@example.test',displayName:'Browser Reviewer',jobTitle:'Quality Reviewer',department:'Supplier Quality',photo:directoryPhoto}]);
+    const storedSettings=await repository.getNotificationSettings();
+    assert.equal(storedSettings.schemaVersion,2);
+    assert.equal(storedSettings.groups.length,16);
+    assert.equal(storedSettings.groups.find(group=>group.key==='department.gscTet.checked').emails,'legacy@example.test');
+    assert.equal(storedSettings.legacyGroups.find(group=>group.key==='signoff.gscTet').emails,'legacy@example.test');
+    const preparedList=page.locator('[data-notification-group="department.gscTet.prepared"]');
+    await preparedList.locator('input').fill('manual@example.test');
+    await page.route('**/api/notification-settings',route=>route.request().method()==='PUT'?route.fulfill({status:409,json:{success:false,error:'Mail routing changed; reload before saving'}}):route.continue());
+    await page.locator('#notificationSaveButton').click();
+    await page.locator('#notificationReloadButton').waitFor({state:'visible'});
+    assert.match(await page.locator('#mailRoutingMessage').textContent(),/unsaved draft is kept/);
+    assert.equal(await preparedList.locator('input').inputValue(),'manual@example.test');
+    page.once('dialog',dialog=>dialog.dismiss());
+    await page.locator('#notificationReloadButton').click();
+    assert.equal(await preparedList.locator('input').inputValue(),'manual@example.test','Declining reload preserves draft');
+    await page.unroute('**/api/notification-settings');
+    page.once('dialog',dialog=>dialog.accept());
+    await page.locator('#notificationReloadButton').click();
+    await page.locator('#mailRoutingMessage').filter({hasText:'Latest saved routing loaded.'}).waitFor();
+    assert.equal(await page.locator('#notificationReloadButton').isVisible(),false);
+    assert.equal(await page.locator('#notificationSaveButton').evaluate(button=>document.activeElement===button),true,'Confirmed reload restores keyboard focus to the stable save control');
+    assert.equal(await preparedList.locator('input').inputValue(),'');
+    await preparedList.locator('input').fill('manual@example.test');
+    await page.locator('#notificationSaveButton').click();
+    await page.locator('#mailRoutingMessage').filter({hasText:'Mail routing saved.'}).waitFor();
+    assert.equal((await repository.getNotificationSettings()).groups.find(group=>group.key==='department.gscTet.prepared').emails,'manual@example.test','Valid manual email can be saved without directory membership');
     await page.route('**/api/admin/notifications/health',route=>route.fulfill({status:503,json:{success:false,error:'PRIVATE_DIAGNOSTIC_MARKER'}}));
     await page.locator('#notificationHealthRefreshButton').click();
     await page.locator('#notificationHealthStatus').filter({hasText:'Unavailable'}).waitFor();
@@ -203,8 +252,12 @@ async function main() {
     assert.deepEqual(errors,[]);
     await fs.mkdir(path.resolve('test-results'),{recursive:true});
     await page.screenshot({path:path.resolve('test-results/notification-health-browser-smoke.png'),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'Separated routing fits a mobile viewport');
+    assert.equal(await page.locator('.notification-department').first().locator('[data-notification-group]').count(),3);
+    await page.screenshot({path:path.resolve('test-results/notification-routing-mobile-smoke.png'),fullPage:true});
     await supplier.screenshot({path:path.resolve('test-results/pcn-browser-smoke.png'),fullPage:true});
-    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','editable-email-routing','original-directory-request-and-response-envelopes','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','no-page-errors'],storage:'isolated_test_adapters'}));
+    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','five-departments-fifteen-step-lists','separate-supplier-list','qa-initial-final-shared-lists','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','manual-email-recipient','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','no-page-errors'],storage:'isolated_test_adapters'}));
   } finally {
     if(browser) await browser.close();
     await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});

@@ -165,9 +165,12 @@
               <div class="panel-header">
                 <div>
                   <h2>Mail Routing</h2>
-                  <p class="admin-message" id="mailRoutingMessage">Loading routing...</p>
+                  <p class="admin-message" id="mailRoutingMessage" role="status" aria-live="polite" aria-atomic="true">Loading routing...</p>
                 </div>
-                <button class="primary-button" id="notificationSaveButton" type="button">Save Mail</button>
+                <div class="mail-routing-save-actions">
+                  <button class="ghost-button" id="notificationReloadButton" type="button" hidden>Reload saved routing</button>
+                  <button class="primary-button" id="notificationSaveButton" type="button">Save Mail</button>
+                </div>
               </div>
 
               <div class="mail-routing-summary">
@@ -181,15 +184,15 @@
                 </div>
                 <div>
                   <span class="section-label">Scope</span>
-                  <strong>Workflow approval groups</strong>
+                  <strong>Approved / Checked / Prepared email lists</strong>
                 </div>
               </div>
 
               <div class="webhook-config">
                 <div class="webhook-config-label">Email and directory services</div>
-                <p>Connections are configured on the server. Email recipients start empty; notifications require a saved recipient.</p>
+                <p>Each department has separate step recipients. Email membership does not change signing permissions. After saving, new PCNs use these step lists; existing PCNs keep their previous department routing.</p>
                 <div class="webhook-actions">
-                  <span class="webhook-status" id="directoryLookupStatus">Directory lookup not configured</span>
+                  <span class="webhook-status" id="directoryLookupStatus" role="status" aria-live="polite" aria-atomic="true">Directory lookup not configured</span>
                 </div>
               </div>
 
@@ -202,6 +205,7 @@
               </section>
 
               <div class="notification-groups" id="notificationGroups"></div>
+              <section class="notification-legacy" id="notificationLegacyGroups" aria-label="Unassigned contacts from previous routing" hidden></section>
             </section>
           </div>
         </section>

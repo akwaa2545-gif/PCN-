@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { scalarFields, childTables, splitRecord, hydratePcn, versionHex } = require('./sqlPcnHydration');
 const { migrationManifest } = require('./sqlDatabase');
+const { settingsVersion } = require('./mailRouting');
 
 const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'], ['signoff.qaTet', 'QA/TET'],
@@ -11,7 +12,7 @@ const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
 ].map(([key, label]) => ({ key, label, emails: '', recipients: [] })) };
 
 class SqlPcnRepository {
-  constructor(pool) { this.pool = pool; this.isSql = true; }
+  constructor(pool, options = {}) { this.pool = pool; this.isSql = true; this.notifications = options.notifications; }
 
   async transaction(work) {
     const tx = this.pool.transaction();
@@ -72,12 +73,16 @@ class SqlPcnRepository {
       const year = Number(String(record.createdAt || new Date().toISOString()).slice(0, 4));
       const id = record.id || await this.allocateCode(tx, year);
       assertCode(id);
-      const next = { ...record, id, internalReview: { ...(record.internalReview || {}), pcnCode: id } };
+      const proposed = { ...record, id, internalReview: { ...(record.internalReview || {}), pcnCode: id } };
+      const prepared = this.notifications ? await this.notifications.prepare(tx, null, proposed, actor) : { record: proposed };
+      const next = prepared.record;
       const parent = await this.writeParent(tx, next);
       await this.writeChildren(tx, parent.PcnId, next);
       if (record.id) await this.raiseCounter(tx, id);
       await this.audit(tx, id, 'created', actor, { status: record.status });
-      return this.readAggregate(tx, parent);
+      const saved = await this.readAggregate(tx, parent);
+      const notification = this.notifications ? await this.notifications.persisted(tx, saved, prepared.plan) : undefined;
+      return notification ? { ...saved, notification } : saved;
     });
   }
 
@@ -94,13 +99,17 @@ class SqlPcnRepository {
       this.checkVersion(parent, expectedVersion);
       const current = await this.readAggregate(tx, parent);
       const proposed = await updater(current);
-      const next = { ...proposed, id: code, ownerUserId: current.ownerUserId, createdAt: current.createdAt,
+      const preserved = { ...proposed, id: code, ownerUserId: current.ownerUserId, createdAt: current.createdAt,
         ...('masterDataVersionId' in current ? { masterDataVersionId: current.masterDataVersionId } : {}),
         internalReview: { ...(proposed.internalReview || {}), pcnCode: code } };
+      const prepared = this.notifications ? await this.notifications.prepare(tx, current, preserved, actor) : { record: preserved };
+      const next = prepared.record;
       const updated = await this.writeParent(tx, next, parent.PcnId);
       await this.writeChildren(tx, parent.PcnId, next);
       await this.audit(tx, code, 'updated', actor, { status: next.status });
-      return this.readAggregate(tx, updated);
+      const saved = await this.readAggregate(tx, updated);
+      const notification = this.notifications ? await this.notifications.persisted(tx, saved, prepared.plan) : undefined;
+      return notification ? { ...saved, notification } : saved;
     });
   }
 
@@ -174,8 +183,13 @@ class SqlPcnRepository {
     return result.recordset[0] ? JSON.parse(result.recordset[0].SettingsJson) : structuredClone(emptySettings);
   }
 
-  async saveNotificationSettings(settings, actor = 'system') {
+  async saveNotificationSettings(settings, actor = 'system', expectedVersion) {
     return this.transaction(async tx => {
+      if (expectedVersion !== undefined) {
+        const locked = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (UPDLOCK,HOLDLOCK) WHERE Id=1');
+        const current = locked.recordset[0] ? JSON.parse(locked.recordset[0].SettingsJson) : structuredClone(emptySettings);
+        if (settingsVersion(current) !== expectedVersion) throw new ApiError(409, 'Mail routing changed; reload before saving');
+      }
       await this.writeSettings(tx, settings);
       await this.audit(tx, 'notification-settings', 'updated', actor, { groups: settings.groups.length });
       return structuredClone(settings);

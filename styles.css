@@ -8199,3 +8199,46 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   animation: pcn-saving-spin 560ms linear infinite reverse !important;
   transform-origin: 50% 50%;
 }
+
+/* Each department owns three distinct mail lists in signing order. */
+#notificationGroups {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.notification-department {
+  min-width: 0;
+  border: 1px solid #d7ddea;
+  background: #fff;
+}
+.notification-department-header {
+  padding: 16px;
+  background: var(--mes-blue);
+  color: #fff;
+}
+.notification-department:nth-child(2n) .notification-department-header { background: #197a77; }
+.notification-department:nth-child(3n) .notification-department-header { background: #1f5f9a; }
+.notification-department-header h3 { margin: 0 0 4px; color: #fff; font-size: 17px; }
+.notification-department-header p { margin: 0; color: #fff; font-size: 12px; }
+.notification-department .notification-step { margin: 0; border: 0; border-top: 1px solid #d7ddea; box-shadow: none; }
+.notification-department .notification-step .notification-group-header { min-height: 58px; background: #eef1f6; color: #242b78; }
+.notification-department .notification-group-header h4 { margin: 0 0 3px; color: #242b78; font-size: 15px; }
+.notification-department .notification-group-header small { color: #475569; }
+.notification-department .notification-add-button { background: #fff; color: #242b78; border-color: #c8d1ea; }
+.notification-department .notification-add-button:hover { background: #e5ebfb; color: #242b78; }
+.notification-step .notification-add-button,
+.notification-step .notification-remove-button { min-height: 44px; }
+.notification-step .notification-person { border-radius: 8px; }
+.notification-step > .notification-group-warning { margin: 0 14px 12px; }
+.notification-step h4 { margin: 0; color: inherit; }
+.mail-routing-save-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mail-routing-save-actions [hidden] { display: none !important; }
+.notification-legacy { padding: 18px; background: #fff9e8; border-top: 1px solid #e8d595; }
+.notification-legacy-source { margin-top: 14px; padding: 14px; border: 1px solid #e8d595; background: #fff; }
+.notification-legacy-source p { overflow-wrap: anywhere; }
+.notification-legacy-source select { max-width: 100%; min-height: 44px; margin-right: 8px; margin-bottom: 8px; }
+.notification-legacy-source button { min-height: 44px; }
+@media (max-width: 900px) { #notificationGroups { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) {
+  .notification-step .notification-person { grid-template-columns: 26px minmax(0, 1fr); }
+  .notification-step .notification-remove-button { grid-column: 2; justify-self: start; }
+}

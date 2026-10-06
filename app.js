@@ -1381,6 +1381,16 @@
   }
 
   async function sendPendingWorkflowNotifications(record) {
+    if (record.notification) {
+      state.pendingWorkflowNotifications.clear();
+      const outcome = record.notification;
+      if (outcome.queued) return ` Workflow email queued for ${outcome.nextLabel || "the next step"}.`;
+      if (outcome.reason === "recipient_not_configured") return " Workflow email not queued: next-step recipients are not configured.";
+      if (outcome.reason === "mail_not_configured") return " Workflow email not queued: mail service is not configured.";
+      if (outcome.reason === "tapbu_requirement_not_selected") return " Workflow email not queued: select the required TaPBU approval choice.";
+      if (outcome.reason === "notification_configuration_invalid") return " Workflow email not queued: notification configuration needs review.";
+      return "";
+    }
     const pendingFields = [...state.pendingWorkflowNotifications];
     const pendingGroups = [...new Set(pendingFields.map((field) => parseApprovalField(field)?.group).filter(Boolean))];
     let queued = 0;
