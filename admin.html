@@ -212,24 +212,24 @@
         </section>
         <section class="admin-view" id="adminUsersView" aria-labelledby="adminUsersTitle">
           <section class="admin-panel users-panel">
-            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Create employee access from Active Directory, then assign a PCN role and department.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
+            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Create employee access, then assign a PCN role and department.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
             <p id="usersMessage" class="admin-message" role="status" aria-live="polite" aria-atomic="true">Open Users to load employee access.</p>
             <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
               <h3 id="employeeFormTitle">Create employee user</h3>
-              <p id="employeeProvisioningHelp">Select an employee from Active Directory. The employee code comes from SamAccountName. New employee users sign in with Windows and have no PCN password.</p>
-              <label for="employeeSearch">Search AD name or employee code</label>
+              <p id="employeeProvisioningHelp">Select an employee from the employee directory. Assign a PCN role and department to allow sign-in using their employee code.</p>
+              <label for="employeeSearch">Search employee name or code</label>
               <input id="employeeSearch" type="search" autocomplete="off" maxlength="100" aria-describedby="employeeProvisioningHelp employeeSearchStatus" aria-controls="employeeResults" disabled />
               <p id="employeeSearchStatus" class="admin-message" role="status" aria-live="polite" aria-atomic="true"></p>
-              <div id="employeeResults" class="employee-results" role="group" aria-label="AD employee search results" hidden></div>
+              <div id="employeeResults" class="employee-results" role="group" aria-label="Employee search results" hidden></div>
               <div class="employee-selected" id="employeeSelected" hidden>
-                <label for="employeeCode">Selected employee code (SamAccountName)</label><input id="employeeCode" type="text" readonly />
+                <label for="employeeCode">Selected employee code</label><input id="employeeCode" type="text" readonly />
                 <p id="employeeProfile"></p>
               </div>
               <div id="employeeAssignments" class="employee-assignments">
                 <label for="employeeRole">PCN role<select id="employeeRole" required><option value="">Select role</option><option value="admin">Administrator</option><option value="reviewer">Reviewer</option><option value="supplier">Requester</option><option value="gsc">GSC</option><option value="productionengineering">Production engineering</option><option value="qa">QA</option><option value="tapbu">TaPBU</option></select></label>
                 <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
               </div>
-              <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. Its PCN password will stop working and existing sessions will be signed out. Windows sign-in requires server SSO to be enabled.</p>
+              <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. The employee code becomes their sign-in code and existing sessions will be signed out.</p>
               <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Clear selection</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
             </form>
             <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee code</th><th scope="col">Employee</th><th scope="col">Role</th><th scope="col">PCN department</th><th scope="col">Status</th><th scope="col">Sign-in</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>

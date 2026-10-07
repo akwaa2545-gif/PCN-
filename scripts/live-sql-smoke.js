@@ -27,7 +27,7 @@ async function main() {
     // Every repository transaction shares this outer test transaction. Only the outer layer commits/rolls back.
     const scoped = {request:()=>tx.request(),transaction:()=>({begin:async()=>{},commit:async()=>{},rollback:async()=>{},request:()=>tx.request()})};
     try {
-      const auth = new AuthService(new SqlAuthRepository(scoped));
+      const auth = new AuthService(new SqlAuthRepository(scoped), { authMode: 'password' });
       const login = await auth.login({username:'itadmin',password:process.env.PCN_SMOKE_BOOTSTRAP_PASSWORD});
       assert(login.user.mustChangePassword);
       const changedPassword = crypto.randomBytes(24).toString('hex');

@@ -19,7 +19,7 @@ function setup(options = {}) {
     async recordLoginFailure() {},
     async updatePassword(id, hash, stamp) { state.users = state.users.map(u => u.id === id ? { ...u, passwordHash: hash, securityStamp: stamp, mustChangePassword: false } : u); state.sessions = []; }
   };
-  return { state, service: new AuthService(repo, { passwordHasher: async p => `hashed:${p}`, passwordVerifier: async (h, p) => h === `hashed:${p}`, ...options }) };
+  return { state, service: new AuthService(repo, { authMode: 'password', passwordHasher: async p => `hashed:${p}`, passwordVerifier: async (h, p) => h === `hashed:${p}`, ...options }) };
 }
 
 test('bootstrap temporary password requires change and hashed session persistence', async () => {

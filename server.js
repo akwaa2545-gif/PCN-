@@ -12,7 +12,7 @@ const { NotificationWorker } = require('./src/notificationWorker');
 const { SqlDocuments } = require('./src/sqlDocuments');
 const { createApp } = require('./src/httpServer');
 const { readAuthConfiguration } = require('./src/authConfiguration');
-const { WindowsDirectoryService } = require('./src/windowsDirectoryService');
+const { SqlEmployeeDirectory } = require('./src/sqlEmployeeDirectory');
 
 function readServerConfig(env = process.env) {
   const port = Number(env.PORT || 3000);
@@ -29,8 +29,8 @@ async function main() {
   await loadRuntimeEnv();
   const {port,host,trustProxy,publicOrigin} = readServerConfig();
   const authConfiguration = readAuthConfiguration(process.env,{host,trustProxy});
-  const directoryService = authConfiguration.directoryDomain ? new WindowsDirectoryService({domain:authConfiguration.directoryDomain}) : undefined;
   const pool = await connectSql();
+  const employeeDirectory = new SqlEmployeeDirectory(pool);
   let timer;
   let server;
   try {
@@ -39,8 +39,8 @@ async function main() {
   const repository = new SqlPcnRepository(pool,{notifications:atomicNotifications});
   await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
-  const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,windowsDomain:authConfiguration.windowsAuth?.domain,directoryService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,windowsAuth:authConfiguration.windowsAuth,directoryService,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
+  const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;

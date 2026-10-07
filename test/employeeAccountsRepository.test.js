@@ -4,178 +4,146 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { SqlAuthRepository } = require('../src/sqlAuthRepository');
 const { migrationManifest } = require('../src/sqlDatabase');
-
-const identity = Object.freeze({ employeeCode: '001Employee', department: 'qaTet',
-  adObjectGuid: 'b1931258-a194-4a50-8fb8-7f8153215ab2', adSid: 'S-1-5-21-100-200-300-400',
-  displayName: 'Employee Name', email: 'employee@example.test', roles: ['qa'] });
+const identity = Object.freeze({ employeeCode: '001Employe', department: 'qaTet', displayName: 'Employee Name', email: null, roles: ['qa'] });
 
 function fixture(results = []) {
   const state = { calls: [], committed: false, rolledBack: false, began: false };
   function request() {
     let inputs = {};
-    return { input(name, type, value) { inputs = { ...inputs, [name]: value }; return this; },
+    return {
+      input(name, type, value) { inputs = { ...inputs, [name]: value }; return this; },
       async query(query) {
-        const offset = state.calls.length;
+        const result = results[state.calls.length];
         state.calls = [...state.calls, { query, inputs }];
-        const result = results[offset];
         if (result instanceof Error) throw result;
         return result || { rowsAffected: [1], recordset: [] };
-      } };
+      }
+    };
   }
   const pool = { request, transaction: () => ({ request, async begin() { state.began = true; },
     async commit() { state.committed = true; }, async rollback() { state.rolledBack = true; } }) };
   return { repo: new SqlAuthRepository(pool), state };
 }
 
-function hydratedResult() {
+function hydrated() {
   return { recordsets: [[{ Id: 'account-id', Username: identity.employeeCode, EmployeeCode: identity.employeeCode,
-    DepartmentKey: identity.department, AdObjectGuid: identity.adObjectGuid, AdSid: identity.adSid,
-    DisplayName: identity.displayName, Email: identity.email, IsActive: true, MustChangePassword: false,
+    NormalizedEmployeeCode: identity.employeeCode.toLowerCase(), DepartmentKey: identity.department,
+    DisplayName: identity.displayName, Email: null, IdentityProvider: 'employee-code', IsActive: true,
     PasswordHash: null, SecurityStamp: 'stamp' }], [{ Name: 'qa' }]] };
 }
 
-test('employee account creation keeps SamAccountName as a string and atomically creates passwordless grants', async () => {
-  const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [1] }, hydratedResult()]);
+test('employee creation preserves leading zeros and transactionally stores explicit provider and assigned role', async () => {
+  const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [1] }, hydrated()]);
   const account = await repo.createEmployeeUser({ ...identity, roles: ['qa', 'qa'] });
   const insert = state.calls[0];
-  assert.equal(insert.inputs.employeeCode, '001Employee');
-  assert.equal(insert.inputs.normalizedEmployeeCode, '001employee');
-  assert.equal(insert.inputs.username, '001Employee');
-  assert.equal(insert.inputs.normalizedUsername, '001employee');
-  assert.equal(insert.inputs.adObjectGuid, identity.adObjectGuid);
-  assert.equal(insert.inputs.adSid, identity.adSid);
+  assert.equal(insert.inputs.employeeCode, '001Employe');
+  assert.equal(insert.inputs.normalizedEmployeeCode, '001employe');
+  assert.equal(insert.inputs.username, '001Employe');
   assert.equal(insert.inputs.department, 'qaTet');
-  assert.match(insert.query, /NULL,1,0/);
+  assert.match(insert.query, /IdentityProvider/);
+  assert.match(insert.query, /'employee-code'/);
+  assert.equal(insert.inputs.adSid, undefined);
+  assert.equal(insert.inputs.adObjectGuid, undefined);
   assert.equal(insert.inputs.hash, undefined);
-  assert.equal(state.calls.length, 3, 'duplicate role grants must be deduplicated');
+  assert.equal(state.calls.length, 3);
   assert.equal(state.committed, true);
-  assert.equal(account.employeeCode, identity.employeeCode);
-  assert.equal(account.department, identity.department);
+  assert.equal(account.identityProvider, 'employee-code');
   assert.equal(account.passwordHash, null);
-  assert.deepEqual(account.roles, ['qa']);
 });
 
-test('employee account identity collisions are safe conflicts and never replace a legacy user', async () => {
+test('collisions and invalid persisted grants roll back safely', async () => {
   for (const number of [2601, 2627]) {
-    const duplicate = Object.assign(new Error('SQL private index and domain details'), { number });
-    const { repo, state } = fixture([duplicate]);
-    await assert.rejects(repo.createEmployeeUser(identity), error => error.statusCode === 409 && !/SQL private/.test(error.message));
+    const { repo, state } = fixture([Object.assign(new Error('private SQL detail'), { number })]);
+    await assert.rejects(repo.createEmployeeUser(identity), error => error.statusCode === 409 && !error.message.includes('private'));
     assert.equal(state.rolledBack, true);
     assert.equal(state.committed, false);
-    assert.equal(state.calls.some(call => /UPDATE|DELETE/.test(call.query)), false);
   }
+  const failed = fixture([{ rowsAffected: [1] }, { rowsAffected: [0] }]);
+  await assert.rejects(failed.repo.createEmployeeUser(identity), { statusCode: 400 });
+  assert.equal(failed.state.rolledBack, true);
 });
 
-test('invalid role persistence rolls employee insertion back instead of leaving an account without grants', async () => {
-  const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [0] }]);
-  await assert.rejects(repo.createEmployeeUser(identity), { statusCode: 400 });
-  assert.equal(state.rolledBack, true);
-  assert.equal(state.committed, false);
-});
-
-test('employee account boundaries reject malformed identifiers before beginning SQL writes', async () => {
-  for (const invalid of [{ employeeCode: 123 }, { employeeCode: '' }, { employeeCode: 'user\\spoof' },
-    { adObjectGuid: "' OR 1=1 --" }, { adSid: 'arbitrary' }, { roles: ['superadmin'] }, { roles: [] },
-    { email: 'invalid' }, { department: '' }, { displayName: 42 }, { displayName: 'A'.repeat(201) },
-    { adSid: 'S-1-5-' + '1'.repeat(185) }, { email: 'a'.repeat(310) + '@example.test' }]) {
+test('invalid source profile or assignments are rejected before SQL writes', async () => {
+  const invalidProfiles = [{ employeeCode: 123 }, { employeeCode: '' }, { employeeCode: 'a'.repeat(11) },
+    { employeeCode: 'user\\spoof' }, { roles: [] }, { roles: ['superadmin'] }, { email: 'invalid' },
+    { department: 'unknown' }, { displayName: 42 }, { displayName: 'A'.repeat(201) }];
+  for (const invalid of invalidProfiles) {
     const { repo, state } = fixture();
     await assert.rejects(repo.createEmployeeUser({ ...identity, ...invalid }), { statusCode: 400 });
     assert.equal(state.began, false);
-    assert.equal(state.calls.length, 0);
   }
 });
 
-test('AD sign-in lookup uses immutable GUID and parameterized SQL rather than employee code alone', async () => {
-  const { repo, state } = fixture([hydratedResult()]);
-  const account = await repo.getUserByAdObjectGuid(identity.adObjectGuid.toUpperCase());
-  assert.equal(state.calls[0].inputs.adObjectGuid, identity.adObjectGuid);
-  assert.match(state.calls[0].query, /u\.AdObjectGuid=@adObjectGuid/);
-  assert.equal(state.calls[0].query.includes(identity.adObjectGuid), false);
-  assert.equal(account.directoryId, identity.adObjectGuid);
-  await assert.rejects(repo.getUserByAdObjectGuid('invalid'), { statusCode: 400 });
-  const missing = fixture([{ recordsets: [[], []] }]);
-  assert.equal(await missing.repo.getUserByAdObjectGuid(identity.adObjectGuid), null);
+test('employee code lookup uses normalized parameter and provider with no SQL interpolation', async () => {
+  const { repo, state } = fixture([hydrated()]);
+  const user = await repo.getUserByEmployeeCode('001EMPLOYE');
+  assert.equal(state.calls[0].inputs.employeeCode, '001employe');
+  assert.match(state.calls[0].query, /u\.NormalizedEmployeeCode=@employeeCode/);
+  assert.match(state.calls[0].query, /u\.IdentityProvider='employee-code'/);
+  assert.equal(state.calls[0].query.includes('001employe'), false);
+  assert.equal(user.employeeCode, identity.employeeCode);
+  await assert.rejects(repo.getUserByEmployeeCode("' OR 1=1 --"), { statusCode: 400 });
 });
 
-test('employee list exposes assigned department and display details without credentials or AD security identifiers', async () => {
-  const { repo, state } = fixture([{ recordset: [{ Id: 'one', Username: identity.employeeCode,
-    EmployeeCode: identity.employeeCode, DepartmentKey: identity.department, DisplayName: identity.displayName,
-    AdObjectGuid: identity.adObjectGuid, AdSid: identity.adSid,
-    Email: identity.email, IsActive: true, MustChangePassword: false, PasswordHash: null, Role: 'qa' },
-    { Id: 'old', Username: 'legacy', EmployeeCode: null, DepartmentKey: null, DisplayName: null, Role: 'admin' }] }]);
-  const users = await repo.listUsers();
-  assert.equal(users[0].employeeCode, identity.employeeCode);
-  assert.equal(users[0].department, identity.department);
-  assert.equal(users[0].displayName, identity.displayName);
-  assert.equal(users[0].directoryId, identity.adObjectGuid);
-  assert.equal(users[0].identityProvider, 'windows');
-  assert.equal(users[0].passwordHash, undefined);
-  assert.equal(users[0].adSid, undefined);
-  assert.equal(users[1].employeeCode, null, 'legacy usernames must not be mapped automatically');
-  assert.equal(users[1].directoryId, null);
-  assert.equal(users[1].identityProvider, 'password');
-  assert.match(state.calls[0].query, /u\.EmployeeCode/);
-});
-
-test('employee identity migration is additive, SQL2014 compatible and preserves legacy accounts', () => {
-  assert.equal(migrationManifest.includes('002_employee_identity.sql'), true);
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'sql', 'migrations', '002_employee_identity.sql'), 'utf8');
-  for (const column of ['EmployeeCode', 'NormalizedEmployeeCode', 'DepartmentKey', 'AdObjectGuid', 'AdSid', 'DisplayName']) {
-    assert.match(migration, new RegExp(`ADD ${column} `));
-  }
-  assert.match(migration, /ALTER COLUMN PasswordHash nvarchar\(512\) NULL/i);
-  for (const identityColumn of ['NormalizedEmployeeCode', 'AdObjectGuid', 'AdSid']) {
-    assert.match(migration, new RegExp(`CREATE UNIQUE INDEX [^\\n]+ON pcn.Users\\(${identityColumn}\\) WHERE ${identityColumn} IS NOT NULL`, 'i'));
-  }
-  assert.doesNotMatch(migration, /\b(?:UPDATE|DELETE|DROP)\b/i);
-  assert.doesNotMatch(migration, /\b(?:ISJSON|OPENJSON|JSON_VALUE)\s*\(/i);
-});
-
-test('explicit employee linking retains existing identity, roles and credentials while revoking previous sessions', async () => {
-  const { repo, state } = fixture([{ recordset: [{ Id: 'old-account', AdObjectGuid: null }] }, { rowsAffected: [1] },
-    { rowsAffected: [2, 1] }, hydratedResult()]);
-  const profile = { samAccountName: identity.employeeCode, directoryId: identity.adObjectGuid,
-    adSid: identity.adSid, displayName: identity.displayName, email: identity.email };
-  const account = await repo.linkEmployeeIdentity('old-account', profile);
+test('explicit linking preserves user ownership, assigned department and roles while removing credentials and old AD identity', async () => {
+  const { repo, state } = fixture([{ recordset: [{ Id: 'old', IdentityProvider: 'retired-windows', EmployeeCode: 'old-sam', IsActive: true }] },
+    { rowsAffected: [1] }, { rowsAffected: [2, 1] }, hydrated()]);
+  const user = await repo.linkEmployeeIdentity('old', identity);
   const update = state.calls[1];
-  assert.equal(update.inputs.id, 'old-account');
-  assert.equal(update.inputs.department, null, 'omitted department must retain the assigned value');
-  assert.match(update.query, /DepartmentKey=COALESCE\(@department,DepartmentKey\)/);
+  assert.equal(update.inputs.employeeCode, '001Employe');
+  assert.match(update.query, /IdentityProvider='employee-code'/);
+  assert.match(update.query, /AdObjectGuid=NULL,AdSid=NULL/);
+  assert.match(update.query, /PasswordHash=NULL/);
   assert.match(update.query, /SecurityStamp=@stamp/);
-  assert.match(update.query, /MustChangePassword=0/);
-  assert.doesNotMatch(update.query, /PasswordHash|UserRoles|PcnRequests/);
+  assert.doesNotMatch(update.query, /DepartmentKey=|UserRoles|PcnRequests/);
   assert.match(state.calls[2].query, /UPDATE pcn.Sessions SET RevokedAt/);
   assert.match(state.calls[2].query, /UPDATE pcn.AccountTokens SET UsedAt/);
   assert.equal(state.committed, true);
-  assert.equal(account.employeeCode, identity.employeeCode);
+  assert.equal(user.identityProvider, 'employee-code');
 });
 
-test('explicit linking rejects missing, conflicting and already-linked accounts without partial changes', async () => {
-  const absent = fixture([{ recordset: [] }]);
-  await assert.rejects(absent.repo.linkEmployeeIdentity('missing', identity), { statusCode: 404 });
-  assert.equal(absent.state.rolledBack, true);
-  assert.equal(absent.state.calls.length, 1);
-  const linked = fixture([{ recordset: [{ Id: 'old', AdObjectGuid: 'a1931258-a194-4a50-8fb8-7f8153215ab2' }] }]);
-  await assert.rejects(linked.repo.linkEmployeeIdentity('old', identity), { statusCode: 409 });
-  assert.equal(linked.state.calls.length, 1);
-  const duplicate = Object.assign(new Error('private SQL identity details'), { number: 2601 });
-  const collision = fixture([{ recordset: [{ Id: 'old', AdObjectGuid: null }] }, duplicate]);
-  await assert.rejects(collision.repo.linkEmployeeIdentity('old', identity), error => error.statusCode === 409 && !error.message.includes('private'));
-  assert.equal(collision.state.rolledBack, true);
-  assert.equal(collision.state.committed, false);
-  assert.equal(collision.state.calls.length, 2);
-});
-
-test('employee identity validation preserves leading zeros and rejects codes exceeding AD SamAccountName length', async () => {
-  const { validateEmployeeIdentity, employeeDepartments } = require('../src/employeeAccounts');
-  assert.doesNotThrow(() => validateEmployeeIdentity({ ...identity, employeeCode: '00123', department: 'it' }));
-  assert.doesNotThrow(() => validateEmployeeIdentity({ ...identity, department: 'other' }));
-  for (const invalid of [null, [], { ...identity, department: 'unknown' }, { ...identity, adSid: null }]) {
-    assert.throws(() => validateEmployeeIdentity(invalid), { statusCode: 400 });
+test('linking rejects conflicting employee links and missing or disabled accounts with no partial mutation', async () => {
+  const cases = [[[], 404], [[{ IdentityProvider: 'employee-code', EmployeeCode: 'other', IsActive: true }], 409],
+    [[{ IdentityProvider: 'password', IsActive: false }], 400]];
+  for (const [recordset, status] of cases) {
+    const { repo, state } = fixture([{ recordset }]);
+    await assert.rejects(repo.linkEmployeeIdentity('old', identity), { statusCode: status });
+    assert.equal(state.rolledBack, true);
+    assert.equal(state.calls.length, 1);
   }
-  assert.equal(employeeDepartments.length, 7);
-  const { repo, state } = fixture();
-  await assert.rejects(repo.createEmployeeUser({ ...identity, employeeCode: 'a'.repeat(21) }), { statusCode: 400 });
-  await assert.rejects(repo.linkEmployeeIdentity('existing', { ...identity, department: 'unknown' }), { statusCode: 400 });
-  assert.equal(state.began, false);
+  const collision = fixture([{ recordset: [{ IdentityProvider: 'password', IsActive: true }] },
+    Object.assign(new Error('private constraint'), { number: 2601 })]);
+  await assert.rejects(collision.repo.linkEmployeeIdentity('old', identity), error => error.statusCode === 409 && !error.message.includes('private'));
+  assert.equal(collision.state.committed, false);
+});
+
+test('user lists expose explicit provider but no AD identifiers, credentials or session stamps', async () => {
+  const { repo } = fixture([{ recordset: [{ Id: 'one', Username: '001234', EmployeeCode: '001234', IdentityProvider: 'employee-code',
+    DepartmentKey: 'qaTet', DisplayName: 'Name', AdObjectGuid: 'private', AdSid: 'private', PasswordHash: 'private', Role: 'qa' },
+    { Id: 'old', Username: 'legacy', EmployeeCode: null, IdentityProvider: 'password', Role: 'admin' }] }]);
+  const users = await repo.listUsers();
+  assert.equal(users[0].identityProvider, 'employee-code');
+  for (const name of ['directoryId', 'adSid', 'passwordHash', 'securityStamp']) assert.equal(users[0][name], undefined);
+  assert.equal(users[1].employeeCode, null);
+  assert.equal(users[1].identityProvider, 'password');
+});
+
+test('migration003 explicitly retires old Windows mappings and revokes sessions without assigning source codes', () => {
+  assert.equal(migrationManifest.includes('003_employee_code_auth.sql'), true);
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'sql', 'migrations', '003_employee_code_auth.sql'), 'utf8');
+  assert.match(migration, /ADD IdentityProvider/);
+  assert.match(migration, /retired-windows/);
+  assert.match(migration, /NEWID\(\)/);
+  assert.match(migration, /UPDATE pcn.Sessions/);
+  assert.match(migration, /UPDATE pcn.AccountTokens/);
+  assert.doesNotMatch(migration, /SET[^;]*IdentityProvider='employee-code'/i);
+  assert.doesNotMatch(migration, /\b(?:ISJSON|OPENJSON|JSON_VALUE)\s*\(/i);
+});
+
+test('migration003 defers statements using newly added provider column until SQL2014 compiles them after ALTER', () => {
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'sql', 'migrations', '003_employee_code_auth.sql'), 'utf8');
+  const statements = ['UPDATE pcn.Users', 'UPDATE pcn.Sessions', 'UPDATE pcn.AccountTokens',
+    'ALTER TABLE pcn.Users ADD CONSTRAINT CK_Users_IdentityProvider',
+    'ALTER TABLE pcn.Users ADD CONSTRAINT CK_Users_EmployeeCodeAuthentication'];
+  for (const statement of statements) assert.match(migration, new RegExp("EXEC\\(N'" + statement));
 });

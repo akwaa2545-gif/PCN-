@@ -4,11 +4,11 @@
   document.addEventListener('DOMContentLoaded', init);
 
   function directoryBody(employee) {
-    if (!employee || typeof employee.directoryId !== 'string' || !employee.directoryId.trim()
-      || typeof employee.employeeCode !== 'string' || !employee.employeeCode.trim()) {
-      throw new Error('Select an employee from the AD search results.');
+    if (!employee || typeof employee.employeeCode !== 'string' || !/^[A-Za-z0-9._-]{1,10}$/.test(employee.employeeCode)
+      || typeof employee.displayName !== 'string' || !employee.displayName.trim()) {
+      throw new Error('Select an employee from the employee search results.');
     }
-    return { directoryId: employee.directoryId };
+    return { employeeCode: employee.employeeCode };
   }
   function provisioningBody(employee, role, department) {
     const identity = directoryBody(employee);
@@ -68,7 +68,7 @@
       state = { ...state, selected: { ...employee } };
       els.employeeSearch.value = employee.displayName || employee.employeeCode;
       els.employeeCode.value = employee.employeeCode;
-      els.employeeProfile.textContent = [employee.displayName, employee.email, employee.adDepartment && `AD department: ${employee.adDepartment}`].filter(Boolean).join(' · ');
+      els.employeeProfile.textContent = [employee.displayName, employee.jobTitle, employee.sourceDepartment && `Organization: ${employee.sourceDepartment}`].filter(Boolean).join(' · ');
       els.employeeSelected.hidden = false;
       els.employeeSearchStatus.textContent = `Selected ${employee.employeeCode}.`;
       hideResults();
@@ -78,38 +78,34 @@
     async function searchEmployees(query) {
       const request = new AbortController();
       controller = request;
-      els.employeeSearchStatus.textContent = 'Searching Active Directory...';
+      els.employeeSearchStatus.textContent = 'Searching employee directory...';
       try {
         const results = await window.PCN_SESSION.fetch(`/api/admin/employees?query=${encodeURIComponent(query)}`, { signal: request.signal });
         if (controller !== request || request.signal.aborted || !state.configured || state.busy
           || els.employeeSearch.value.trim() !== query || window.location.hash !== '#users') return;
-        if (!Array.isArray(results)) throw new Error('The AD search returned an invalid response.');
+        if (!Array.isArray(results)) throw new Error('The employee search returned an invalid response.');
         hideResults();
         results.forEach((employee) => {
           const button = document.createElement('button');
           button.type = 'button';
           button.className = 'employee-result';
-          button.textContent = [employee.displayName, employee.employeeCode, employee.email, employee.adDepartment].filter(Boolean).join(' · ');
+          button.textContent = [employee.displayName, employee.employeeCode, employee.jobTitle, employee.sourceDepartment].filter(Boolean).join(' · ');
           button.addEventListener('click', () => selectEmployee(employee));
           els.employeeResults.appendChild(button);
         });
         els.employeeResults.hidden = results.length === 0;
-        els.employeeSearchStatus.textContent = results.length ? `${results.length} AD employees found. Select a result.` : 'No AD employee found. Try another name or employee code.';
+        els.employeeSearchStatus.textContent = results.length ? `${results.length} employees found. Select a result.` : 'No employee found. Try another name or employee code.';
       } catch (error) {
         if (controller === request && !request.signal.aborted) {
           hideResults();
-          els.employeeSearchStatus.textContent = error.message || 'AD search is unavailable. Please try again.';
+          els.employeeSearchStatus.textContent = error.message || 'Employee search is unavailable. Please try again.';
         }
       } finally { if (controller === request) controller = null; }
     }
     function beginLink(user) {
-      if (state.mode !== 'windows' && (user.roles || []).includes('admin')) {
-        message('To protect administrator access, create a separate Windows administrator, enable Windows SSO, then link existing administrators.');
-        return;
-      }
       clearSelection(false);
       state = { ...state, linkUser: user };
-      els.employeeFormTitle.textContent = `Link AD employee to ${user.displayName || user.username}`;
+      els.employeeFormTitle.textContent = `Link employee to ${user.displayName || user.username}`;
       els.employeeAssignments.hidden = true;
       els.employeeLinkHelp.hidden = false;
       els.employeeRole.required = false;
@@ -125,16 +121,17 @@
       els.adminUsersRows.replaceChildren();
       state.users.forEach((user) => {
         const row = document.createElement('tr');
+        const signIn = user.identityProvider === 'employee-code' ? 'Employee code'
+          : user.identityProvider === 'retired-windows' ? 'Employee link required' : 'Password maintenance';
         const values = [user.employeeCode || user.username, [user.displayName, user.email].filter(Boolean).join(' · '),
           (user.roles || []).map((role) => optionLabel(els.employeeRole, role)).join(', '),
-          optionLabel(els.employeeDepartment, user.department), user.isActive ? 'Active' : 'Inactive', user.directoryId ? 'Windows' : 'Local'];
+          optionLabel(els.employeeDepartment, user.department), user.isActive ? 'Active' : 'Inactive', signIn];
         values.forEach((value) => { const cell = document.createElement('td'); cell.textContent = value || '—'; row.appendChild(cell); });
-        if (!user.directoryId) {
+        if (user.identityProvider !== 'employee-code') {
           const link = document.createElement('button');
-          link.type = 'button'; link.className = 'ghost-button'; link.textContent = 'Link AD employee';
-          link.setAttribute('aria-label', `Link AD employee to ${user.username}`);
-          link.disabled = !state.configured || state.busy || (state.mode !== 'windows' && (user.roles || []).includes('admin'));
-          if (state.mode !== 'windows' && (user.roles || []).includes('admin')) link.title = 'Enable Windows SSO before linking an existing administrator.';
+          link.type = 'button'; link.className = 'ghost-button'; link.textContent = 'Link employee';
+          link.setAttribute('aria-label', `Link employee to ${user.displayName || user.username}`);
+          link.disabled = !state.configured || state.busy;
           link.addEventListener('click', () => beginLink(user));
           row.lastElementChild.appendChild(link);
         }
@@ -144,12 +141,12 @@
     async function loadUsers() {
       if (!state.authorized || state.busy || window.location.hash !== '#users') return;
       state = { ...state, busy: true };
-      updateControls(); message('Loading users and AD provisioning status...');
+      updateControls(); message('Loading users and employee directory status...');
       try {
         const [config, users] = await Promise.all([window.PCN_SESSION.fetch('/api/auth/config'), window.PCN_SESSION.fetch('/api/admin/users')]);
         if (!Array.isArray(users)) throw new Error('The user list returned an invalid response.');
         state = { ...state, configured: config.employeeProvisioningConfigured === true, mode: config.mode, users, loaded: true };
-        message(state.configured ? `${users.length} assigned users. Select an AD employee to create or link access.${state.mode !== 'windows' ? ' Before linking existing administrators, create a separate Windows administrator and enable Windows SSO.' : ''}` : 'AD employee provisioning is not configured on the server. Existing users are shown below.');
+        message(state.configured ? `${users.length} assigned users. Select an employee to create or link access.` : 'The employee directory is not configured on the server. Existing users are shown below.');
       } catch (error) { message(error.message); }
       finally { state = { ...state, busy: false }; updateControls(); renderUsers(); }
     }
@@ -159,12 +156,12 @@
       els.employeeSelected.hidden = true; els.employeeCode.value = ''; els.employeeProfile.textContent = '';
       updateControls();
       const query = els.employeeSearch.value.trim();
-      els.employeeSearchStatus.textContent = query.length < 2 ? 'Type at least two characters to search AD.' : '';
+      els.employeeSearchStatus.textContent = query.length < 2 ? 'Type at least two characters to search employees.' : '';
       if (state.configured && !state.busy && query.length >= 2) timer = setTimeout(() => searchEmployees(query), 280);
     });
     els.employeeSearch.addEventListener('keydown', (event) => {
       if (event.key === 'ArrowDown' && !els.employeeResults.hidden) { event.preventDefault(); els.employeeResults.firstElementChild?.focus(); }
-      if (event.key === 'Escape') { cancelLookup(); hideResults(); els.employeeSearchStatus.textContent = 'AD search results dismissed.'; }
+      if (event.key === 'Escape') { cancelLookup(); hideResults(); els.employeeSearchStatus.textContent = 'Employee search results dismissed.'; }
     });
     els.employeeResults.addEventListener('keydown', (event) => {
       const buttons = [...els.employeeResults.querySelectorAll('button')];
@@ -180,15 +177,14 @@
       event.preventDefault();
       if (state.busy) return;
       try {
-        if (!state.configured) throw new Error('AD employee provisioning is not configured on the server.');
+        if (!state.configured) throw new Error('The employee directory is not configured on the server.');
         const linkedUser = state.linkUser;
-        if (linkedUser && state.mode !== 'windows' && (linkedUser.roles || []).includes('admin')) throw new Error('Enable Windows SSO before linking an existing administrator.');
         const body = linkedUser ? directoryBody(state.selected) : provisioningBody(state.selected, els.employeeRole.value, els.employeeDepartment.value);
-        if (linkedUser && !window.confirm(`Link ${linkedUser.username} to ${state.selected.employeeCode}? This account's PCN password will stop working and existing sessions will be signed out. Its permissions and records will be preserved.`)) return;
+        if (linkedUser && !window.confirm(`Link ${linkedUser.username} to ${state.selected.employeeCode}? The employee code becomes this account's sign-in code and existing sessions will be signed out. Its permissions and records will be preserved.`)) return;
         state = { ...state, busy: true }; cancelLookup(); updateControls(); renderUsers(); message('Saving employee access...');
-        const user = await window.PCN_SESSION.fetch(linkedUser ? `/api/admin/users/${encodeURIComponent(linkedUser.id)}/directory` : '/api/admin/users', { method: 'POST', body: JSON.stringify(body) });
+        const user = await window.PCN_SESSION.fetch(linkedUser ? `/api/admin/users/${encodeURIComponent(linkedUser.id)}/employee` : '/api/admin/users', { method: 'POST', body: JSON.stringify(body) });
         state = { ...state, users: linkedUser ? state.users.map((existing) => existing.id === linkedUser.id ? user : existing) : [...state.users, user], busy: false };
-        clearSelection(); renderUsers(); message(linkedUser ? 'AD employee linked. Existing permissions and records were preserved.' : 'Employee user created. Windows sign-in is available when server SSO is enabled.');
+        clearSelection(); renderUsers(); message(linkedUser ? 'Employee linked. Existing permissions and records were preserved.' : 'Employee user created. Sign in using the selected employee code.');
       } catch (error) { state = { ...state, busy: false }; updateControls(); renderUsers(); message(error.message); }
     });
     window.addEventListener('hashchange', () => {

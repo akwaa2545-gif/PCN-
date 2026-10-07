@@ -14,10 +14,9 @@ const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');
   if (!options.authService) throw new Error('A SQL authentication service is required');
-  const authMode = options.authMode || options.authService.authMode || 'password';
-  if (!['password','windows'].includes(authMode)) throw new Error('Invalid authentication mode');
-  const context = { ...options, authMode, directoryService: options.directoryService || options.authService.directoryService,
-    windowsAuth: authMode === 'windows' ? {...options.windowsAuth,mode:authMode} : null,
+  const authMode = options.authMode || options.authService.authMode || 'employee-code';
+  if (!['password','employee-code'].includes(authMode)) throw new Error('Invalid authentication mode');
+  const context = { ...options, authMode, employeeDirectory: options.employeeDirectory || options.authService.employeeDirectory,
     trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
   const rateLimiter = options.rateLimiter || new ApiRateLimiter();

@@ -16,7 +16,7 @@ $script:RuntimeFiles = @(
     'app.js', 'admin.js', 'login.js', 'session-client.js', 'master-data.js',
     'auth.css', 'styles.css', 'tokin-header-logo.png',
     'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
-    'scripts/read-sql-credential.ps1', 'scripts/ad-directory.ps1', 'admin-users.js'
+    'scripts/read-sql-credential.ps1', 'admin-users.js'
 )
 
 function Assert-ManagedPath([string]$Path) {

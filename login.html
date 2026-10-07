@@ -15,9 +15,12 @@
     <p id="authDescription">Sign in to create and review product change notifications.</p>
     <p id="authMessage" role="status" aria-live="polite"></p>
     <button class="ghost-button" id="authRetryButton" type="button" hidden>Retry sign-in setup</button>
-    <form id="windowsLoginForm" hidden>
-      <p>Use your Windows account to sign in. No separate PCN password is required.</p>
-      <button class="primary-button" type="submit">Continue with Windows</button>
+    <form id="employeeLoginForm" hidden>
+      <label for="employeeCode">Employee code</label>
+      <input id="employeeCode" name="employeeCode" type="text" autocomplete="username" maxlength="10" pattern="[A-Za-z0-9._\-]{1,10}" required aria-describedby="employeeCodeHelp" />
+      <p id="employeeCodeHelp">Use the employee code assigned to your PCN access.</p>
+      <label class="auth-checkbox"><input id="employeeRemember" type="checkbox" /> Remember me on this device</label>
+      <button class="primary-button" type="submit">Sign in</button>
     </form>
     <form id="loginForm" hidden>
       <label for="username">Username</label>

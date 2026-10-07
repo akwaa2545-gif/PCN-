@@ -1,13 +1,8 @@
-﻿# SQL Server API inventory and checklist
+# SQL Server API inventory and checklist
 
-Updated: 2026-10-07. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. Main `9f23256` is deployed in signed release pcn-test-8-1. [Actions 37559651975](https://github.com/akwaa2545-gif/PCN-/actions/runs/37559651975) passed 243 tests, 59 isolated browser checks and the dependency audit gate. Twelve real Windows-client SSPI/TLS checks passed before and after the release restart; actual browser GUI sign-in and email delivery remain unverified.
+Updated: 2026-10-07. The replacement runtime uses employee-code authentication with read-only `KEY_Code_DB.dbo.tblEmployee` lookup. Migration 003, a separate Administrator / IT account for verified code `2205529`, and IIS cutover are pending live execution. See [employee-code authentication](employee-code-authentication.md) and the [Windows deployment runbook](windows-test-deployment.md) for current evidence.
 
-Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups were initialized empty. Real SQL smoke checks and isolated browser E2E passed. Current deployment evidence is recorded in [the Windows runbook](windows-test-deployment.md). Existing Firebase data import remains pending.
-
-Department/action routing-v2 is on main and deployed in pcn-test-8-1. See [routing design](mail-routing-design.md). It adds no DDL; live routing saves and notification delivery were not exercised by the Windows sign-in checks.
-
-Migration 002 is applied on `svr120a / Scn_DB`. The original two users remain, and only the selected SamAccountName `2172172512501` was provisioned as Administrator / IT. Windows sign-in, own AD lookup, administrator reads, header overwrite, password denial and CSRF/logout checks passed against the deployed IIS/NetworkService backend. See the [Windows-authentication runbook](employee-windows-authentication.md) for exact evidence and rollback; no bulk employee import occurred.
-
+PCN records, workbook data, users, roles, departments, sessions and routing remain in `Scn_DB`. Existing Firebase data import remains pending. Migrations 001/002 are applied; former AD provisioning is historical and is retired by migration 003 without bulk employee import.
 ## Shared contract
 
 - JSON success: `{success:true,data}`; errors: `{success:false,error,details?,code?,requestId}`. Download returns file bytes.
@@ -29,18 +24,18 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `GET /api/health` | Public process liveness | Does not test SQL |
 | `GET /api/ready` | Public schema/table/master readiness | SQL unavailable returns 503 without SQL details |
 | `GET /api/auth/config` | Public local auth-mode/provisioning capability | `{mode,employeeProvisioningConfigured}`; no private domains/keys |
-| `POST /api/auth/windows` | Local Windows-mode sign-in with empty JSON body | Trusted loopback IIS identity/key; active AD GUID/SID/employee-code SQL mapping required; no automatic registration |
-| `POST /api/auth/login` | Username/email, password, optional remember | Account lockout; source-IP throttling; 403 in local Windows mode |
-| `GET /api/session` | Safe identity or authenticated:false | SQL expiry/revocation/stamp/account check; local Windows mode also revalidates trusted IIS/AD identity |
+| `POST /api/auth/windows` | Removed | AD proof headers cannot authenticate |
+| `POST /api/auth/login` | Employee-code mode: `{employeeCode,remember?}` | Current source record plus active provisioned PCN account; explicit password maintenance mode retains password login |
+| `GET /api/session` | Safe identity or authenticated:false | SQL expiry/revocation/stamp/provider/account check; employee mode also revalidates SQL employee source and reloads current grants |
 | `POST /api/auth/logout` | Revoke session and clear cookie | Idempotent when logged out |
-| `POST /api/auth/change-password` | Current/new password | Nonempty, at most 128 characters; revokes sessions; 403 for local Windows accounts/mode |
+| `POST /api/auth/change-password` | Current/new password | Nonempty, at most 128 characters; revokes sessions; 403 in employee-code mode |
 | `POST /api/admin/login` | Admin-only compatibility alias | Non-admin session revoked |
 | `GET /api/admin/session` | Compatibility session alias | authenticated reflects admin role |
 | `POST /api/admin/logout` | Compatibility logout alias | SQL revocation |
 | `GET /api/admin/users` | Admin safe account list | Local employee identity/department fields and provisioning UI; no pagination |
-| `GET /api/admin/employees?query=...` | Local admin read-only active AD employee search | 2–100 characters, at most 20 profiles; distinct from Power Automate recipient lookup |
-| `POST /api/admin/users` | Admin account creation | Local AD configuration requires directoryId/roles/department, re-queried AD mapping and no PCN password; old password path only without AD config in password mode |
-| `POST /api/admin/users/:uuid/directory` | Local admin links existing account to selected active AD identity | directoryId only; preserves user ID/roles and legacy hash, revokes sessions and blocks linked password login/change in every mode; existing-admin link blocked in password mode |
+| `GET /api/admin/employees?query=...` | Admin read-only SQL employee search | 2–100 characters, at most 20 profiles; distinct from Power Automate recipient lookup |
+| `POST /api/admin/users` | Admin account creation | Selected employeeCode/roles/department; server re-queries source, stores explicit PCN grants; no self-provisioning |
+| `POST /api/admin/users/:uuid/employee` | Admin explicitly links existing account to selected SQL employee | employeeCode only; preserves user ID/roles/department/ownership, clears old credentials, revokes sessions; administrator linking denied in password maintenance mode |
 | `GET /api/admin/directory-users?query=...` | Admin backend directory lookup with distinct private endpoint | query/searchTerm payload; profile fields and safe inline photos; no Firebase runtime |
 | `GET /api/admin/notifications/health` | Admin read-only local endpoint validation + SQL queue/worker outcomes | No fetch, flow invocation, queue mutation or email; normal session required |
 | `POST /api/admin/notifications/test` | Admin compatibility mail test using recipient/groupId | Explicit admin recipient allowed; invokes mail only when explicitly requested; not called by health UI |
@@ -64,8 +59,7 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 
 Schema roles: `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa`, `tapbu`. Department review permissions are enforced; admin/reviewer can manage all review fields. Supplier ownership is per user, not display name/email domain.
 
-Employee provisioning uses SamAccountName as Empcode and persists AD object GUID/SID for identity matching. Create User assigns explicit PCN roles and department; AD department does not grant signing rights. Existing signing/ownership rules remain unchanged. The staged rollout is complete: `KEMET.COM` / `KEMET` are verified, a separate AD-mapped administrator exists, and PCNTest uses Windows Authentication with the protected PostAuthenticateRequest identity module. The runbook distinguishes real client HTTP checks from isolated browser and workflow tests.
-
+PCN authorization uses `pcn.Users`, `pcn.Roles` and `pcn.UserRoles` in `Scn_DB`. The read-only employee source supplies `EmpCode` and profile hints; source presence grants no role. Administrators assign department and roles explicitly. IdentityProvider distinguishes employee-code, password maintenance and retired Windows mappings. Existing signing and ownership rules remain unchanged.
 ## Notification health and original mail contract
 
 `GET /api/admin/notifications/health` requires a valid admin session that has completed any forced password change. It returns the normal success/data envelope. It validates the server endpoint locally and performs a read-only SQL aggregate; it never fetches the flow, sends test mail or changes queued jobs. SQL/health failure returns a generic 503.

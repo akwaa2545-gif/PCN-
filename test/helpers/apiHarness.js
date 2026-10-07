@@ -68,6 +68,7 @@ function fakeAuthService() {
     return structuredClone(safe);
   };
   return {
+    authMode: 'password',
     repository: { async listUsers() { return users.map(safeUser); } },
     async createUser(input) {
       const created = { ...input, id: `new-${users.length}`, isActive: true };

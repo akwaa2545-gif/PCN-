@@ -1,21 +1,20 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
-const { employeeRoles, employeeDepartments, validateEmployeeIdentity } = require('./employeeAccounts');
-
+const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode } = require('./employeeAccounts');
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
-const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive, mustChangePassword: user.directoryId ? false : user.mustChangePassword,
-  ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null, directoryId: user.directoryId || null, identityProvider: user.directoryId ? 'windows' : 'password' } : {}) });
-
+const providerOf = user => user?.identityProvider || (user?.directoryId ? 'retired-windows' : 'password');
+const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive,
+  mustChangePassword: providerOf(user) === 'employee-code' ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
+  ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null } : {}) });
 function sessionPrincipal(user, session, tokenHash) {
   const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
-  Object.defineProperties(principal, {
-    sessionSecurityStamp: { value: session.securityStamp },
-    sessionTokenHash: { value: tokenHash }
-  });
+  Object.defineProperties(principal, { sessionSecurityStamp: { value: session.securityStamp }, sessionTokenHash: { value: tokenHash } });
   return principal;
 }
-
+function assertFields(body, allowed) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !allowed.includes(key))) throw new ApiError(400, 'Unexpected request fields');
+}
 class AuthService {
   constructor(repository, options = {}) {
     this.repository = repository;
@@ -24,13 +23,11 @@ class AuthService {
     this.verifyPassword = options.passwordVerifier || verifyPassword;
     this.dummyHash = null;
     this.attempts = new Map();
-    this.authMode = options.authMode || 'password';
-    this.windowsDomain = options.windowsDomain || 'KEMET';
-    this.directoryService = options.directoryService;
+    this.authMode = options.authMode || 'employee-code';
+    if (!['employee-code', 'password'].includes(this.authMode)) throw new Error('Invalid authentication mode');
+    this.employeeDirectory = options.employeeDirectory;
   }
-
   now() { return new Date(this.clock()); }
-
   throttle(address) {
     const now = this.now().getTime();
     const key = String(address || 'unknown').slice(0, 100);
@@ -38,39 +35,63 @@ class AuthService {
     const next = prior && prior.until > now ? { ...prior, count: prior.count + 1 } : { count: 1, until: now + 60000 };
     this.attempts.set(key, next);
     if (this.attempts.size > 10000) {
-      const expired = [...this.attempts].filter(([, v]) => v.until <= now).map(([k]) => k);
-      for (const item of expired) this.attempts.delete(item);
+      for (const [item, value] of this.attempts) if (value.until <= now) this.attempts.delete(item);
       if (this.attempts.size > 10000) this.attempts.delete(this.attempts.keys().next().value);
     }
     if (next.count > 15) throw new ApiError(429, 'Too many sign-in attempts. Try again shortly');
   }
-
   async createUser({ username, email = null, password, roles = ['supplier'], mustChangePassword = false, bootstrap = false }) {
     if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,100}$/.test(username)) throw new ApiError(400, 'Username must contain 3 to 100 letters, numbers, dots, underscores or hyphens');
     if (email !== null && (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new ApiError(400, 'Invalid email address');
-    if (!Array.isArray(roles) || !roles.length || roles.some(role => !['admin', 'reviewer', 'supplier', 'gsc', 'productionengineering', 'qa', 'tapbu'].includes(role))) throw new ApiError(400, 'Invalid user roles');
+    if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
     if (bootstrap && !mustChangePassword) throw new ApiError(400, 'Bootstrap users must change their password');
     validatePassword(password);
-    const user = await this.repository.createUser({ username, email, passwordHash: await this.hashPassword(password), roles: [...new Set(roles)], mustChangePassword });
-    return safeUser(user);
+    return safeUser(await this.repository.createUser({ username, email, passwordHash: await this.hashPassword(password), roles: [...new Set(roles)], mustChangePassword }));
   }
-
-  async login({ username, password, remember = false } = {}, requestInfo = {}) {
-    if (this.authMode === 'windows') throw new ApiError(403, 'Use Windows sign-in to access PCN');
+  async login(body = {}, requestInfo = {}) {
     this.throttle(requestInfo.ip);
+    if (this.authMode === 'employee-code') return this.loginEmployee(body);
+    assertFields(body, ['username','password','remember']);
+    const {username,password,remember=false}=body;
     if (typeof username !== 'string' || username.length > 320 || typeof password !== 'string' || password.length > 128) throw new ApiError(401, 'Invalid username or password');
     const user = await this.repository.getUserByLogin(username.trim().toLowerCase());
     if (!this.dummyHash) this.dummyHash = this.hashPassword(crypto.randomBytes(32).toString('hex'));
     const verified = await this.verifyPassword(user?.passwordHash || await this.dummyHash, password);
     const locked = user?.lockoutUntil && new Date(user.lockoutUntil) > this.now();
-    if (!user || !verified || !user.isActive || locked || user.directoryId) {
+    if (!user || !verified || !user.isActive || locked || providerOf(user) !== 'password') {
       if (user && user.isActive && !locked) await this.repository.recordLoginFailure(user.id, this.now());
       throw new ApiError(401, 'Invalid username or password');
     }
     await this.repository.resetLoginFailures(user.id);
     return this.issueSession(user, remember === true);
   }
-
+  async lookupEmployee(employeeCode, directory = this.employeeDirectory) {
+    if (!directory) throw new ApiError(503, 'Employee service is unavailable');
+    try {
+      const profile = await directory.getByCode(employeeCode);
+      if (!profile) return null;
+      validateEmployeeIdentity(profile);
+      if (profile.isActive !== true || normalizeEmployeeCode(profile.employeeCode).toLowerCase() !== employeeCode.toLowerCase()) return null;
+      return profile;
+    } catch { throw new ApiError(503, 'Employee service is unavailable'); }
+  }
+  async loginEmployee(body) {
+    assertFields(body, ['employeeCode','remember']);
+    if (body.remember !== undefined && typeof body.remember !== 'boolean') throw new ApiError(400, 'Invalid remember option');
+    let code;
+    try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Employee access could not be verified'); }
+    const profile = await this.lookupEmployee(code);
+    const user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
+    if (!profile || !this.matchesEmployee(user, profile)) throw new ApiError(401, 'Employee access could not be verified');
+    return this.issueSession(user, body.remember === true);
+  }
+  matchesEmployee(user, profile) {
+    if (!user?.isActive || providerOf(user) !== 'employee-code') return false;
+    try {
+      const code = normalizeEmployeeCode(user.employeeCode).toLowerCase();
+      return user.normalizedEmployeeCode === code && code === normalizeEmployeeCode(profile.employeeCode).toLowerCase();
+    } catch { return false; }
+  }
   async issueSession(user, remember = false) {
     const token = crypto.randomBytes(32).toString('hex');
     const csrfToken = crypto.randomBytes(32).toString('hex');
@@ -79,95 +100,66 @@ class AuthService {
     await this.repository.saveSession({ id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt });
     return { user: safeUser(user), token, csrfToken, expiresAt };
   }
-
-  async resolveEmployee(directoryId, directoryService = this.directoryService) {
-    if (!directoryService) throw new ApiError(503, 'Directory service is unavailable');
-    const profile = await directoryService.getById(directoryId);
-    if (!profile || profile.isActive !== true) throw new ApiError(400, 'Select an active directory employee');
-    validateEmployeeIdentity(profile);
+  async resolveEmployee(employeeCode, directory = this.employeeDirectory) {
+    const code=normalizeEmployeeCode(employeeCode);
+    const profile=await this.lookupEmployee(code,directory);
+    if(!profile)throw new ApiError(400,'Select an employee from the employee database');
     return profile;
   }
-
-  async createEmployee({ directoryId, roles, department } = {}, directoryService = this.directoryService) {
+  async createEmployee(body = {}, directory = this.employeeDirectory) {
+    assertFields(body,['employeeCode','roles','department']);
+    const {employeeCode,roles,department}=body;
     if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
     if (!employeeDepartments.some(item => item.key === department)) throw new ApiError(400, 'Select a valid department');
-    const profile = await this.resolveEmployee(directoryId, directoryService);
-    const user = await this.repository.createEmployeeUser({
-      employeeCode: profile.samAccountName, displayName: profile.displayName, email: profile.email || null,
-      roles: [...new Set(roles)], department, adObjectGuid: profile.directoryId, adSid: profile.adSid
-    });
-    return safeUser(user);
+    const profile=await this.resolveEmployee(employeeCode,directory);
+    return safeUser(await this.repository.createEmployeeUser({ employeeCode: normalizeEmployeeCode(profile.employeeCode), displayName: profile.displayName, email: profile.email || null, roles: [...new Set(roles)], department }));
   }
-
-  async linkEmployee({ userId, directoryId } = {}, directoryService = this.directoryService) {
-    const prior = await this.repository.getUserById(userId);
-    if (!prior) throw new ApiError(404, 'User not found');
-    if (!prior.isActive) throw new ApiError(400, 'Only active users can be linked to a directory employee');
-    if (this.authMode === 'password' && prior.roles.includes('admin')) throw new ApiError(400, 'Enable Windows sign-in before linking an existing administrator. Create a separate Windows administrator for rollout.');
-    const profile = await this.resolveEmployee(directoryId, directoryService);
-    const user = await this.repository.linkEmployeeIdentity(userId, profile);
-    return safeUser(user);
+  async linkEmployee(body = {}, directory = this.employeeDirectory) {
+    assertFields(body,['userId','employeeCode']);
+    const {userId,employeeCode}=body;
+    const prior=await this.repository.getUserById(userId);
+    if(!prior)throw new ApiError(404,'User not found');
+    if(!prior.isActive)throw new ApiError(400,'Only active users can be linked to an employee');
+    if(this.authMode === 'password' && prior.roles.includes('admin')) throw new ApiError(409,'Switch to employee-code mode before linking an administrator');
+    const profile=await this.resolveEmployee(employeeCode,directory);
+    return safeUser(await this.repository.linkEmployeeIdentity(userId,profile));
   }
-
-  async resolveWindowsEmployee(identity) {
-    if (this.authMode !== 'windows' || !identity || typeof identity.domain !== 'string' || identity.domain.toLowerCase() !== this.windowsDomain.toLowerCase()) throw new ApiError(401, 'Windows sign-in could not be verified');
-    if (!this.directoryService) throw new ApiError(503, 'Directory service is unavailable');
-    const profile = await this.directoryService.getBySamAccountName(identity.samAccountName);
-    if (!profile || profile.isActive !== true || profile.samAccountName.toLowerCase() !== String(identity.samAccountName).toLowerCase()) throw new ApiError(401, 'Windows sign-in could not be verified');
-    validateEmployeeIdentity(profile);
-    return profile;
-  }
-
-  matchesEmployee(user, profile) {
-    return Boolean(user?.isActive && typeof user.directoryId === 'string' && user.directoryId.toLowerCase() === profile.directoryId.toLowerCase()
-      && user.adSid === profile.adSid && typeof user.employeeCode === 'string' && user.employeeCode.toLowerCase() === profile.samAccountName.toLowerCase());
-  }
-
-  async loginWindows(identity, requestInfo = {}) {
-    this.throttle(requestInfo.ip);
-    const profile = await this.resolveWindowsEmployee(identity);
-    const user = await this.repository.getUserByAdObjectGuid(profile.directoryId);
-    if (!this.matchesEmployee(user, profile)) throw new ApiError(403, 'Your Windows account has not been provisioned for PCN access');
-    return this.issueSession(user);
-  }
-
-  async validateWindowsPrincipal(principal, identity) {
-    if (!principal?.user || !principal.sessionTokenHash) throw new ApiError(401, 'Windows sign-in required');
-    const profile = await this.resolveWindowsEmployee(identity);
-    const session = await this.repository.getSession(principal.sessionTokenHash);
-    const user = await this.repository.getUserById(principal.user.id);
-    if (!session || session.revokedAt || session.userId !== principal.user.id || new Date(session.expiresAt) <= this.now()
-      || session.securityStamp !== principal.sessionSecurityStamp || user?.securityStamp !== session.securityStamp
-      || !this.matchesEmployee(user, profile)) throw new ApiError(401, 'Windows sign-in no longer matches this session');
-    return sessionPrincipal(user, session, principal.sessionTokenHash);
-  }
-
-  async session(token) {
+  async session(token,{skipEmployeeLookup=false}={}) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
-    const session = await this.repository.getSession(hashToken(token));
+    const tokenHash = hashToken(token);
+    const session = await this.repository.getSession(tokenHash);
     if (!session || session.revokedAt || new Date(session.expiresAt) <= this.now()) return null;
     const user = await this.repository.getUserById(session.userId);
-    if (!user?.isActive || session.securityStamp !== user.securityStamp) return null;
-    if (user.directoryId && this.authMode !== 'windows') return null;
-    return sessionPrincipal(user, session, hashToken(token));
+    if (!user?.isActive || session.securityStamp !== user.securityStamp || providerOf(user) !== this.authMode) return null;
+    if (this.authMode === 'employee-code' && !skipEmployeeLookup) {
+      let code;
+      try {code=normalizeEmployeeCode(user.employeeCode);}catch{return null;}
+      const profile=await this.lookupEmployee(code);
+      if (!profile) return null;
+      // Employee lookup can be slow. Re-read grants so concurrent revocation,
+      // relinking or a role change cannot authorize the earlier SQL principal.
+      const latestSession = await this.repository.getSession(tokenHash);
+      if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
+        || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
+      const latestUser = await this.repository.getUserById(latestSession.userId);
+      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesEmployee(latestUser, profile)) return null;
+      return sessionPrincipal(latestUser, latestSession, tokenHash);
+    }
+    return sessionPrincipal(user, session, tokenHash);
   }
-
   async logout(token) {
     if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) await this.repository.revokeSession(hashToken(token));
   }
-
   async changePassword(token, { currentPassword, newPassword } = {}) {
-    if (this.authMode === 'windows') throw new ApiError(403, 'Windows accounts use their domain password');
+    if (this.authMode !== 'password') throw new ApiError(403, 'Employee-code sign-in does not use a password');
     const principal = await this.session(token);
     if (!principal) throw new ApiError(401, 'Sign in required');
     validatePassword(newPassword);
     if (typeof currentPassword !== 'string' || currentPassword.length > 128) throw new ApiError(400, 'Invalid current password');
     const user = await this.repository.getUserById(principal.user.id);
-    if (user.directoryId) throw new ApiError(403, 'Windows accounts use their domain password');
     if (!await this.verifyPassword(user.passwordHash, currentPassword)) throw new ApiError(400, 'Invalid current password');
     if (currentPassword === newPassword) throw new ApiError(400, 'Choose a different password');
     await this.repository.updatePassword(user.id, await this.hashPassword(newPassword), crypto.randomUUID(), user.securityStamp);
   }
 }
-
 module.exports = { AuthService, hashToken, safeUser };

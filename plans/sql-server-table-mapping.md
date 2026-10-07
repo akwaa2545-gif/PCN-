@@ -1,11 +1,10 @@
-﻿# SQL Server source-to-table mapping
+# SQL Server source-to-table mapping
 
-Updated: 2026-10-07. Target: existing `svr120a / Scn_DB`. Sources: migrations 001/002 and repository/hydration/auth/document/routing modules. Names use the `pcn` schema. Department/action routing-v2 is deployed in pcn-test-8-1; it adds no DDL. Live routing saves and email delivery were not exercised by the Windows sign-in checks.
+Updated: 2026-10-07. Target: existing `svr120a / Scn_DB`. Sources: migrations 001/002/003 and repository/hydration/auth/document/routing modules. Names use the `pcn` schema. Department/action routing-v2 is deployed in pcn-test-8-1; it adds no DDL. Live routing saves and email delivery were not exercised by the Windows sign-in checks.
 
 The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are Unicode text parsed/validated in Node; the migration avoids unavailable SQL JSON functions. Migration 001 is applied, with 21 application tables plus migration history, master-data version 1 and a hashed, forced-change `itadmin` account. Seven routing groups were initialized empty. Live SQL verification writes were rolled back. Existing Firebase records have not been imported.
 
-Employee provisioning uses [migration 002](../sql/migrations/002_employee_identity.sql), applied on Scn_DB on 2026-10-07 before release selection. SQL readiness passed, the original two users were preserved, and only the selected AD account was added as Administrator / IT. Runtime ZIPs exclude migration files and startup never performs DDL. See the [Windows-authentication runbook](employee-windows-authentication.md) for encrypted logical-export evidence, live sign-in checks and rollback.
-
+Employee source `KEY_Code_DB.dbo.tblEmployee` is read-only and is not imported. PCN owns `pcn.Users` (employee mapping, IdentityProvider, DepartmentKey, IsActive), `pcn.Roles` and `pcn.UserRoles` in `Scn_DB`. Migration 003 adds provider separation and retires old Windows mappings/session state. Only explicitly provisioned active employee-code accounts can sign in. Source department hints never grant PCN permissions. Migration 003 and separate verified administrator `2205529` are pending live execution; see [employee-code authentication](employee-code-authentication.md).
 ## PCN aggregate
 
 SQL normalizes parent fields and ordered child tables while retaining complete nested payloads as `nvarchar(max)`. This saves PCN data in SQL even though some evolving form fields retain JSON representation.
@@ -62,7 +61,7 @@ Review dates stay text. Checkbox snapshots do not prove a historical approver id
 
 | Table | Actual key and important columns | Runtime use |
 |---|---|---|
-| Users | Id uniqueidentifier; Username/NormalizedUsername nvarchar(100); nullable Email/NormalizedEmail nvarchar(320); PasswordHash nvarchar(512); active/force-change/stamp/lockout fields; local migration-002 identity columns below | Password accounts retain Argon2id hashes; new AD accounts have a null hash, linked accounts retain an unusable legacy hash; explicit GUID/SID mapping |
+| Users | Id uniqueidentifier; employee code/normalized code, provider, department, display name; active/stamp/session fields; nullable legacy password/email columns | Employee-provider accounts have no password and explicit source-code mapping; old password accounts remain maintenance-only; old AD mappings are retired |
 | Roles | Id int identity; Name nvarchar(40) unique | admin, reviewer, supplier, gsc, productionengineering, qa, tapbu |
 | UserRoles | UserId uniqueidentifier + RoleId int composite PK/FKs | Role membership |
 | Sessions | Id uniqueidentifier; UserId; TokenHash char(64) unique; CsrfToken char(64); SecurityStamp; ExpiresAt/CreatedAt/RevokedAt | Opaque cookie hash, expiry/revocation/account stamp checks; 8-hour/30-day durations |
@@ -80,7 +79,7 @@ Review dates stay text. Checkbox snapshots do not prove a historical approver id
 
 There are 21 application tables in the core migration plus SchemaMigrations. The runner creates the application schema and migration metadata before versioned core DDL. Application startup checks readiness and never runs DDL.
 
-Migration 002 adds nullable `EmployeeCode`/`NormalizedEmployeeCode` nvarchar(100), `DepartmentKey` nvarchar(80), `AdObjectGuid` uniqueidentifier, `AdSid` nvarchar(184) and `DisplayName` nvarchar(200) to Users, makes PasswordHash nullable and creates filtered unique indexes on non-null normalized employee code/GUID/SID. SamAccountName is Empcode; AD department is a profile hint while DepartmentKey is administrator-assigned PCN data. Existing IDs, role grants and ownership are retained; the migration does not auto-link/backfill users. Newly created AD accounts have no PCN password. Explicit links preserve the legacy hash, rotate the security stamp and revoke sessions while preserving IDs/roles; linked password login/change are blocked in every mode. Password-mode rollback neither unlinks accounts nor makes the retained hash usable. No new identity table is introduced, and old signing permissions remain unchanged.
+Migration 002 historically added nullable `EmployeeCode`/`NormalizedEmployeeCode`, `DepartmentKey`, `AdObjectGuid`, `AdSid` and `DisplayName` plus unique non-null identity indexes. Migration 003 retains those historical columns and adds `IdentityProvider` (`password`, `employee-code`, `retired-windows`) with integrity constraints. Old AD users are retired and their sessions/tokens revoked. New employee accounts have a canonical source code, administrator-assigned department/roles, null password and no AD mapping. Explicit links preserve user ID, roles, department and ownership while clearing obsolete AD/password state and revoking sessions. No source row grants access automatically and no new duplicate user table is needed.
 
 The SQL connection account `scndb` is not an end-user identity. Legacy bootstrap created `itadmin` from private environment values. With AD configured, runtime creation resolves an administrator-selected AD employee and assigns explicit PCN roles/department without a PCN password. No plaintext application password is stored in SQL.
 
