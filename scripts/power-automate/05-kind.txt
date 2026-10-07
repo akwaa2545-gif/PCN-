@@ -1,0 +1,5 @@
+if(
+  startsWith(string(coalesce(triggerBody()?['subject'], '')), '[Action Required] '),
+  'action_required',
+  if(startsWith(string(coalesce(triggerBody()?['subject'], '')), '[PCN Update] '), 'pcn_update', 'generic')
+)

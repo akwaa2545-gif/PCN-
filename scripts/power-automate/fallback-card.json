@@ -1,0 +1,9 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.2",
+  "body": [
+    { "type": "TextBlock", "size": "Large", "weight": "Bolder", "wrap": true, "text": "Supplier PCN notification" },
+    { "type": "TextBlock", "wrap": true, "text": "Refer to the notification email for details. A validated PCN link is unavailable." }
+  ]
+}

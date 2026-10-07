@@ -18,10 +18,10 @@ test('employee provisioning sends the selected employee code and fixed PCN assig
   const body = api.provisioningBody(employee, 'admin', 'it');
   assert.equal(JSON.stringify(body), JSON.stringify({ employeeCode: '001234', roles: ['admin'], department: 'it', signingStep: null }));
   for (const profile of [null, {}, { employeeCode: 'typed' }, { employeeCode: '12345678901', displayName: 'Employee' }, { employeeCode: 'a b', displayName: 'Employee' }]) {
-    assert.throws(() => api.provisioningBody(profile, 'reviewer', 'qaTet'), /select/i);
+    assert.throws(() => api.provisioningBody(profile, 'approved', 'qaTet'), /select/i);
   }
   assert.throws(() => api.provisioningBody(employee, 'superuser', 'qaTet'), /role/i);
-  assert.throws(() => api.provisioningBody(employee, 'reviewer', 'arbitrary'), /department/i);
+  assert.throws(() => api.provisioningBody(employee, 'approved', 'arbitrary'), /department/i);
 });
 test('linking an existing user sends employee code without altering permissions or department', () => {
   assert.equal(JSON.stringify(users().directoryBody(employee)), JSON.stringify({ employeeCode: '001234' }));
@@ -32,6 +32,7 @@ async function usersPage(assignedUsers = [], options = {}) {
   const elements = new Map();
   const pendingTimers = new Map();
   const calls = [];
+  const confirmations = [];
   function createElement() {
     return {
       value: '', hidden: true, disabled: false, required: false, textContent: '', innerHTML: '', children: [], events: {}, options: [],
@@ -46,10 +47,10 @@ async function usersPage(assignedUsers = [], options = {}) {
     return elements.get(id);
   }
   element('employeeUserForm').reset = () => {
-    for (const id of ['employeeSearch', 'employeeCode', 'employeeRole', 'employeeDepartment', 'employeeSigningStep', 'employeeMailSearch']) element(id).value = '';
+    for (const id of ['employeeSearch', 'employeeCode', 'employeeRole', 'employeeDepartment', 'employeeMailSearch']) element(id).value = '';
   };
   const window = {
-    location: { hash: '#users' }, addEventListener() {}, confirm: () => true,
+    location: { hash: '#users' }, addEventListener() {}, confirm: (message) => { confirmations.push(message); return pageOptions.confirm !== false; },
     PCN_SESSION: {
       require: async () => ({ authenticated: true, user: { roles: ['admin'] } }),
       async fetch(url, options) {
@@ -81,7 +82,7 @@ async function usersPage(assignedUsers = [], options = {}) {
     await timer();
     element('employeeResults').firstElementChild.events.click();
   }
-  return { element, calls, select, async runMailTimer() { await [...pendingTimers.values()].at(-1)?.(); } };
+  return { element, calls, confirmations, select, async runMailTimer() { await [...pendingTimers.values()].at(-1)?.(); } };
 }
 
 test('assigned Users show verified profile photos and identity while unsafe images use initials', async () => {
@@ -131,36 +132,41 @@ test('employee creation requires selecting a lookup result and editing search cl
 });
 
 const verifiedMail = { id: 'mail-id', email: 'person@example.test', displayName: 'Employee' };
-test('one signing step requires a confirmed directory email and uses the selected PCN department', () => {
+test('four PCN roles derive department authority and require a verified recipient for signing', () => {
   const api = users();
-  const body = JSON.parse(JSON.stringify(api.provisioningBody(employee, 'reviewer', 'qaTet', 'approved', verifiedMail)));
-  assert.deepEqual(body, { employeeCode: '001234', roles: ['reviewer'], department: 'qaTet', signingStep: 'approved', mailSelection: { id: 'mail-id', email: 'person@example.test' } });
-  for (const step of ['approved', 'checked', 'prepared']) {
-    assert.throws(() => api.assignmentBody('reviewer', 'qaTet', step, null), /select.*mail/i);
+  for (const [department, expectedRole] of Object.entries({gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu'})) {
+    for (const role of ['approved', 'checked', 'prepared']) {
+      const body = JSON.parse(JSON.stringify(api.provisioningBody(employee, role, department, verifiedMail)));
+      assert.deepEqual(body, {employeeCode: '001234', roles: [expectedRole], department, signingStep: role, mailSelection: {id: verifiedMail.id, email: verifiedMail.email}});
+      assert.throws(() => api.assignmentBody(role, department), /select.*mail/i);
+    }
   }
-  assert.throws(() => api.assignmentBody('reviewer', 'qaTet', ['approved', 'checked'], verifiedMail), /step/i);
-  assert.throws(() => api.assignmentBody('admin', 'it', 'approved', verifiedMail), /department/i);
-  assert.throws(() => api.assignmentBody('supplier', 'qaTet', 'approved', verifiedMail), /role/i);
-  assert.throws(() => api.assignmentBody('reviewer', 'qaTet', 'approved', { email: 'typed@example.test' }), /select/i);
+  assert.deepEqual(JSON.parse(JSON.stringify(api.assignmentBody('admin', 'it'))), {roles: ['admin'], department: 'it', signingStep: null});
+  for (const role of ['', 'reviewer', 'supplier', 'gsc', ['approved', 'checked']]) assert.throws(() => api.assignmentBody(role, 'qaTet', verifiedMail), /role/i);
+  assert.throws(() => api.assignmentBody('approved', 'it', verifiedMail), /department/i);
+  assert.throws(() => api.assignmentBody('approved', 'qaTet', {email: 'typed@example.test'}), /select/i);
 });
 
-test('editing preserves multi-role assignments and unchanged verified mail with the original version', () => {
+test('unrelated edits preserve exact legacy or multiple roles and existing signing assignment', () => {
   const api = users();
-  const user = { roles: ['admin', 'reviewer'], department: 'qaTet', signingStep: 'checked', mailProfile: verifiedMail, version: '0011223344556677' };
-  const body = JSON.parse(JSON.stringify(api.editBody(user, 'admin', 'qaTet', 'prepared', null, false, false)));
-  assert.deepEqual(body, { roles: ['admin', 'reviewer'], department: 'qaTet', signingStep: 'prepared', isActive: false, version: user.version });
-  const changed = api.editBody(user, 'qa', 'qaTet', 'approved', { id: 'other', email: 'other@example.test' }, true, true);
-  assert.equal(JSON.stringify(changed.roles), JSON.stringify(['qa']));
+  for (const [roles, signingStep, choice] of [[['admin', 'reviewer'], 'checked', 'admin'], [['reviewer','qa'], 'approved', 'approved'], [['supplier'], null, ''], [['gsc'], null, '']]) {
+    const user = {roles, department: 'qaTet', signingStep, mailProfile: verifiedMail, version: '0011223344556677'};
+    const body = JSON.parse(JSON.stringify(api.editBody(user, choice, 'qaTet', null, false, false)));
+    assert.deepEqual(body, {roles, department: 'qaTet', signingStep, isActive: false, version: user.version});
+  }
+  const user = {roles: ['admin', 'reviewer'], department: 'qaTet', signingStep: 'checked', mailProfile: verifiedMail, version: '0011223344556677'};
+  const changed = api.editBody(user, 'prepared', 'gscTet', {id: 'other', email: 'other@example.test'}, true, true);
+  assert.equal(JSON.stringify(changed.roles), JSON.stringify(['gsc']));
+  assert.equal(changed.signingStep, 'prepared');
   assert.equal(changed.mailSelection.email, 'other@example.test');
-  assert.equal(api.editBody(user, 'admin', 'qaTet', '', null, true, false, false).mailSelection, null, 'Clearing the mail query without a signing step explicitly removes the old verified profile');
-  assert.throws(() => api.editBody({ ...user, version: null }, 'admin', 'qaTet', '', null, true, false), /reload/i);
+  assert.equal(api.editBody(user, 'admin', 'it', null, true, true, false).mailSelection, null);
+  assert.throws(() => api.editBody({...user,version:null}, 'admin', 'it', null, true, false), /reload/i);
 });
 
 test('English-name lookup never guesses a mail identity and typing invalidates a confirmed result', async () => {
   const page = await usersPage([], { employee: { ...employee, displayName: 'Local name', englishName: 'Employee' } });
-  page.element('employeeRole').value = 'reviewer';
+  page.element('employeeRole').value = 'checked';
   page.element('employeeDepartment').value = 'qaTet';
-  page.element('employeeSigningStep').value = 'checked';
   await page.select();
   await new Promise(setImmediate);
   assert.equal(page.calls.find((call) => call.url.startsWith('/api/admin/directory-users?')).url, '/api/admin/directory-users?query=Employee');
@@ -186,9 +192,8 @@ test('mail results without a usable directory identity cannot be confirmed and e
     { ...verifiedMail, id: '' }, { ...verifiedMail, id: '   ' }, { ...verifiedMail, id: 123 },
     { ...verifiedMail, id: 'a'.repeat(201) }, { ...verifiedMail, email: 'invalid-address' }
   ] });
-  page.element('employeeRole').value = 'gsc';
+  page.element('employeeRole').value = 'approved';
   page.element('employeeDepartment').value = 'gscTet';
-  page.element('employeeSigningStep').value = 'approved';
   await page.select();
   await new Promise(setImmediate);
   assert.equal(page.element('employeeMailResults').children.length, 0);
@@ -196,7 +201,7 @@ test('mail results without a usable directory identity cannot be confirmed and e
   assert.equal(page.element('employeeMailSelected').textContent, '');
   assert.equal(page.element('employeeCreateButton').disabled, true);
   assert.match(page.element('employeeMailStatus').textContent, /valid directory identity/i);
-  assert.match(page.element('employeeRoutePreview').textContent, /Select a mail recipient for this signing step/);
+  assert.match(page.element('employeeRoutePreview').textContent, /Select a mail recipient for this PCN role/);
   await page.element('employeeUserForm').events.submit({ preventDefault() {} });
   assert.equal(page.calls.filter((call) => call.options?.method === 'POST').length, 0);
 });
@@ -204,9 +209,8 @@ test('mail results without a usable directory identity cannot be confirmed and e
 test('a confirmed deterministic directory identity enables and submits the GSC signing assignment', async () => {
   const mail = { ...verifiedMail, id: `directory-email:${'a'.repeat(64)}` };
   const page = await usersPage([], { mailProfiles: [{ ...mail, id: '' }, mail] });
-  page.element('employeeRole').value = 'gsc';
+  page.element('employeeRole').value = 'approved';
   page.element('employeeDepartment').value = 'gscTet';
-  page.element('employeeSigningStep').value = 'approved';
   await page.select();
   await new Promise(setImmediate);
   assert.equal(page.element('employeeMailResults').children.length, 1);
@@ -242,14 +246,13 @@ test('editing active status carries concurrency and retains a conflicted draft u
   const page = await usersPage([existing], { conflict: true });
   page.element('adminUsersRows').firstElementChild.lastElementChild.firstElementChild.events.click();
   assert.equal(page.element('employeeSearch').disabled, true);
-  page.element('employeeSigningStep').value = 'prepared';
   page.element('employeeActive').checked = false;
   page.element('employeeActive').events.change();
   await page.element('employeeUserForm').events.submit({ preventDefault() {} });
   const write = page.calls.find((call) => call.options?.method === 'PATCH');
-  assert.deepEqual(JSON.parse(write.options.body), { roles: ['admin', 'reviewer'], department: 'qaTet', signingStep: 'prepared', isActive: false, version: existing.version });
+  assert.deepEqual(JSON.parse(write.options.body), { roles: ['admin', 'reviewer'], department: 'qaTet', signingStep: 'checked', isActive: false, version: existing.version });
   assert.match(page.element('usersMessage').textContent, /Your edit is kept/);
-  assert.equal(page.element('employeeSigningStep').value, 'prepared');
+  assert.equal(page.element('employeeRole').value, 'admin');
   page.element('employeeCancelButton').events.click();
   assert.equal(page.element('employeeFormTitle').textContent, 'Create employee user');
   assert.equal(page.calls.filter((call) => call.options?.method === 'PATCH').length, 1);
@@ -269,4 +272,56 @@ test('an existing retired administrator can be linked using only the selected em
   const call = page.calls.find((entry) => entry.options?.method === 'POST');
   assert.equal(call.url, '/api/admin/users/old-admin/employee');
   assert.equal(call.options.body, JSON.stringify({ employeeCode: '001234' }));
+});
+
+test('explicit Administrator removal requires confirmation and cancellation retains the draft', async () => {
+  const existing = {id:'employee-id', ...employee, roles:['admin','reviewer'], department:'qaTet', signingStep:'checked', mailProfile:verifiedMail, isActive:true, identityProvider:'employee-code', version:'0011223344556677'};
+  for (const accept of [false,true]) {
+    const page = await usersPage([existing], {confirm:accept});
+    page.element('adminUsersRows').firstElementChild.lastElementChild.firstElementChild.events.click();
+    assert.match(page.element('employeeRoleHelp').textContent, /preserved.*checked/i);
+    page.element('employeeRole').value='prepared'; page.element('employeeRole').events.change();
+    assert.match(page.element('employeeRoutePreview').textContent, /qa.*prepared/i);
+    assert.match(page.element('employeeRoleHelp').textContent, /will replace.*when saved/);
+    assert.doesNotMatch(page.element('employeeRoleHelp').textContent, /are preserved/);
+    await page.element('employeeUserForm').events.submit({preventDefault(){}});
+    assert.equal(page.confirmations.length,1);
+    assert.match(page.confirmations[0], /remove Administrator/i);
+    const writes = page.calls.filter(call => call.options?.method === 'PATCH');
+    assert.equal(writes.length,accept ? 1 : 0);
+    if (accept) assert.deepEqual(JSON.parse(writes[0].options.body).roles,['qa']);
+    else assert.equal(page.element('employeeRole').value,'prepared');
+  }
+});
+
+test('blank legacy PCN role remains editable without granting signing and explicit changes require a choice', async () => {
+  const existing={id:'employee-id',...employee,roles:['supplier'],department:'qaTet',signingStep:null,isActive:true,identityProvider:'employee-code',version:'0011223344556677'};
+  const page=await usersPage([existing]);
+  page.element('adminUsersRows').firstElementChild.lastElementChild.firstElementChild.events.click();
+  assert.equal(page.element('employeeRole').value,'');
+  assert.equal(page.element('employeeRole').required,false);
+  assert.equal(page.element('employeeCreateButton').disabled,false);
+  assert.match(page.element('employeeRoleHelp').textContent,/Requester.*preserved/i);
+  page.element('employeeDepartment').value='gscTet'; page.element('employeeDepartment').events.change();
+  assert.equal(page.element('employeeCreateButton').disabled,true);
+  assert.match(page.element('employeeRoutePreview').textContent,/Select a PCN role/);
+});
+
+test('department changes deliberately derive signing access while Administrator changes clear signing', async () => {
+  const existing={id:'employee-id',...employee,roles:['reviewer','qa'],department:'qaTet',signingStep:'checked',mailProfile:verifiedMail,isActive:true,identityProvider:'employee-code',version:'0011223344556677'};
+  const page=await usersPage([existing]);
+  page.element('adminUsersRows').firstElementChild.lastElementChild.firstElementChild.events.click();
+  page.element('employeeDepartment').value='prodEngTet'; page.element('employeeDepartment').events.change();
+  assert.match(page.element('employeeRoutePreview').textContent,/Access: Production engineering/);
+  await page.element('employeeUserForm').events.submit({preventDefault(){}});
+  const write=page.calls.find(call=>call.options?.method==='PATCH');
+  assert.deepEqual(JSON.parse(write.options.body),{roles:['productionengineering'],department:'prodEngTet',signingStep:'checked',isActive:true,version:existing.version});
+  assert.equal(page.confirmations.length,0);
+  const admin=await usersPage([existing]);
+  admin.element('adminUsersRows').firstElementChild.lastElementChild.firstElementChild.events.click();
+  admin.element('employeeRole').value='admin'; admin.element('employeeRole').events.change();
+  admin.element('employeeDepartment').value='it'; admin.element('employeeDepartment').events.change();
+  assert.match(admin.element('employeeRoutePreview').textContent,/Administrator.*not added to a signing mail list/);
+  await admin.element('employeeUserForm').events.submit({preventDefault(){}});
+  assert.deepEqual(JSON.parse(admin.calls.find(call=>call.options?.method==='PATCH').options.body),{roles:['admin'],department:'it',signingStep:null,isActive:true,version:existing.version});
 });

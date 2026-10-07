@@ -1,0 +1,14 @@
+and(
+  equals(length(split(outputs('Compose_PCN_Message'), '<a href="https://172.30.77.137:8443/form.html?id=')), 2),
+  equals(length(split(outputs('Compose_PCN_Message'), 'href="')), 2),
+  contains(last(split(outputs('Compose_PCN_Message'), '<a href="https://172.30.77.137:8443/form.html?id=')), '"'),
+  equals(length(outputs('Compose_PCN_Candidate')), 13),
+  contains(substring(outputs('Compose_PCN_Padded'), 0, 4), 'PCN-'),
+  equals(substring(outputs('Compose_PCN_Padded'), 8, 1), '-'),
+  equals(
+    replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+      concat(substring(outputs('Compose_PCN_Padded'), 4, 4), substring(outputs('Compose_PCN_Padded'), 9, 4)),
+      '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''),
+    ''
+  )
+)

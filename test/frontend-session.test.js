@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function client(responses) {
+function client(responses, location = {}) {
   const calls = [];
   const redirects = [];
-  const window = { location: { origin: 'https://pcn.example', pathname: '/PCN-2026-0001', search: '', hash: '', assign: (url) => redirects.push(url) } };
+  const window = { location: { origin: 'https://pcn.example', pathname: '/PCN-2026-0001', search: '', hash: '', ...location, assign: (url) => redirects.push(url) } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'session-client.js'), 'utf8'), {
     window, URL, Headers,
     fetch: async (url, options) => {
@@ -49,6 +49,18 @@ test('auth gate redirects unauthenticated users with a local return path', async
   const c = client([success({ authenticated: false })]);
   assert.equal(await c.api.require(), null);
   assert.equal(c.redirects[0], '/login?returnTo=%2FPCN-2026-0001');
+});
+
+test('email PCN query link survives sign-in and expired-session redirects', async () => {
+  const location = { pathname: '/form.html', search: '?id=PCN-2026-0001', hash: '#review' };
+  const expected = '/login?returnTo=%2Fform.html%3Fid%3DPCN-2026-0001%23review';
+  const signedOut = client([success({ authenticated: false })], location);
+  assert.equal(await signedOut.api.require(), null);
+  assert.deepEqual(signedOut.redirects, [expected]);
+  const expired = client([{ status: 401, body: { success: false, error: 'Authentication required' } }], location);
+  await assert.rejects(expired.api.fetch('/api/pcns/PCN-2026-0001'), (error) => error.status === 401);
+  assert.deepEqual(expired.redirects, [expected]);
+  assert.equal(expired.api.safeReturnTo('/form.html?id=PCN-2026-0001#review'), '/form.html?id=PCN-2026-0001#review');
 });
 
 test('temporary-password users are sent to password change before protected data loads', async () => {

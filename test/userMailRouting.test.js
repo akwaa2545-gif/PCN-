@@ -102,7 +102,10 @@ test('saved handoff snapshots automatic identity and original mail contract sepa
   assert.equal(prepared.plan.payload.to, 'manual@example.test; Person@example.test');
   assert.equal(prepared.plan.payload.routingSnapshot.automaticRecipients[0].directoryId, user.mailDirectoryId);
   assert.equal(prepared.plan.payload.routingSnapshot.manualEmails, 'manual@example.test');
-  assert.equal(tx.calls.filter(call => call.query?.includes('u.MailProfileJson')).length, 1);
+  const audienceQueries = tx.calls.filter(call => call.query?.includes('u.MailProfileJson'));
+  assert.equal(audienceQueries.length, 2);
+  assert.match(audienceQueries[0].query, /u.SigningStep IS NOT NULL/);
+  assert.doesNotMatch(audienceQueries[1].query, /u.SigningStep IS NOT NULL/);
 });
 
 test('revoked SQL principal cannot run an aggregate updater after authority changes', async () => {

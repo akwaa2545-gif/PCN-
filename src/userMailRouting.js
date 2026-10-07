@@ -15,10 +15,18 @@ async function lockUserMailRouting(tx, mode = 'Shared') {
 }
 
 async function readUserMailAssignments(tx) {
+  return readMailUsers(tx, true);
+}
+
+async function readGeneralNotificationUsers(tx) {
+  return readMailUsers(tx, false);
+}
+
+async function readMailUsers(tx, signingOnly) {
   const rows = await tx.request().query(`SELECT u.Id,u.EmployeeCode,u.IsActive,u.IdentityProvider,u.DepartmentKey,u.SigningStep,
     u.Email,u.MailDirectoryId,u.MailVerifiedAt,u.MailProfileJson,ur.UserId,r.Name AS RoleName
     FROM pcn.Users u LEFT JOIN pcn.UserRoles ur ON ur.UserId=u.Id LEFT JOIN pcn.Roles r ON r.Id=ur.RoleId
-    WHERE u.IsActive=1 AND u.IdentityProvider=N'employee-code' AND u.SigningStep IS NOT NULL
+    WHERE u.IsActive=1 AND u.IdentityProvider=N'employee-code' ${signingOnly ? 'AND u.SigningStep IS NOT NULL' : ''}
       AND u.MailVerifiedAt IS NOT NULL AND u.MailDirectoryId IS NOT NULL ORDER BY u.Id,r.Name;`);
   const users = rows.recordset.reduce((list, row) => {
     const previous = list.find(user => user.id === row.Id);
@@ -85,5 +93,5 @@ async function assertCurrentUser(tx, user) {
   }
 }
 
-module.exports = { USER_MAIL_ROUTING_LOCK, lockUserMailRouting, readUserMailAssignments, managedRecipient,
+module.exports = { USER_MAIL_ROUTING_LOCK, lockUserMailRouting, readUserMailAssignments, readGeneralNotificationUsers, managedRecipient,
   applyUserMailRouting, getUserMailAssignments, mergedEmails, filterPendingRecipients, assertCurrentUser };
