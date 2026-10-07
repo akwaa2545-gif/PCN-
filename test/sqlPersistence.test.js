@@ -45,6 +45,22 @@ function mockPool(results) {
   return { calls, transaction: () => transaction, request };
 }
 
+test('routing saves compare the locked current version before writing groups or audit', async () => {
+  const { settingsVersion } = require('../src/mailRouting');
+  const previous = { groups: [{ key: 'signoff.gscTet', emails: 'original@example.com' }] };
+  const next = { schemaVersion: 2, groups: [{ key: 'department.gscTet.approved', label: 'GSC/TET Approved', emails: 'new@example.com', recipients: [] }], legacyGroups: previous.groups };
+  const stale = mockPool([{ recordset: [{ SettingsJson: JSON.stringify(previous) }] }]);
+  await assert.rejects(new SqlPcnRepository(stale).saveNotificationSettings(next, 'admin', 'a'.repeat(64)), { statusCode: 409 });
+  assert.equal(stale.calls.at(-1), 'rollback');
+  assert.match(stale.calls[1].sql, /UPDLOCK,HOLDLOCK/);
+  assert.equal(stale.calls.filter(call => call.sql).length, 1);
+  const current = mockPool([{ recordset: [{ SettingsJson: JSON.stringify(previous) }] }]);
+  assert.deepEqual(await new SqlPcnRepository(current).saveNotificationSettings(next, 'admin', settingsVersion(previous)), next);
+  assert.equal(current.calls.at(-1), 'commit');
+  const write = current.calls.find(call => call.inputs?.json);
+  assert.deepEqual(JSON.parse(write.inputs.json).legacyGroups, previous.groups);
+});
+
 test('stale update rolls back before updater, children or audit writes', async () => {
   const pool = mockPool([{ recordset: [{ PcnId: 1, PcnCode: 'PCN-2026-0001', RowVersion: Buffer.from('0000000000000002', 'hex') }] }]);
   let invoked = false;
@@ -81,7 +97,7 @@ test('readiness rejects unapplied migration and missing seeded master data', asy
   const pool = mockPool([{ recordsets: [[], [], []] }]);
   await assert.rejects(new SqlPcnRepository(pool).readiness(), { statusCode: 503 });
   const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 21 }]] }]);
-  assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: 1 });
+  assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: migrationManifest.length });
 });
 
 test('migration manifest contains repeatable normalized SQL and no embedded credentials', () => {

@@ -16,7 +16,7 @@ $script:RuntimeFiles = @(
     'app.js', 'admin.js', 'login.js', 'session-client.js', 'master-data.js',
     'auth.css', 'styles.css', 'tokin-header-logo.png',
     'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
-    'scripts/read-sql-credential.ps1'
+    'scripts/read-sql-credential.ps1', 'admin-users.js'
 )
 
 function Assert-ManagedPath([string]$Path) {
@@ -216,13 +216,13 @@ function Assert-PcnBackend([string]$ReleaseDirectory) {
     $listeners = @(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction Stop)
     if ($listeners.Count -ne 1 -or $listeners[0].LocalAddress -ne '127.0.0.1') { throw 'Unexpected backend listener.' }
     $service = Get-CimInstance Win32_Service -Filter "Name='SupplierPCNTest'"
-    if ($service.StartName -ine 'NT AUTHORITY\LocalService' -or $service.State -ne 'Running') { throw 'Unexpected backend service identity.' }
+    if ($service.StartName -ine 'NT AUTHORITY\NetworkService' -or $service.State -ne 'Running') { throw 'Unexpected backend service identity.' }
     $process = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $listeners[0].OwningProcess)
     $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner
     $server = [Regex]::Escape((Join-Path $ReleaseDirectory 'server.js'))
     if ($process.ParentProcessId -ne $service.ProcessId -or $process.ExecutablePath -ine 'C:\Program Files\nodejs\node.exe' -or
         $process.CommandLine -notmatch ('(?:^|\s)"?' + $server + '"?\s*$') -or
-        $owner.ReturnValue -ne 0 -or $owner.Domain -ine 'NT AUTHORITY' -or $owner.User -ine 'LOCAL SERVICE') {
+        $owner.ReturnValue -ne 0 -or $owner.Domain -ine 'NT AUTHORITY' -or $owner.User -ine 'NETWORK SERVICE') {
         throw 'Backend listener does not belong to the intended release and service.'
     }
 }

@@ -26,17 +26,48 @@
       <h1 id="authTitle">Welcome</h1>
       <p id="authDescription">Enter your 7 digit Employee ID to continue to the PCN portal.</p>
       <p id="authMessage" role="status" aria-live="polite"></p>
-      <form id="loginForm">
+      <button class="ghost-button" id="authRetryButton" type="button" hidden>Retry sign-in setup</button>
+      <form id="employeeLoginForm" hidden>
         <div class="auth-field auth-field--icon">
           <svg class="auth-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M4 9h16M3 15h16M10 4 8 20M16 4l-2 16" />
           </svg>
-          <label for="employeeId">Employee ID</label>
-          <input id="employeeId" name="employeeId" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" placeholder=" " title="Enter your 7 digit Employee ID" required />
+          <label for="employeeCode">Employee ID</label>
+          <input id="employeeCode" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" placeholder=" " title="Enter your 7 digit Employee ID" required />
         </div>
         <button class="primary-button auth-submit" type="submit">
           <span>Sign in</span>
         </button>
+      </form>
+      <form id="loginForm" hidden>
+        <div class="auth-field">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" autocomplete="username" maxlength="100" placeholder=" " required />
+        </div>
+        <div class="auth-field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" placeholder=" " required />
+        </div>
+        <button class="primary-button auth-submit" type="submit">Sign in</button>
+      </form>
+      <form id="passwordChangeForm" hidden>
+        <div class="auth-field">
+          <label for="currentPassword">Current password</label>
+          <input id="currentPassword" type="password" autocomplete="current-password" placeholder=" " required />
+        </div>
+        <div class="auth-field">
+          <label for="newPassword">New password</label>
+          <input id="newPassword" type="password" autocomplete="new-password" maxlength="128" placeholder=" " required aria-describedby="passwordHelp" />
+          <p id="passwordHelp">Choose a password different from your current password.</p>
+        </div>
+        <div class="auth-field">
+          <label for="confirmPassword">Confirm new password</label>
+          <input id="confirmPassword" type="password" autocomplete="new-password" maxlength="128" placeholder=" " required />
+        </div>
+        <div class="auth-actions">
+          <button class="primary-button" type="submit">Change password</button>
+          <button class="ghost-button" id="signOutButton" type="button">Sign out</button>
+        </div>
       </form>
     </div>
   </main>

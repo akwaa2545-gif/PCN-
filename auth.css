@@ -28,6 +28,10 @@ body.auth-page {
   box-shadow: 0 32px 80px rgba(13, 31, 70, 0.22);
 }
 
+.auth-card [hidden] {
+  display: none;
+}
+
 .auth-brand {
   position: relative;
   display: flex;

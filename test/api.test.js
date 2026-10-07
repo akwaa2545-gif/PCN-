@@ -32,18 +32,6 @@ test('incorrect credentials never establish a session', async t => {
   assert.equal(result.body.success, false);
 });
 
-test('seven digit Employee ID creates a session without a password', async t => {
-  const api = await startApi(t);
-  const login = await api.request('/api/auth/login', { method: 'POST', body: { employeeId: '0000001' } });
-  assert.equal(login.status, 200);
-  assert.equal(login.body.data.user.username, 'admin');
-  assert.equal(login.body.data.user.employeeId, '0000001');
-  assert.match(login.headers.get('set-cookie'), /^pcn_session=/);
-  const invalid = await api.request('/api/auth/login', { method: 'POST', body: { employeeId: '123456' } });
-  assert.equal(invalid.status, 401);
-  assert.equal(invalid.headers.get('set-cookie'), null);
-});
-
 test('temporary password restricts PCNs until change and fresh login', async t => {
   const api = await startApi(t);
   const login = await api.login('temporary');

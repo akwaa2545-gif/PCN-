@@ -8340,3 +8340,116 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
     left: 0;
   }
 }
+/* Each department owns three distinct mail lists in signing order. */
+#notificationGroups {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+.notification-department {
+  min-width: 0;
+  border: 1px solid #d7ddea;
+  background: #fff;
+}
+.notification-department-header {
+  padding: 16px;
+  background: var(--mes-blue);
+  color: #fff;
+}
+.notification-department:nth-child(2n) .notification-department-header { background: #197a77; }
+.notification-department:nth-child(3n) .notification-department-header { background: #1f5f9a; }
+.notification-department-header h3 { margin: 0 0 4px; color: #fff; font-size: 17px; }
+.notification-department-header p { margin: 0; color: #fff; font-size: 12px; }
+.notification-department .notification-step { margin: 0; border: 0; border-top: 1px solid #d7ddea; box-shadow: none; }
+.notification-department .notification-step .notification-group-header { min-height: 58px; background: #eef1f6; color: #242b78; }
+.notification-department .notification-group-header h4 { margin: 0 0 3px; color: #242b78; font-size: 15px; }
+.notification-department .notification-group-header small { color: #475569; }
+.notification-department .notification-add-button { background: #fff; color: #242b78; border-color: #c8d1ea; }
+.notification-department .notification-add-button:hover { background: #e5ebfb; color: #242b78; }
+.notification-step .notification-add-button,
+.notification-step .notification-remove-button { min-height: 44px; }
+.notification-step .notification-person { border-radius: 8px; }
+.notification-step .notification-person:focus-within:has(.directory-suggestions:not([hidden])) { margin-bottom: 8px; }
+.notification-step .directory-suggestions {
+  position: static;
+  grid-column: 1 / -1;
+  width: auto;
+  margin-top: 6px;
+  max-height: 280px;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+}
+.notification-step > .notification-group-warning { margin: 0 14px 12px; }
+.notification-step h4 { margin: 0; color: inherit; }
+.mail-routing-save-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mail-routing-save-actions [hidden] { display: none !important; }
+.notification-legacy { padding: 18px; background: #fff9e8; border-top: 1px solid #e8d595; }
+.notification-legacy-source { margin-top: 14px; padding: 14px; border: 1px solid #e8d595; background: #fff; }
+.notification-legacy-source p { overflow-wrap: anywhere; }
+.notification-legacy-source select { max-width: 100%; min-height: 44px; margin-right: 8px; margin-bottom: 8px; }
+.notification-legacy-source button { min-height: 44px; }
+.notification-person-email { display: block; overflow-wrap: anywhere; color: #111827; font-size: 13px; }
+.recipient-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid #c8d1ea;
+  border-radius: 0;
+  background: #fff;
+  color: #111827;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.3);
+}
+.recipient-dialog::backdrop { background: rgba(15, 23, 42, 0.5); }
+.recipient-dialog-heading { padding: 20px 20px 8px; }
+.recipient-dialog-heading h2 { margin: 8px 0; color: #242b78; font-size: 21px; overflow-wrap: anywhere; }
+.recipient-dialog-heading p { margin: 0; line-height: 1.5; color: #475569; }
+.recipient-dialog-editor { padding: 8px 6px; }
+.recipient-dialog .notification-person { grid-template-columns: 34px minmax(0, 1fr); border-radius: 0; }
+.recipient-dialog .notification-person:has(.notification-person-meta:not([hidden])),
+body.admin-page .recipient-dialog input,
+body.admin-page .recipient-dialog button,
+body.admin-page .recipient-dialog .notification-person-avatar,
+body.admin-page .recipient-dialog .directory-suggestions,
+body.admin-page .recipient-dialog .directory-suggestion,
+body.admin-page .recipient-dialog .directory-suggestion-avatar { border-radius: 0; }
+.recipient-dialog .notification-person input { min-height: 44px; width: 100%; }
+.recipient-dialog #notificationRecipientEmail { min-height: 44px; }
+.recipient-dialog-input-label { display: block; margin: 0 14px 8px; color: #242b78; font-weight: 700; }
+.recipient-dialog .notification-group-warning { margin: 10px 14px 0; color: #475569; }
+.recipient-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px 20px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
+.recipient-dialog-actions button { min-height: 44px; }
+body.admin-page .recipient-dialog-actions .primary-button,
+body.admin-page .recipient-dialog-actions .primary-button:hover { color: #241a00; }
+@media (max-width: 480px) {
+  .recipient-dialog-heading { padding: 16px 14px 8px; }
+  .recipient-dialog-actions { padding: 14px; flex-wrap: wrap; }
+}
+@media (max-width: 900px) { #notificationGroups { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) {
+  .notification-step .notification-person { grid-template-columns: 26px minmax(0, 1fr); }
+  .notification-step .notification-remove-button { grid-column: 2; justify-self: start; }
+}
+/* Employee access uses the same square controls as mail routing. */
+.users-panel { padding-bottom: 24px; }
+.users-panel > .admin-message { margin: 16px 20px; }
+.employee-user-form { display: grid; gap: 12px; margin: 20px; padding: 20px; border: 1px solid #d4daeb; background: #f8fafc; }
+.employee-user-form h3, .employee-user-form p { margin: 0; }
+.employee-user-form input, .employee-user-form select { width: 100%; min-height: 44px; border: 1px solid #aeb8d0; border-radius: 0; padding: 10px; font: inherit; box-sizing: border-box; }
+.employee-user-form label { display: grid; gap: 8px; font-weight: 600; }
+.employee-assignments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.employee-user-actions { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.users-panel button { min-height: 44px; border-radius: 0; }
+.users-panel .primary-button, .users-panel .primary-button:hover { color: #241a00; }
+.admin-page #adminRefreshButton[hidden] { display: none; }
+.employee-results { display: grid; gap: 8px; max-height: 300px; overflow: auto; }
+.employee-result { text-align: left; background: white; border: 1px solid #aeb8d0; padding: 12px; color: #17265f; font: inherit; overflow-wrap: anywhere; cursor: pointer; }
+.employee-selected { display: grid; gap: 10px; overflow-wrap: anywhere; }
+.employee-selected input { background: #eaf0f7; }
+.employee-user-form [hidden] { display: none; }
+.users-table-wrap { margin: 20px; overflow: auto; }
+.users-table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 14px; }
+.users-table caption { text-align: left; font-weight: 700; margin-bottom: 12px; }
+.users-table th, .users-table td { text-align: left; vertical-align: top; border-bottom: 1px solid #d4daeb; padding: 12px; overflow-wrap: anywhere; }
+.users-table th { background: #edf1f8; }
+.users-table td:last-child button { display: block; margin-top: 8px; }
+@media (max-width: 600px) { .employee-assignments { grid-template-columns: minmax(0, 1fr); } .employee-user-form, .users-table-wrap { margin: 12px; padding: 12px; } }

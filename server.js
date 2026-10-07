@@ -11,6 +11,8 @@ const { NotificationService } = require('./src/notificationService');
 const { NotificationWorker } = require('./src/notificationWorker');
 const { SqlDocuments } = require('./src/sqlDocuments');
 const { createApp } = require('./src/httpServer');
+const { readAuthConfiguration } = require('./src/authConfiguration');
+const { SqlEmployeeDirectory } = require('./src/sqlEmployeeDirectory');
 
 function readServerConfig(env = process.env) {
   const port = Number(env.PORT || 3000);
@@ -26,15 +28,19 @@ function readServerConfig(env = process.env) {
 async function main() {
   await loadRuntimeEnv();
   const {port,host,trustProxy,publicOrigin} = readServerConfig();
+  const authConfiguration = readAuthConfiguration(process.env,{host,trustProxy});
   const pool = await connectSql();
+  const employeeDirectory = new SqlEmployeeDirectory(pool);
   let timer;
   let server;
   try {
-  const repository = new SqlPcnRepository(pool);
-  await repository.readiness();
   const integrationService = new IntegrationService({mailUrl:process.env.POWER_AUTOMATE_MAIL_URL,directoryUrl:process.env.POWER_AUTOMATE_DIRECTORY_URL,allowedHosts:(process.env.INTEGRATION_ALLOWED_HOSTS || '').split(',').map(value=>value.trim()).filter(Boolean)});
+  const atomicNotifications = new NotificationService(pool,{publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL,mailConfigurationStatus:()=>integrationService.mailConfigurationStatus()});
+  const repository = new SqlPcnRepository(pool,{notifications:atomicNotifications});
+  await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService:new AuthService(new SqlAuthRepository(pool)),integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
+  const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;

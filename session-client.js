@@ -56,7 +56,12 @@
   }
 
   async function load() {
-    return apiFetch('/api/session');
+    try { return await apiFetch('/api/session'); }
+    catch (error) {
+      if (error.status !== 401) throw error;
+      session = { authenticated: false, user: null, csrfToken: '' };
+      return session;
+    }
   }
 
   async function requireSession(role) {
@@ -82,8 +87,8 @@
   function mountProfile(user, onLogoutError) {
     const container = document.getElementById('accountMenu');
     if (!container || !user) return;
-    const username = String(user.username || 'User');
-    const fullName = String(user.fullName || '').trim();
+    const username = String(user.displayName || user.fullName || user.username || 'User').trim();
+    const fullName = String(user.displayName || user.fullName || '').trim();
     const roleNames = {
       admin: 'Admin', reviewer: 'Reviewer', supplier: 'Supplier',
       gsc: 'GSC/TET', productionengineering: 'Prod. Eng./TET',

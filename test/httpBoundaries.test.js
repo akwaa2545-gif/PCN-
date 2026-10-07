@@ -31,14 +31,14 @@ test('notification settings save recipients while endpoint URLs remain server ma
   const save = await api.request('/api/notification-settings', { method: 'PUT', session: admin, body: input });
   assert.equal(save.status, 200);
   const load = await api.request('/api/notification-settings', { session: admin });
-  const group = load.body.data.groups.find(item => item.key === 'signoff.gscTet');
+  const group = load.body.data.legacyGroups.find(item => item.key === 'signoff.gscTet');
   assert.equal(group.emails, 'gsc.one@example.com; gsc.two@example.com');
   assert.equal(group.recipients[0].displayName, 'Planner');
   for (const body of [{ flowUrl: 'https://evil.example/send' }, { directoryLookupUrl: 'https://evil.example/query' },
     { groups: [{ key: 'signoff.gscTet', emails: 'invalid' }] }]) {
     assert.equal((await api.request('/api/notification-settings', { method: 'PUT', session: admin, body })).status, 400);
   }
-  assert.equal((await api.request('/api/notification-settings', { session: admin })).body.data.groups.find(item => item.key === 'signoff.gscTet').emails, group.emails);
+  assert.equal((await api.request('/api/notification-settings', { session: admin })).body.data.legacyGroups.find(item => item.key === 'signoff.gscTet').emails, group.emails);
 });
 
 test('workflow, progress, status filtering, audit and unsupported methods are scoped', async t => {

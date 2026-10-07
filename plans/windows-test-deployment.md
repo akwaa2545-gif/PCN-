@@ -1,44 +1,44 @@
-# Windows HTTPS test deployment
+# Windows HTTPS deployment and employee-code cutover
 
-Updated: 2026-10-06. Status: signed release `pcn-test-5-1` built and deployed successfully through the outbound pipeline. HTTPS/readiness, service restart, active process identity, loopback isolation, unauthenticated boundary checks and a repeated no-op poll passed. Client browser trust and actual authenticated pilot login remain unverified.
+Updated: 2026-10-07. [SQL employee-code-only login](employee-code-authentication.md) is deployed as signed `pcn-test-10-1` from `c827d9c1c23c27631604936807dbbc352101c11e`. Migration 003, the separate approved employee Administrator / IT account and PCN-only IIS cutover are complete. Real local and HTTPS API acceptance passed; the user's own Edge GUI remains unobserved. The former AD / Windows SSO runtime is retired.
 
-## Scope and components
+## Scope and retained components
 
-The authorized pilot serves the SQL-backed PCN app on `THCHA-WEBHOST01`, Windows 10 Pro, at `https://172.30.77.137:8443`. It uses a separate IIS `PCNTest` site and application pool so the pilot configuration is isolated from existing IIS sites. Node handles application routes/static assets through the API server; IIS terminates HTTPS and proxies to loopback port 3000.
+The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `https://172.30.77.137:8443`, with the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` WinSW service. Node serves application routes/static files only through `127.0.0.1:3000`. Default Web Site's `*:80` binding was verified unchanged and responds HTTP 200.
+
+The replacement data flow is:
 
 ```text
-Test browser -> IIS PCNTest HTTPS :8443 -> Node 127.0.0.1:3000 -> svr120a / Scn_DB
-                                                   |
-                                              WinSW service
+Browser employee code -> IIS HTTPS :8443 -> Node 127.0.0.1:3000
+                                           | PCN users / sessions / roles -> Scn_DB
+                                           | read-only employee lookup   -> KEY_Code_DB.dbo.tblEmployee
 ```
 
-This is a limited pilot. IIS on Windows 10 Professional permits ten concurrent requests; excess requests queue. That limit is about active requests, not a fixed number of signed-in users. Wider use should move to Windows Server with appropriate capacity and supported operating-system maintenance. [Microsoft IIS request restrictions](https://learn.microsoft.com/en-us/iis/troubleshoot/request-restrictions)
+Both databases are on the configured server `svr120a`. The source table has 1,935 inspected records, unique non-null `EmpCode` text up to ten characters, names, job title and source department. It has no email/active flag. Source presence plus an explicit active PCN account/provider and manually granted PCN roles govern access. The source remains read-only; no bulk employee import or synchronization is performed.
 
-The host has Node.js 26.10 installed. A real Node 26 service process running as LocalService, its loopback listener and SQL-backed readiness were observed. These startup checks do not replace the full host compatibility/test suite. The service wrapper is pinned to stable WinSW 2.12.0; upstream identifies 2.x as the stable line. [WinSW project](https://github.com/winsw/winsw), [v2.12.0 release](https://github.com/winsw/winsw/releases/tag/v2.12.0)
+The host has Node.js 26.10 and WinSW 2.12.0. The service currently runs as exact `NT AUTHORITY\NetworkService`, with its unique `NT SERVICE\SupplierPCNTest` SID enabled. Its previous process owner, parent, loopback listener and SQL readiness were verified. Changing the application auth mode does not require weakening these service-SID ACLs or giving the shared NetworkService account access to SQL secrets.
 
-The pilot connects to the existing `Scn_DB`. Saves and password changes persist in that database and may affect its users. No separate sandbox database is implied. Deployment must not run `db:migrate`, `db:import`, bootstrap account creation or live smoke scripts that alter initial-account state. Existing tables/master data/accounts are reused. Routing and integration secrets remain unconfigured unless separately authorized.
+IIS on Windows 10 Professional permits ten concurrent requests, so this remains a limited pilot; wider use requires appropriate Windows Server capacity and maintenance. [Microsoft IIS request restrictions](https://learn.microsoft.com/en-us/iis/troubleshoot/request-restrictions).
 
-## Release, configuration and service isolation
+## Release and configuration isolation
 
-| Component | Required deployment layout |
+| Component | Retained deployment layout |
 |---|---|
-| Current pilot release | `C:\SupplierPCN\releases\pcn-test-5-1` |
-| Future pipeline release files | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>`; record the selected directory for each rollout |
-| WinSW executable/XML and service artifacts | `C:\SupplierPCN\service` |
-| Service logs | `C:\SupplierPCN\logs` |
-| Private environment file | `C:\ProgramData\SupplierPCN\config\pcn.env` |
-| Service environment pointer | `PCN_ENV_FILE` set to that absolute environment-file path |
-| Backend listener | Loopback only, port 3000; no public inbound exposure |
-| Public origin | Exactly `https://172.30.77.137:8443` |
-| Process environment | `NODE_ENV=production` for Secure session cookies |
-| Windows service identity | `SupplierPCNTest`, LocalService with its unique service SID enabled for ACLs |
-| IIS identity | `PCNTest` application pool for the `PCNTest` site; no database-secret access |
+| Current release | `C:\SupplierPCN\releases\pcn-test-10-1` |
+| Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
+| WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
+| Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
+| Backend binding | `127.0.0.1:3000` only |
+| Browser origin | Exactly `https://172.30.77.137:8443` |
+| Runtime identity | `SupplierPCNTest` as NetworkService with service-SID-specific ACLs |
+| IIS identity | Separate PCNTest application pool, no SQL/environment-secret access |
 
-Keep SQL credentials and signed integration URLs outside versioned releases. Do not put them in WinSW XML, IIS web.config, build output, documentation, source control or logs. Grant `NT SERVICE\SupplierPCNTest` read access to the private environment file; do not grant all `LOCAL SERVICE` processes access. Grant that service SID read/execute on its selected release and read/write on its logs. Administrator/SYSTEM maintenance access is separate.
+SQL passwords and signed mail/directory URLs remain outside Git, releases, WinSW XML, IIS configuration and logs. The unique service SID reads the private backend file and selected release; administrators/SYSTEM control maintenance. A downloaded release cannot replace the protected deployment consumer/public key. The source table connection is a read-only query through the protected SQL connection, not a browser credential.
 
-The nonsecret pilot configuration is:
+The replacement nonsecret runtime configuration is:
 
 ```text
+AUTH_MODE=employee-code
 HOST=127.0.0.1
 PORT=3000
 TRUST_PROXY=loopback
@@ -46,78 +46,50 @@ NODE_ENV=production
 PUBLIC_ORIGIN=https://172.30.77.137:8443
 ```
 
-The service supplies `PCN_ENV_FILE=C:\ProgramData\SupplierPCN\config\pcn.env`; database credentials are maintained privately in that file.
+`employee-code` is the normal runtime default. Explicit `AUTH_MODE=password` is maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings and proxy secrets are removed from the replacement environment; their presence must not activate Windows mode. Normal employee-code sign-in requires neither a PCN password nor a Windows-authenticated browser.
 
-`PCN_ENV_FILE` must be absolute and loaded by the application before configuration validation. Relative working-directory `.env` files must not override the deployment's external configuration. The service should fail startup when its configuration is missing/unreadable rather than silently use a developer credential profile. Confirm these behaviors before acceptance.
+## Reviewed cutover sequence
 
-Node's database configuration remains server-side. Use the existing SQL connection profile privately; never print the environment file to verify it. The IIS site must proxy application requests, rather than statically publishing a release directory containing source/configuration.
+1. Pause the `SupplierPCNTestDeployment` SYSTEM polling task for reviewed cutover; preserve its trust anchors, version records and current service/IIS configuration. Keep the live application running during preparation where possible.
+2. Confirm the intended administrator's source `EmpCode` with the user. The former AD SamAccountName is not assumed to identify the same SQL-source employee. For this rollout create the separately approved `2205529` Administrator / IT account; preserve the prior accounts and their ownership without relinking the unrelated former AD administrator.
+3. Check protected SQL/source connectivity and preserve an appropriate before-state. Apply reviewed migration 003 to `Scn_DB`, then verify readiness. Startup/deployment does not run DDL. The source `KEY_Code_DB` table must remain unchanged.
+4. On **PCNTest only**, enable Anonymous Authentication and disable Windows Authentication. Archive/remove its old Windows identity module and separate key file/configuration. Retain HTTPS, certificate validation and other IIS sites.
+5. Keep the ordinary loopback proxy and overwrite `X-PCN-Client-IP` with observed `REMOTE_ADDR` on every request, including forged caller values. Remove Windows identity forwarding; no AD header is authentication evidence for the replacement.
+6. Set employee-code mode in the private backend environment, validate the reviewed signed replacement runtime and installed consumer, switch only the PCN service and verify exact Node/WinSW identity, loopback listener, schema/SQL/source behavior.
+7. Verify real employee-code administrator login/session/authorization/logout through HTTPS, selected user creation/linking and source-outage denial; retain cookie/origin/CSRF protections and PCN signing/ownership permissions. Record the actual release and results before resuming the task.
 
-## Proxy and client address handling
+This rollout completed the sequence. PCNTest has Windows Authentication disabled / Anonymous Authentication enabled with empty anonymous username and its existing pool identity. The obsolete Windows module DLL/key were archived in protected maintenance storage and removed from the live site. Existing pool read/execute permissions, HTTPS binding, service-SID secret isolation and native `REMOTE_ADDR` client-IP rewrite remain intact. Real GUI automation against the local SQL-backed runtime passed; the user's own Edge observation remains separate.
 
-IIS must overwrite `X-PCN-Client-IP` with its observed client address on every proxied request. A caller-supplied value must not be forwarded unchanged. The Node app trusts this custom header only when the direct socket peer is loopback; untrusted peers must use their socket address. Do not infer authority from arbitrary `X-Forwarded-For` values.
+## TLS and client setup retained
 
-This preserves per-client login throttling behind the local proxy while preventing browser-supplied address spoofing. Bind Node to loopback and verify that port 3000 is unreachable from another machine. Keep the exact HTTPS origin in application configuration so cookie/CSRF checks use the pilot URL.
+The HTTPS binding uses certificate thumbprint `B3691FE671FDCB46718B8E4AC7EA5B9EDEDF64FB`, expiring on 2027-01-04. Pinned-certificate IP validation passed. The approved client's Current User Root store contains the verified public certificate; normal operating-system TLS trust passed without a custom CA file or TLS bypass. The private key remains on the server.
 
-## HTTPS certificate and test-client trust
+The current user's HTTPS IP `172.30.77.137` was mapped to Local Intranet zone 1 during the former Windows-auth pilot. That mapping covers all HTTPS ports at this IP, with no HTTP/subnet/domain-wide mapping or credential-delegation/authentication-allowlist change. Employee-code login does not need that zone mapping for native SSO. Protected rollback metadata remains under `%LOCALAPPDATA%\SupplierPCN\deployment\sso-operations\backups\pcn-browser-before-*.json`; restore only the scoped client state if retiring it, retaining TLS trust required for the pilot.
 
-The IIS HTTPS :8443 binding uses certificate thumbprint `B3691FE671FDCB46718B8E4AC7EA5B9EDEDF64FB`, expiring on 2027-01-04. A TLS request using the pinned public certificate with IP identity verification succeeded. Its public certificate is expected at `C:\Users\Server32\Downloads\PCN-HTTPS-Test.cer`; verify that file/location before distributing it. The private key stays on the server and must never be copied with the public certificate.
+The HTTP.sys binding is back at its verified original baseline with Disable HTTP2 Not Set and all other TLS fields unchanged. A former HTTP/1.1 trial did not resolve Edge `ERR_TOO_MANY_RETRIES` and was reverted. The former browser incident involved a VPN extension overriding native HTTP authentication challenges; its credentials are not recorded here. Those SSO diagnostics are [historical](employee-windows-authentication.md#historical-edge-incident), not setup requirements for the replacement. Successful browser GUI access after the new cutover remains to be observed.
 
-For an approved test client, obtain that public `.cer` through the agreed internal channel, inspect its thumbprint against the value above, then manually import it into **Current User > Trusted Root Certification Authorities** using Certificate Manager. This pilot trust is local to that user. Do not bypass browser TLS warnings or trust a different certificate to make a test pass. Verify the browser shows a valid certificate for `172.30.77.137` after import. Browser trust has not yet been recorded as verified.
+Retire the pilot trust/binding when replacing the test with an approved CA-issued certificate. Remove only the installed pilot thumbprint from the client's Current User Root store when it is no longer needed, and never export a PFX/private key.
 
-Remove the same thumbprint from the client's Current User trusted-root store after testing. Remove the pilot trust/binding when the test is retired or replaced with an approved CA-issued certificate. Renew or replace before the expiry date if testing continues. Never document/export a PFX or private key.
+## Historical release evidence
 
-## Deployment sequence
+[Actions 37562025155](https://github.com/akwaa2545-gif/PCN-/actions/runs/37562025155) succeeded and published signed [pcn-test-9-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-9-1) from `9b00da23`. The observed host deployment timestamp is `2026-10-07T02:41:51.5138466Z`; its clock differed from the workstation. It included the Retry authentication card visibility fix, verified by two extra assertions in the existing 59-check isolated browser run. This release has the former Windows authentication model, not the replacement code-only design.
 
-1. Inspect existing IIS sites, bindings, service names and ports. Record them before adding the isolated PCNTest resources.
-2. Install/copy the selected release under `C:\SupplierPCN`; run dependency installation and compatibility checks using the host's Node version. Keep secrets and private exports out of the release.
-3. Configure the external environment file privately, service SID ACLs, explicit loopback listener, production origin and WinSW service restart/logging behavior.
-4. Start the service and verify loopback health/readiness without exposing configuration. Failure must stop rollout until corrected.
-5. Create the separate IIS site/application pool, configure HTTPS :8443 with the selected certificate, and proxy to Node. Overwrite the custom client-IP header.
-6. Verify client access, certificate trust, auth/CSRF and deep links. Recheck other sites after pilot changes.
-7. Record the actual release/service/binding names and completed acceptance evidence below. Only then report the pilot URL as working.
+Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 59 isolated browser checks in Actions 37559651975. Twelve real curl SSPI checks passed before/after that deployment. The installed consumer independently verified the exact release directory, NetworkService owner, WinSW parent and exclusive loopback listener; the SYSTEM polling task was enabled / Ready with result 0 at that final check. Those former SSO results do not verify employee-code login.
 
-## Verified deployment pipeline
+`pcn-test-6-1` from `359e1c43e39b30ec8ef1ebfbed30daa0bd54d939` passed 155 tests / 16 isolated browser checks in Actions 37426439232 and deployed on 2026-10-06 as LocalService. Its ZIP SHA-256 was `025e8eb72c849b09b97e5f68e7bdd2d3adc2de672136542bf6674af885935829`. SQL readiness, compact Mail service HTML and a backend recipient lookup with an inline photo passed; email delivery did not.
 
-The user requested an automated pipeline. Its [separate runbook](github-deployment.md) describes GitHub-hosted Windows CI tests, an Ed25519-signed public prerelease containing only production runtime files, and the `SupplierPCNTestDeployment` SYSTEM task with highest privileges, scheduled every ten minutes and at startup. This design uses neither an internet-facing deployment listener nor a self-hosted GitHub runner. GitHub holds the release-signing secret; SQL credentials remain on the deployment host.
+The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
-[Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) completed all steps, including 134/134 tests and seven isolated browser checks. It published signed release `pcn-test-5-1` from commit `6170a0fe80d249314dfe2e50d5378490ef9107fd` at `2026-10-06T04:03:30Z`. The SYSTEM task logged deployment of that release at `2026-10-06T04:13:57.8149751Z`; the last-deployed state records the same commit and release ID. The task is Ready with LastTaskResult 0.
+## Current acceptance and recovery
 
-External HTTPS probes with the pinned certificate and verified IP identity passed after deployment: readiness/login page/anonymous session returned 200, unauthenticated PCNs returned JSON 401, and source/.env/src paths returned 404. IIS overwrote caller-supplied client-IP headers and foreign Origin requests returned 403. These checks did not perform authenticated pilot login or database writes.
+[Actions 37567205169](https://github.com/akwaa2545-gif/PCN-/actions/runs/37567205169) succeeded with 240 tests, 59 isolated browser checks and the high/critical audit gate. Signed `pcn-test-10-1` was installed at observed server time `2026-10-07T03:42:57.7868092Z`. Migration 003 was applied at `2026-10-07T03:35:30.942Z`, with 001/002 unchanged. The separate verified `2205529` Administrator / IT account was added while retaining the prior three accounts.
 
-An independent host check confirmed the running command is `C:\SupplierPCN\releases\pcn-test-5-1\server.js`, owned by `NT AUTHORITY\LOCAL SERVICE`, with its parent process matching the WinSW service. Node listens exclusively on `127.0.0.1:3000` and SQL readiness succeeds. A second manual SYSTEM-task poll returned result 0 and logged `already_current` at `2026-10-06T04:15:53.5310931Z`; the service PID and last-deployed file hash were unchanged, confirming no unnecessary restart.
+NetworkService / WinSW / exclusive loopback identity and SQL readiness passed. Real HTTPS acceptance passed 26 checks with CA/IP validation and no Windows authentication challenge; the local SQL-backed headless browser passed login, Users/lookup, role/department controls and logout. Default Web Site HTTP :80 remained available. The polling task is enabled / Ready / result 0 and a repeated poll was a no-op. See [the complete acceptance record](employee-code-authentication.md#acceptance--2026-10-07) for scope, coverage and account evidence; these checks do not claim the user's Edge GUI or email delivery was observed.
 
-## Acceptance record
+Before migration 003, a DPAPI-encrypted logical export of 22 PCN tables / 121 rows passed decryption/SHA-256 verification. The SQL login lacked native backup permission; this was not a native SQL backup and full restore was not tested. Preserve that recovery limitation; the earlier 108-row export preceded migration 002.
 
-The following table records only supplied deployment evidence. Local browser smoke flows passed against isolated test adapters; they do not prove authenticated login or PCN saving on this HTTPS pilot.
+Keep the task paused if cutover fails. Restore only a reviewed, schema-compatible release/configuration and the approved account access needed for recovery. Migration 003 retires Windows mappings and revokes sessions; switching old application files alone is insufficient to recreate former access. Do not undo operational PCN data or enable all source/retired users. Retain version high-water records and service-SID ACLs; inspect protected safe logs/readiness without exposing secrets.
 
-| Check | Required evidence | Status |
-|---|---|---|
-| Host and listener | THCHA-WEBHOST01; IIS PCNTest HTTPS :8443; Node 127.0.0.1:3000 only; workstation cannot connect to :3000 | Verified |
-| Runtime compatibility | Windows Node 26 CI: 134/134 tests and seven isolated browser checks; deployed SQL readiness | Verified CI/startup; full suite not rerun against live database |
-| Service identity and ACLs | SupplierPCNTest Running/Automatic; exact pcn-test-5-1 server.js command, LOCAL SERVICE owner and WinSW parent; service-SID config/release ACLs | Verified after cutover |
-| External configuration | Absolute PCN_ENV_FILE external to release, protected service-specific configuration | Installed; missing-file startup behavior verified by focused runtime-env tests |
-| Health/readiness | HTTPS health/readiness return 200 through IIS with certificate/IP verification | Verified |
-| Certificate | Binding thumbprint/expiry and pinned-certificate TLS IP check | TLS verified; user reports client trust done, actual browser trust not observed |
-| Public login/session | Login page 200; anonymous session endpoint 200 | Verified; actual authenticated login/logout/cookies pending |
-| Unauthenticated API/static boundaries | PCNs return JSON 401; environment/source/src paths return 404 | Verified |
-| Origin and proxy header | Foreign Origin rejected 403; duplicate forged X-PCN-Client-IP overwritten by IIS | Verified; remaining authenticated CSRF/throttling checks pending |
-| PCN navigation | Admin, create, saved PCN deep links and browser refresh through IIS | Pending |
-| Data behavior | Existing Scn_DB reused; deployment runs no migration/import/bootstrap | Database readiness verified; no pilot save/login claimed |
-| Isolation | Existing Default Web Site `*:80` binding unchanged | Verified binding; broader site regression pending |
-| Restart | Service restart returns Running/Automatic LocalService with loopback listener and SQL readiness | Verified |
-| Polling task | SupplierPCNTestDeployment SYSTEM/Highest, every ten minutes plus startup; Ready/result 0, deployed state matches pcn-test-5-1; second poll already_current with unchanged PID/state hash | Verified deployment and no-op poll |
-| Pipeline | Actions 37411798943 all steps successful; signed pcn-test-5-1 installed from commit 6170a0fe80d249314dfe2e50d5378490ef9107fd | Verified |
+To retire the test, stop only PCN resources and remove their binding/firewall exception and scoped client trust as appropriate. Do not delete either database or change unrelated IIS sites.
 
-The final Windows CI run passes 134 tests and seven isolated browser checks. The earlier local coverage measurement is 93.84% lines and 86.41% branches; it is not a coverage measurement of the deployed live SQL database. Browser test adapters isolate test state from Scn_DB.
-
-For save testing, record the test PCN identifiers and distinguish test records from operational records because writes persist in the existing database.
-
-## Operations and rollback
-
-Use the recorded Windows service and IIS site names to stop/restart only this pilot. Logs should contain safe error/request identifiers, not passwords, cookies, signed URLs or environment-file contents. Check the service log, IIS status and API readiness when troubleshooting startup/proxy failures.
-
-Before changing release selection, stop the service, preserve the previous release/service configuration, select the validated release, restart and check readiness/HTTPS access. Configuration remains in ProgramData. Rolling back application files does not undo database PCN saves or password changes and must remain compatible with the existing applied schema.
-
-To retire the test, stop the PCN service/site, remove only its binding/firewall exception and pilot resources, and remove temporary certificate trust on clients. Do not delete Scn_DB or alter unrelated IIS sites.
-
-Related: [application setup](../README.md), [migration plan](sql-server-migration.md), [API inventory](sql-server-api-checklist.md).
+Related: [employee-code design](employee-code-authentication.md), [GitHub deployment](github-deployment.md), [API inventory](sql-server-api-checklist.md), [application setup](../README.md).

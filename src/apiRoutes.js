@@ -3,15 +3,17 @@ const { getClientAddress } = require('./clientAddress');
 const { readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal } = require('./authHttp');
 const { hasRole, isInternal, assertRecordAccess } = require('./workflowAccess');
 const { buildWorkflow } = require('./masterData');
+const { normalizeUserId } = require('./employeeAccounts');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
-  const { service, repository, authService } = context;
+  const { service, repository, authService, authMode, employeeDirectory } = context;
   const send = (data, status = 200) => writeJson(res, status, {success:true,data});
   const route = url.pathname;
   const method = req.method;
   const token = readSessionToken(req);
   if (route === '/api/health' && method === 'GET') return send({status:'ok',service:'supplier-pcn-workflow',requestId});
+  if (route === '/api/auth/config' && method === 'GET') return send({mode:authMode,employeeProvisioningConfigured:Boolean(employeeDirectory)});
   if (route === '/api/ready' && method === 'GET') {
     try { await repository.readiness(); return send({status:'ready'}); }
     catch { throw new ApiError(503, 'Database is unavailable'); }
@@ -19,6 +21,7 @@ async function handleApi(req, res, url, context, requestId) {
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     const body = await readJsonBody(req);
+    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
     if (route === '/api/admin/login' && !hasRole(session.user, 'admin')) {
       await authService.logout(session.token);
@@ -27,16 +30,18 @@ async function handleApi(req, res, url, context, requestId) {
     setSessionCookie(res, session, {secure:context.secureCookies});
     return send({authenticated:true,user:session.user,csrfToken:session.csrfToken,expiresAt:session.expiresAt});
   }
-  const principal = await authService.session(token);
-  if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
-    return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
-  }
+  if (route === '/api/auth/change-password' && authMode !== 'password') throw new ApiError(403,'Employee-code sign-in does not use a password');
+  const loggingOut = ['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST';
+  const principal = await authService.session(token, {skipEmployeeLookup:loggingOut});
   if (['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     if (principal) enforceCsrf(req, principal);
     await authService.logout(token);
     clearSessionCookie(res, {secure:context.secureCookies});
     return send({authenticated:false});
+  }
+  if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
+    return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
   }
   const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
   if (!['GET','HEAD'].includes(method)) {
@@ -52,10 +57,29 @@ async function handleApi(req, res, url, context, requestId) {
   const admin = () => { if (!hasRole(user,'admin')) throw new ApiError(403,'Administrator access required'); };
   if (route.startsWith('/api/admin/')) {
     admin();
-    if (route === '/api/admin/users' && method === 'GET') return send(await authService.repository.listUsers());
+    if (route === '/api/admin/users' && method === 'GET') return send((await authService.repository.listUsers()).map(publicAccount));
+    if (route === '/api/admin/employees' && method === 'GET') {
+      if (!employeeDirectory) throw new ApiError(503,'Employee service is unavailable');
+      let employees;
+      try { employees = await employeeDirectory.search(url.searchParams.get('query') || ''); }
+      catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw error; throw new ApiError(503,'Employee service is unavailable'); }
+      return send(employees.map(employee => ({employeeCode:employee.employeeCode,displayName:employee.displayName,email:employee.email || null,sourceDepartment:employee.sourceDepartment || null,jobTitle:employee.jobTitle || null})));
+    }
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
-      return send(await authService.createUser({username:body.username,employeeId:body.employeeId ?? null,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+      if (Object.hasOwn(body,'employeeCode') || authMode === 'employee-code' || employeeDirectory) {
+        assertBodyKeys(body, ['employeeCode','roles','department']);
+        return send(await authService.createEmployee(body,employeeDirectory),201);
+      }
+      assertBodyKeys(body,['username','email','password','roles']);
+      return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+    }
+    const employeeLink = /^\/api\/admin\/users\/([^/]+)\/employee$/.exec(route);
+    if (employeeLink && method === 'POST') {
+      const userId = normalizeUserId(employeeLink[1]);
+      const body = await readJsonBody(req);
+      assertBodyKeys(body,['employeeCode']);
+      return send(await authService.linkEmployee({userId,employeeCode:body.employeeCode},employeeDirectory));
     }
     if (route === '/api/admin/directory-users' && method === 'GET') {
       if (!context.integrationService) throw new ApiError(503,'Directory lookup is not configured');
@@ -138,6 +162,15 @@ async function handleApi(req, res, url, context, requestId) {
     return res.end(file.Bytes);
   }
   throw new ApiError(405,'Method not allowed');
+}
+
+function assertBodyKeys(body, allowed) {
+  if (Object.keys(body).some(key => !allowed.includes(key))) throw new ApiError(400,'Unexpected request fields');
+}
+
+function publicAccount(user) {
+  const fields = ['id','username','email','roles','isActive','mustChangePassword','createdAt','employeeCode','displayName','department','identityProvider'];
+  return Object.fromEntries(fields.filter(key => Object.hasOwn(user,key)).map(key => [key,user[key]]));
 }
 
 function requireVersion(body) {

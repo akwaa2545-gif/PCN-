@@ -1,6 +1,8 @@
 const { ApiError } = require("./apiError");
 const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, isInternal } = require('./workflowAccess');
 const { isDeepStrictEqual } = require('node:util');
+const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
+const { emailList } = require('./integrationService');
 const {
   buildWorkflow,
   buildWorkflowProgress,
@@ -52,14 +54,19 @@ class PcnService {
   }
 
   async getNotificationSettings() {
-    const settings = normalizeNotificationSettings(await this.repository.getNotificationSettings());
+    const settings = normalizeMailRouting(await this.repository.getNotificationSettings());
     return { ...settings, flowConfigured: Boolean(process.env.POWER_AUTOMATE_MAIL_URL), directoryConfigured: Boolean(process.env.POWER_AUTOMATE_DIRECTORY_URL) };
   }
 
   async updateNotificationSettings(input, actor = "web") {
-    const settings = sanitizeNotificationSettings(input);
-
-    await this.repository.saveNotificationSettings(settings, actor);
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiError(400, 'Mail routing body must be an object');
+    if (input.schemaVersion !== undefined && input.schemaVersion !== 2) throw new ApiError(400, 'Unsupported mail routing schema version');
+    const current = await this.repository.getNotificationSettings();
+    if (input?.schemaVersion !== 2 && current.schemaVersion === 2) {
+      throw new ApiError(409, 'Mail routing changed; reload before saving');
+    }
+    const settings = input?.schemaVersion === 2 ? sanitizeDepartmentRouting(input, current) : sanitizeNotificationSettings(input);
+    await this.repository.saveNotificationSettings(settings, actor, settingsVersion(current));
     return this.getNotificationSettings();
   }
 
@@ -318,24 +325,6 @@ class PcnService {
   }
 }
 
-function normalizeNotificationSettings(value = {}) {
-  value = value || {};
-  const configuredGroups = Array.isArray(value.groups) ? value.groups : [];
-
-  return {
-    groups: notificationGroups.map((group) => {
-      const configured = configuredGroups.find((entry) => entry && entry.key === group.key);
-      const emails = configured ? configured.emails || "" : "";
-
-      return {
-        ...group,
-        emails,
-        recipients: configured ? normalizeNotificationRecipients(configured.recipients, emails) : []
-      };
-    })
-  };
-}
-
 function sanitizeNotificationSettings(input = {}) {
   if (input.flowUrl || input.directoryLookupUrl) throw new ApiError(400, 'Integration URLs are configured on the server');
   const groupInput = new Map(
@@ -356,10 +345,33 @@ function sanitizeNotificationSettings(input = {}) {
   };
 }
 
+function sanitizeDepartmentRouting(input, current) {
+  if (input.flowUrl || input.directoryLookupUrl) throw new ApiError(400, 'Integration URLs are configured on the server');
+  if (typeof input.version !== 'string' || !/^[a-f0-9]{64}$/.test(input.version)) throw new ApiError(400, 'Mail routing version is required');
+  if (input.version !== settingsVersion(current)) throw new ApiError(409, 'Mail routing changed; reload before saving');
+  if (!Array.isArray(input.groups) || input.groups.length !== mailGroups.length) throw new ApiError(400, 'All 16 mail recipient groups are required');
+  const keys = input.groups.map(group => group?.key);
+  if (new Set(keys).size !== mailGroups.length || keys.some(key => !mailGroups.some(group => group.key === key))) {
+    throw new ApiError(400, 'Mail recipient groups contain duplicate or unknown keys');
+  }
+  return { schemaVersion: 2, groups: mailGroups.map(definition => {
+    const configured = input.groups.find(group => group.key === definition.key);
+    if (configured.emails !== undefined && typeof configured.emails !== 'string') throw new ApiError(400, 'Mail recipient addresses must be text');
+    if (configured.recipients !== undefined && (!Array.isArray(configured.recipients) || configured.recipients.some(recipient => !recipient || typeof recipient !== 'object' || Array.isArray(recipient)))) {
+      throw new ApiError(400, 'Mail recipient profiles must be objects');
+    }
+    const emails = sanitizeEmailList(configured.emails || '');
+    if (emails) emailList(emails);
+    if (parseNotificationEmails(emails).length > 30) throw new ApiError(400, 'A mail recipient group supports at most 30 addresses');
+    return { ...definition, emails, recipients: sanitizeNotificationRecipients(configured.recipients, emails) };
+  }), legacyGroups: normalizeMailRouting(current).legacyGroups };
+}
+
 function normalizeNotificationRecipients(recipients, emails) {
   const emailSet = new Set(parseNotificationEmails(emails).map((email) => email.toLowerCase()));
 
   return (Array.isArray(recipients) ? recipients : [])
+    .filter(recipient => recipient && typeof recipient === 'object' && !Array.isArray(recipient))
     .map((recipient) => ({
       email: String(recipient.email || recipient.mail || "").trim(),
       displayName: String(recipient.displayName || recipient.name || "").trim(),
@@ -404,34 +416,28 @@ function sanitizeEmailList(value) {
     return "";
   }
 
-  const recipients = parseNotificationEmails(text);
+  const parsed = parseNotificationEmails(text);
+  const recipients = parsed.filter((email, index) => parsed.findIndex(value => value.toLowerCase() === email.toLowerCase()) === index);
 
-  const invalid = recipients.find((recipient) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient));
+  const invalid = recipients.find((recipient) => recipient.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient));
 
   if (invalid) {
     throw new ApiError(400, `Invalid notification email: ${invalid}`);
   }
 
-  return recipients.join("; ");
+  const normalized = recipients.join("; ");
+  if (normalized.length > 1000) throw new ApiError(400, 'emails is too long', { maxLength: 1000 });
+  return normalized;
 }
 
 function sanitizeDirectoryPhoto(value) {
-  const text = sanitizeString(value, "photo", 0, 150000);
-
-  if (!text) {
-    return "";
-  }
-
-  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(text)) {
-    return text.replace(/\s/g, "");
-  }
-
-  try {
-    const parsed = new URL(text);
-    return parsed.protocol === "https:" ? text : "";
-  } catch (error) {
-    return "";
-  }
+  const text = sanitizeString(value, 'photo', 0, 150000);
+  const match = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/= \t\r\n]+)$/i.exec(text);
+  if (!match) return '';
+  const encoded = match[2].replace(/[ \t\r\n]/g, '');
+  if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return '';
+  const photo = `data:image/${match[1].toLowerCase()};base64,${encoded}`;
+  return photo.length <= 100 * 1024 ? photo : '';
 }
 
 function sanitizeString(value, field, minLength, maxLength) {

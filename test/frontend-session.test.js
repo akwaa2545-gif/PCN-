@@ -20,6 +20,22 @@ function client(responses) {
 }
 const success = (data) => ({ status: 200, body: { success: true, data } });
 
+test('loading an expired or mismatched session resets authentication and stale CSRF without a login loop', async () => {
+  const c = client([success({ authenticated: true, user: { roles: ['admin'] }, csrfToken: 'stale-token' }),
+    { status: 401, body: { success: false, error: 'Employee access could not be verified' } }, success({})]);
+  await c.api.load();
+  assert.equal(JSON.stringify(await c.api.load()), JSON.stringify({ authenticated: false, user: null, csrfToken: '' }));
+  await c.api.fetch('/api/auth/login', { method: 'POST', body: '{"employeeCode":"001234"}' });
+  assert.equal(c.calls[2].options.headers.has('x-csrf-token'), false);
+  assert.deepEqual(c.redirects, []);
+});
+
+test('session infrastructure failures remain errors instead of appearing signed out', async () => {
+  const c = client([{ status: 503, body: { success: false, error: 'Employee service is unavailable' } }]);
+  await assert.rejects(c.api.load(), (error) => error.status === 503);
+  assert.deepEqual(c.redirects, []);
+});
+
 test('cookie session supplies CSRF for edits and never trusts role headers from callers', async () => {
   const c = client([success({ authenticated: true, user: { roles: ['supplier'] }, csrfToken: 'session-token' }), success({ id: 'PCN-2026-0001' })]);
   await c.api.load();
@@ -86,4 +102,16 @@ test('server password-change rejection redirects to password change', async () =
   const c = client([{ status: 403, body: { success: false, error: 'Change password first', code: 'PASSWORD_CHANGE_REQUIRED' } }]);
   await assert.rejects(c.api.fetch('/api/pcns'), (error) => error.status === 403 && error.code === 'PASSWORD_CHANGE_REQUIRED');
   assert.match(c.redirects[0], /changePassword=1$/);
+});
+
+test('employee-code sign-in preserves the code and rotates session CSRF for provisioning', async () => {
+  const c = client([success({ authenticated: true, user: { username: 'EMP001', employeeCode: 'EMP001', roles: ['admin'], mustChangePassword: false }, csrfToken: 'employee-session-token' }), success({ id: 'created-user' })]);
+  const session = await c.api.fetch('/api/auth/login', { method: 'POST', body: '{"employeeCode":"EMP001"}' });
+  assert.equal(session.user.employeeCode, 'EMP001');
+  assert.equal(session.user.mustChangePassword, false);
+  assert.equal(c.calls[0].options.body, '{"employeeCode":"EMP001"}');
+  assert.equal(c.calls[0].options.headers.has('x-windows-user'), false);
+  await c.api.fetch('/api/admin/users', { method: 'POST', body: '{"employeeCode":"001234","roles":["reviewer"],"department":"qaTet"}' });
+  assert.equal(c.calls[1].options.headers.get('x-csrf-token'), 'employee-session-token');
+  assert.deepEqual(c.redirects, []);
 });

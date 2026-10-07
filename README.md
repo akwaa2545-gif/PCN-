@@ -1,10 +1,12 @@
 ﻿# Supplier PCN workflow — SQL Server
 
-Updated: 2026-10-06.
+Updated: 2026-10-07.
 
 The Node API stores PCN form data, internal review, comments, approvals, audit history, routing settings and application accounts in SQL Server. The browser calls the API; the active application does not use Firebase Authentication or Firestore. The existing target is `svr120a / Scn_DB`.
 
-Current setup: migration `001_core.sql` is applied on SQL Server 2014 (compatibility 120), with 21 application tables plus `SchemaMigrations`, master-data version 1, and the first `itadmin` account. Its email is null and first login requires a password change. All seven email groups are empty. Live SQL round-trip checks passed; their test writes were rolled back. Existing Firebase records have not been imported.
+Employee-code-only login is deployed, backed by read-only `[KEY_Code_DB].[dbo].[tblEmployee]` on the same `svr120a` server. Administrators select an existing employee, then grant PCN roles and a PCN department; the 1,935-row employee source is not imported or modified. Signed `pcn-test-10-1`, migration 003 and the approved separate Administrator / IT account are accepted. See [the employee-code plan](plans/employee-code-authentication.md) for the source model and complete evidence.
+
+Migrations 001/002/003 are applied on SQL Server 2014 (compatibility 120), with 21 application tables plus `SchemaMigrations` and master-data version 1. Migration 003 retired former AD mappings without automatically granting employee access. The separate verified employee `2205529` / WATCHARAPHONG BANYEN has Administrator / IT access; the prior three accounts were preserved. The first `itadmin` account and empty initial mail mapping are historical setup details. Existing Firebase records have not been imported.
 
 Workbook-derived options come from `NSN-000244 Supplier Product and Process Change Notification Form.xlsx`. SQL saves the web form's PCN data, including ordered change rows and the complete nested internal review. This does not import or execute workbooks or macros.
 
@@ -32,7 +34,7 @@ Get-Credential -UserName 'scndb' -Message 'SQL Server connection account' |
 
 The default location is `%LOCALAPPDATA%\SupplierPCN\sql-credential.xml`; `PCN_SQL_CREDENTIAL_PATH` can select another absolute path. A service needs a credential protected for its Windows identity. Do not run the credential-reading helper directly: its output is intended only for Node.
 
-## Create tables and the first administrator
+## Migrations and administrator provisioning
 
 `Scn_DB` must already exist. Check connectivity:
 
@@ -42,27 +44,24 @@ npm run db:check
 
 The migration account needs database access and permission to create the `pcn` schema/tables and seed them. [The DBA permissions script](sql/grant-migration-permissions.sql) maps the existing login if needed, precreates the schema and grants scoped migration/data access without changing login credentials. It includes revocation steps for schema administration after migration. The runtime account needs application data access without schema alteration rights. Startup never creates tables automatically.
 
-For a new database, provide the first administrator's real seven digit Employee ID. This creates `itadmin` without a password to enter on the sign in page:
+Apply reviewed migrations from source with `npm run db:migrate` before selecting the corresponding release. Startup and the release consumer never execute DDL. [Migration 003](sql/migrations/003_employee_code_auth.sql) was applied at `2026-10-07T03:35:30.942Z`; 001/002 were unchanged. It adds provider state, retires former AD mappings and revokes their sessions/tokens. This rollout created the separately approved employee `2205529` Administrator / IT account without relinking the unrelated former AD administrator. Future explicit links preserve the intended existing PCN user ID, roles and ownership; never infer a source code from SamAccountName or import all employees as a substitute.
+
+For a fresh installation that requires a temporary maintenance administrator, password bootstrap remains available privately. This creates a legacy password account for explicit `AUTH_MODE=password` maintenance, not the normal employee login:
 
 ```powershell
-$env:PCN_BOOTSTRAP_USERNAME = 'itadmin'
-$env:PCN_BOOTSTRAP_EMPLOYEE_ID = Read-Host 'Initial administrator Employee ID (7 digits)'
+$bootstrapCredential = Get-Credential -UserName 'itadmin' -Message 'Initial application administrator'
+$env:PCN_BOOTSTRAP_USERNAME = $bootstrapCredential.UserName
+$env:PCN_BOOTSTRAP_PASSWORD = $bootstrapCredential.GetNetworkCredential().Password
 try { npm run db:migrate }
 finally {
   Remove-Item Env:PCN_BOOTSTRAP_USERNAME -ErrorAction SilentlyContinue
-  Remove-Item Env:PCN_BOOTSTRAP_EMPLOYEE_ID -ErrorAction SilentlyContinue
+  Remove-Item Env:PCN_BOOTSTRAP_PASSWORD -ErrorAction SilentlyContinue
 }
 ```
 
-`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Bootstrap creates the administrator only if that username is absent. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Existing installations may still have password based accounts; passwords remain hashed with Argon2id, but the sign in page now uses Employee IDs.
+`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Maintenance bootstrap creates the password administrator only if that username is absent. Passwords are stored as Argon2id hashes; first password login requires changing the password, and changes revoke sessions. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Normal employee-code accounts have no PCN password and must be explicitly provisioned from the source lookup.
 
-The sign in page now accepts a seven digit Employee ID. After updating the application, run `npm run db:migrate` to add the nullable, unique `EmployeeId` column, then assign a real ID to each existing account. The following command prompts for the actual ID for `itadmin`:
-
-```powershell
-npm run user:assign-id -- itadmin
-```
-
-The assignment clears the old first-login password-change requirement for that account and revokes its existing sessions. Repeat for other accounts. Accounts without an assigned Employee ID cannot use the sign in page. New accounts created through `POST /api/admin/users` can include `employeeId` with exactly seven digits; a password is not needed for those accounts. Employee ID sign in grants access to anyone who knows a registered ID, including an administrator's ID, so it should only be used where that access model is intended.
+`AUTH_MODE=employee-code` is the normal default; `AUTH_MODE=password` is an explicit maintenance choice for eligible unlinked legacy accounts. Employee codes remain text, including leading zeros. The source provides English/Thai names, job title and department hints but no email or active flag. Current source presence, active PCN account/provider and assigned PCN roles determine access; source outages fail closed with 503. Create User lets administrators select an employee lookup result and assign the roles/department manually. AD, Windows SSO, its proof headers/module/helper and its sign-in route are removed from the replacement runtime. Existing PCN signing/ownership rules and mail-directory lookup are preserved.
 
 Mail routing starts empty. Leave `POWER_AUTOMATE_MAIL_URL`, `POWER_AUTOMATE_DIRECTORY_URL` and `INTEGRATION_ALLOWED_HOSTS` empty until configured. No default recipient is used.
 
@@ -88,11 +87,13 @@ The server checks schema and master data before listening. Production requires `
 
 ## Windows HTTPS pilot
 
-The HTTPS pilot is deployed on `THCHA-WEBHOST01` at `https://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. TLS checks with the pinned public certificate and IP verification passed; health/readiness and the login page return 200. Service restart passed, and port 3000 is unreachable from the workstation. Unauthenticated PCN requests are denied. Actual authenticated pilot login and browser certificate validation are still pending. See [the Windows test deployment runbook](plans/windows-test-deployment.md) for exact release/configuration paths, certificate trust and acceptance evidence.
+The employee-code HTTPS pilot is on `THCHA-WEBHOST01` at `https://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. NetworkService ownership, WinSW parent, listener isolation and SQL readiness passed. Real HTTPS acceptance passed 26 checks with CA/IP verification and no Windows authentication challenge. Local real API and SQL-backed headless browser checks also passed; the user's own Edge GUI remains unobserved. See [the Windows deployment runbook](plans/windows-test-deployment.md).
 
-This pilot uses the existing `svr120a / Scn_DB`: PCN saves are real persistent database writes. Deployment reuses the applied schema and accounts; it does not run migration, import or bootstrap. Mail mappings remain empty. Windows 10 Pro has a small IIS concurrency limit, so this host is for a limited pilot; wider use requires an appropriate Windows Server deployment.
+This pilot uses the existing `svr120a / Scn_DB`: PCN saves are real persistent database writes. Deployment reuses the applied schema and accounts; it does not run migration, import or bootstrap. Recipient routing is maintained separately. Windows 10 Pro has a small IIS concurrency limit, so this host is for a limited pilot; wider use requires an appropriate Windows Server deployment.
 
-The requested [GitHub deployment pipeline](plans/github-deployment.md) has successfully built and deployed signed release `pcn-test-5-1`. [Actions run 37411798943](https://github.com/akwaa2545-gif/PCN-/actions/runs/37411798943) passed all 134 tests and seven isolated browser checks. The protected SYSTEM task deployed the release to `C:\SupplierPCN\releases\pcn-test-5-1`; external HTTPS readiness and access-boundary probes passed afterward. The active release runs as LocalService on loopback, and a repeated poll returned `already_current` without restarting it. The task polls outbound every ten minutes and at startup, with no public inbound deployment endpoint or self-hosted CI runner. GitHub holds the release-signing key, not SQL credentials.
+The [GitHub deployment pipeline](plans/github-deployment.md) deployed signed [pcn-test-10-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-10-1) from main `c827d9c1c23c27631604936807dbbc352101c11e`, after [Actions 37567205169](https://github.com/akwaa2545-gif/PCN-/actions/runs/37567205169) passed. The protected SYSTEM task was resumed after the reviewed cutover and is enabled / Ready / result 0; a repeated poll was a no-op. It polls outbound every ten minutes and at startup, with no public deployment listener or self-hosted CI runner. GitHub holds the release-signing key, not SQL credentials.
+
+**PCNTest only** now has Anonymous Authentication enabled / Windows Authentication disabled; the retired identity module/key were protected/archived and removed from the live site. HTTPS, SQL/mail secrets, existing pool permissions and loopback isolation were retained. The ordinary proxy overwrites `X-PCN-Client-IP` from `REMOTE_ADDR`; employee-code access has no AD header proof. Default Web Site HTTP :80 remains available.
 
 ## Import existing PCN data
 
@@ -116,11 +117,11 @@ The compact admin **Mail service** row has a status badge and **Check status** b
 
 The earlier mail/health change passed local verification and backend, JavaScript, code and security reviews: its coverage run passed 148 tests with 95.00% line, 87.54% branch and 94.67% function coverage, plus 14 isolated browser checks without SQL or flow calls. These are historical results, separate from the latest full-suite results below and the earlier deployed release's 134 tests/seven browser checks. Release CI and live acceptance are separate from local verification.
 
-The requested private mail configuration is saved in the host's protected external environment file and will be read on the next service start. A read-only SQL check found zero pending/sending jobs before the update. The update retained file permissions and a protected backup; it made no SQL mutations, restarted no service and invoked no flow. No test request or email is part of configuration or health checking. Normal queued workflow jobs are still processed by the worker when mail is configured.
+Private mail/directory configuration is stored outside releases on the host. The directory update retained the existing mail/SQL values, file permissions and protected backup under the deployment mutex, after a zero pending/sending-job check; that configuration update made no SQL mutations, restarted no service and invoked no flow. The subsequent release deployment restarted the service with the new configuration. Mail configuration passes local validation, and a host-side directory lookup returned one matching profile with an inline photo. No mail test or delivery verification was performed. Normal queued workflow jobs are processed by the worker when mail is configured.
 
 Directory lookup uses a distinct private `POWER_AUTOMATE_DIRECTORY_URL`, with its exact hostname in `INTEGRATION_ALLOWED_HOSTS`; it is different from the mail endpoint. The original directory configuration was recovered once through a read-only lookup of legacy Firestore settings. The SQL app now calls Power Automate directly from the backend, with no Firebase runtime dependency. The ignored local `.env` enables directory lookup only and does not enable local mail. Private configuration remains external to release files.
 
-The admin directory API sends the same search text as both `query` and `searchTerm` and accepts an array or `users`, `value` or `results` response. It returns bounded profile fields, including job title/department, and permits inline PNG/JPEG/GIF/WebP photos whose complete data URI is at most 100 KiB; remote image URLs are dropped. A live lookup of the original flow returned one matching profile with those fields. Browser checks confirmed the dropdown displays name, email, title/department and photo. Identifying values and signed endpoint details stay private. Local SQL readiness returned 200 after watch reload; deployed feature acceptance must be recorded separately.
+The admin directory API sends the same search text as both `query` and `searchTerm` and accepts an array or `users`, `value` or `results` response. It returns bounded profile fields, including job title/department, and permits inline PNG/JPEG/GIF/WebP photos whose complete data URI is at most 100 KiB; remote image URLs are dropped. Live backend lookups locally and from the host returned a matching profile with those fields. Isolated browser checks confirmed dropdown rendering, and deployed HTML contains the compact mail row. Identifying values and signed endpoint details stay private. Actual authenticated use of the deployed health/directory UI remains unverified.
 
 Attachment APIs store PDF, PNG, JPEG or UTF-8 text in SQL, capped at 10 MiB per file and 20 files / 50 MiB per PCN. Upload/delete require the PCN version and atomically recheck permissions/stage, advance the version and record an audit. Uploads are `pendingScan`; downloads return 423 until a trusted scanner marks them clean. Scanner integration and the attachment upload interface are pending. Form document checkboxes are requirement/history flags, not proof of scanned content.
 
@@ -133,12 +134,12 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The latest full-suite coverage run passed 155/155 tests with 95.03% line, 88.27% branch and 94.70% function coverage. Focused directory integration passed 14/14; all 16 isolated browser checks passed. The compact row also passed 14 focused frontend tests, and a reviewer independently passed 14 notification-health API tests. Code, JavaScript and accessibility reviews approved with no findings; screenshot inspection confirmed one row without metrics. These local checks do not establish release CI, deployed authenticated use or email delivery.
+Employee-code verification passed 240 unit/API tests with 95.85% line / 89.32% branch / 96.32% function coverage and 59 isolated browser checks. Real local and HTTPS API acceptance each passed 26 checks, and a real headless browser against the local SQL-backed runtime passed login, Users/lookup, role/department controls and logout. The [complete acceptance record](plans/employee-code-authentication.md#acceptance--2026-10-07) distinguishes these results from the user's unobserved Edge GUI and operational PCN saves; no email delivery is claimed.
 
-The release's Windows CI run passed all 134 tests and seven isolated browser checks. An earlier local coverage run measured 93.84% lines and 86.41% branches; this is separate from the final CI test count. The corrected Windows DPAPI fixtures are included in the successful CI run. SQL-backed HTTPS readiness and unauthenticated access boundaries also passed on the deployed host.
+The first release `pcn-test-5-1` passed 134 tests and seven isolated browser checks; its earlier 93.84% line/86.41% branch coverage is historical. The current release and its acceptance record are in the deployment runbooks.
 
 Browser smoke checks passed for forced password change, re-login, empty routing, a blank supplier form, creation and reload using isolated test adapters. They do not establish actual authenticated browser use of the HTTPS pilot. `scripts/live-sql-smoke.js` separately verified the real database, authentication, Unicode workbook persistence, stale writes, attachment quarantine/audit and soft deletion inside a rolled-back transaction. It accepts the bootstrap password only through `PCN_SMOKE_BOOTSTRAP_PASSWORD` and is intended for initial setup, not routine deployment.
 
 See [API inventory](plans/sql-server-api-checklist.md), [table mapping](plans/sql-server-table-mapping.md), and [migration plan](plans/sql-server-migration.md). The migration plan includes future acceptance criteria, not a declaration that every proposed feature exists.
 
-Pending features include password recovery/invitations, user-management UI and role/disable endpoints, company membership/reviewer assignments, list pagination, historical-master rendering/version API, attachment scanning/UI, mail status/retry operations and general command idempotency. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.
+Create User selects SQL-source employees with explicit PCN role/department grants. Remaining work includes the user's Edge GUI observation, operational save/signing/link acceptance, role/disable management, company membership/reviewer assignments, list pagination, historical-master rendering/version API, attachment scanning/UI, mail status/retry operations and general command idempotency. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.

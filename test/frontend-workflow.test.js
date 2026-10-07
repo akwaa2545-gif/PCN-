@@ -32,3 +32,26 @@ test('complete group queues once and empty email mapping never claims email was 
   assert.match(message, /no.*recipient|recipient.*not configured/i);
   assert.doesNotMatch(message, /submitted to Power Automate|email sent/i);
 });
+
+test('atomic saved handoff reports next action without a second HTTP write', async () => {
+  const c = app();
+  c.app.state.pendingWorkflowNotifications.add('signoff.gscTet.approved');
+  const message = await c.app.sendPendingWorkflowNotifications({ id: 'PCN-2026-0007',
+    notification: { queued: true, nextLabel: 'GSC/TET Checked' } });
+  assert.equal(c.calls.length, 0);
+  assert.equal(c.app.state.pendingWorkflowNotifications.size, 0);
+  assert.match(message, /queued for GSC\/TET Checked/);
+  assert.doesNotMatch(message, /email sent|delivered/i);
+});
+
+test('blocked or unchanged saved handoff never retries through the legacy endpoint', async () => {
+  for (const reason of ['recipient_not_configured', 'mail_not_configured', 'tapbu_requirement_not_selected', 'notification_configuration_invalid', 'no_transition']) {
+    const c = app();
+    c.app.state.pendingWorkflowNotifications.add('signoff.gscTet.prepared');
+    const message = await c.app.sendPendingWorkflowNotifications({ notification: { queued: false, reason } });
+    assert.equal(c.calls.length, 0);
+    assert.equal(c.app.state.pendingWorkflowNotifications.size, 0);
+    if (reason !== 'no_transition') assert.match(message, /not queued/);
+    else assert.equal(message, '');
+  }
+});
