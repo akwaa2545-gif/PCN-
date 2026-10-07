@@ -20,6 +20,7 @@
           <button class="ghost-button" id="signOutButton" type="button">Sign out</button>
           <button class="ghost-button admin-nav-button" id="adminRecordsButton" type="button">PCN Records</button>
           <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button">Mail Routing</button>
+          <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button">Users</button>
           <a class="ghost-link" href="/create">Create PCN</a>
           <button class="primary-button" id="adminRefreshButton" type="button">Refresh</button>
         </div>
@@ -175,8 +176,8 @@
 
               <div class="mail-routing-summary">
                 <div>
-                  <span class="section-label">Saved format</span>
-                  <strong>Semicolon separated recipients</strong>
+                  <span class="section-label">Add recipients</span>
+                  <strong>Click Add and select a directory recipient</strong>
                 </div>
                 <div>
                   <span class="section-label">Validation</span>
@@ -209,10 +210,52 @@
             </section>
           </div>
         </section>
+        <section class="admin-view" id="adminUsersView" aria-labelledby="adminUsersTitle">
+          <section class="admin-panel users-panel">
+            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Create employee access from Active Directory, then assign a PCN role and department.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
+            <p id="usersMessage" class="admin-message" role="status" aria-live="polite" aria-atomic="true">Open Users to load employee access.</p>
+            <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
+              <h3 id="employeeFormTitle">Create employee user</h3>
+              <p id="employeeProvisioningHelp">Select an employee from Active Directory. The employee code comes from SamAccountName. New employee users sign in with Windows and have no PCN password.</p>
+              <label for="employeeSearch">Search AD name or employee code</label>
+              <input id="employeeSearch" type="search" autocomplete="off" maxlength="100" aria-describedby="employeeProvisioningHelp employeeSearchStatus" aria-controls="employeeResults" disabled />
+              <p id="employeeSearchStatus" class="admin-message" role="status" aria-live="polite" aria-atomic="true"></p>
+              <div id="employeeResults" class="employee-results" role="group" aria-label="AD employee search results" hidden></div>
+              <div class="employee-selected" id="employeeSelected" hidden>
+                <label for="employeeCode">Selected employee code (SamAccountName)</label><input id="employeeCode" type="text" readonly />
+                <p id="employeeProfile"></p>
+              </div>
+              <div id="employeeAssignments" class="employee-assignments">
+                <label for="employeeRole">PCN role<select id="employeeRole" required><option value="">Select role</option><option value="admin">Administrator</option><option value="reviewer">Reviewer</option><option value="supplier">Requester</option><option value="gsc">GSC</option><option value="productionengineering">Production engineering</option><option value="qa">QA</option><option value="tapbu">TaPBU</option></select></label>
+                <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
+              </div>
+              <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. Its PCN password will stop working and existing sessions will be signed out. Windows sign-in requires server SSO to be enabled.</p>
+              <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Clear selection</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
+            </form>
+            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee code</th><th scope="col">Employee</th><th scope="col">Role</th><th scope="col">PCN department</th><th scope="col">Status</th><th scope="col">Sign-in</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
+          </section>
+        </section>
       </main>
     </div>
 
+    <dialog class="recipient-dialog" id="notificationRecipientDialog" aria-labelledby="notificationRecipientTitle" aria-describedby="notificationRecipientInstructions">
+      <div class="recipient-dialog-heading">
+        <span class="section-label">Add email recipient</span>
+        <h2 id="notificationRecipientTitle">Recipient list</h2>
+        <p id="notificationRecipientInstructions">Search by name or email and select a directory result. Typed text is only used to search. Signing permissions stay the same.</p>
+      </div>
+      <div class="notification-step recipient-dialog-editor" id="notificationRecipientEditor">
+        <label class="recipient-dialog-input-label" for="notificationRecipientEmail">Search name or email</label>
+        <div class="notification-person-list" id="notificationRecipientList"></div>
+        <div class="notification-group-warning" id="notificationRecipientValidation" role="status" aria-live="polite" aria-atomic="true"></div>
+      </div>
+      <div class="recipient-dialog-actions">
+        <button class="ghost-button" id="notificationRecipientCancelButton" type="button">Cancel</button>
+        <button class="primary-button" id="notificationRecipientConfirmButton" type="button" disabled>Add recipient</button>
+      </div>
+    </dialog>
     <script src="/session-client.js"></script>
     <script src="/admin.js"></script>
+    <script src="/admin-users.js"></script>
   </body>
 </html>

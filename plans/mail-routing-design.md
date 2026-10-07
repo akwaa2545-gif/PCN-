@@ -16,11 +16,11 @@ Mail Routing now separates five departments into Approved, Checked and Prepared 
 
 QA/TET initial review and Final Judgment reuse the same three QA/TET lists. Their stage identifiers and messages remain distinct. The supplierNotification list remains the GSC/TET supplier-communication handoff; the app does not infer a supplier recipient from the PCN.
 
-Each list accepts directory-selected people or manually entered valid addresses, including distribution lists. Profiles retain safe name/email/job-title/department/inline-photo fields; directory department text is descriptive, not an authorization assignment. Lists are bounded to 30 unique addresses and 1,000 normalized email characters.
+New recipients added through the popup must be selected from directory results. Typed text is only a search query; editing a selection requires selecting a result again. Confirmation stays disabled for unavailable lookup, no match, or an unselected address. Existing saved contacts and explicit legacy copying remain available. Profiles retain safe name/email/job-title/department/inline-photo fields; directory department text is descriptive, not an authorization assignment. Lists are bounded to 30 unique addresses and 1,000 normalized email characters. This selection rule is enforced in the Add UI; the settings API contract is unchanged.
 
 ## Administrator UI
 
-The screen keeps the compact **Mail service / badge / Check status** row, then displays five department cards with three labelled recipient sections each and a separate supplier-notification card. QA/TET explains its review/final-judgment reuse. Directory search, profile display, manual add/remove and empty-list indicators remain available.
+The screen keeps the compact **Mail service / badge / Check status** row, then displays five department cards with three labelled recipient sections each and a separate supplier-notification card. QA/TET explains its review/final-judgment reuse. Add opens a square popup titled with the department and action. Lists show static contact/profile rows with Remove and empty-list indicators; visible search inputs appear only in the popup.
 
 Previous whole-department contacts appear separately as read-only **Unassigned contacts from previous routing**. An administrator can copy a legacy contact group to a selected new list; merging/deduplication does not alter the preserved legacy group or guess step membership. The 15 step lists start empty when reading old seven-group settings. Existing supplierNotification recipients are retained for the new supplier list because its key/purpose is unchanged.
 
@@ -94,7 +94,7 @@ Power Automate still receives exactly to, subject, message and senderName. The e
 
 - [x] Local implementation of fixed 16 groups, department/action editor, legacy-copy controls, versioned full saves and conflict draft preservation.
 - [x] Local save-time transactional handoff, stable activation deduplication, policy coexistence, blocked state and pending-only cancellation.
-- [x] Full local tests/coverage: 184/184, 95.33% lines / 88.87% branches / 95.32% functions; browser 26/26. Accessibility approved; local served admin.js returned 200 with separated cards, step keys and versioned Save Mail.
+- [x] Full local tests/coverage after popup and directory-selection changes: 190/190, 95.49% lines / 88.99% branches / 95.32% functions; browser 42/42. Popup target labels, square styling, keyboard access, selection invalidation and unavailable-lookup rejection verified. Accessibility approved; local served admin.js returned 200 with separated cards, step keys and versioned Save Mail.
 - [x] Final code/JavaScript edge-fix review, independent handoff checks, security and accessibility reviews approved with no findings.
 - [ ] Publish/CI/deploy this routing implementation and verify its target environment separately; current deployed release predates it.
 - [ ] Explicit blocked-handoff retry with current-state/version revalidation and activation reuse.

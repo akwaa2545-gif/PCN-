@@ -9,9 +9,10 @@ const run = promisify(execFile);
 
 const ROOT_FILES = new Set([
   'server.js', 'package.json', 'package-lock.json', 'admin.html', 'form.html', 'index.html', 'login.html',
-  'app.js', 'admin.js', 'login.js', 'session-client.js', 'auth.css', 'styles.css',
+  'app.js', 'admin.js', 'admin-users.js', 'login.js', 'session-client.js', 'auth.css', 'styles.css',
   'tokin-header-logo.png', 'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
   'scripts/read-sql-credential.ps1',
+  'scripts/ad-directory.ps1',
 ]);
 
 function selectRuntimeFiles(tracked) {

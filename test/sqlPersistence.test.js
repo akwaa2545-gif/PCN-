@@ -97,7 +97,7 @@ test('readiness rejects unapplied migration and missing seeded master data', asy
   const pool = mockPool([{ recordsets: [[], [], []] }]);
   await assert.rejects(new SqlPcnRepository(pool).readiness(), { statusCode: 503 });
   const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 21 }]] }]);
-  assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: 1 });
+  assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: migrationManifest.length });
 });
 
 test('migration manifest contains repeatable normalized SQL and no embedded credentials', () => {

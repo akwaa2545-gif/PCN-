@@ -117,6 +117,10 @@ For save testing, record the test PCN identifiers and distinguish test records f
 
 ## Operations and rollback
 
+The local employee-provisioning/Windows-authentication feature is **not** in the verified pcn-test-6-1 deployment. Follow [its staged runbook](employee-windows-authentication.md) before selecting a release containing it: apply migration 002 from reviewed source (runtime ZIPs contain no migrations/automatic DDL), verify an AD-readable Node service identity, keep password mode while creating a separate AD-mapped administrator, then configure Windows Authentication/SSL on PCNTest only before enabling Windows mode. Current LocalService network access must not be assumed to work for AD. IIS must overwrite X-PCN-Windows-User from LOGON_USER and the private proxy-key header as well as X-PCN-Client-IP; IIS receives no access to the SQL/environment file. No live migration 002, AD, Windows-authentication IIS change, deployment or push has been performed for this feature. Existing pilot acceptance above remains password-mode evidence.
+
+Before releasing that feature, update the protected installed deployment consumer through the reviewed maintenance procedure: its archive allowlist must admit `scripts/ad-directory.ps1` and `admin-users.js`. The repository consumer and signed-ZIP round-trip check are updated/passing locally; repository changes alone do not replace the installed consumer. No live consumer update is claimed.
+
 Use the recorded Windows service and IIS site names to stop/restart only this pilot. Logs should contain safe error/request identifiers, not passwords, cookies, signed URLs or environment-file contents. Check the service log, IIS status and API readiness when troubleshooting startup/proxy failures.
 
 Before changing release selection, stop the service, preserve the previous release/service configuration, select the validated release, restart and check readiness/HTTPS access. Configuration remains in ProgramData. Rolling back application files does not undo database PCN saves or password changes and must remain compatible with the existing applied schema.

@@ -10,6 +10,8 @@
     healthUnavailable: false,
     directoryLookupStatus: "Directory lookup not configured",
     hasMailChanges: false,
+    mailDraftRows: null,
+    recipientTargetKey: null,
     mailConflict: false,
     view: getViewFromHash(),
     isLoading: true,
@@ -23,6 +25,7 @@
   const els = {};
   const directoryLookupTimers = new WeakMap();
   const directoryLookupControllers = new WeakMap();
+  const directorySelections = new WeakMap();
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -45,10 +48,19 @@
       "notificationSaveButton",
       "notificationReloadButton",
       "notificationLegacyGroups",
+      "notificationRecipientDialog",
+      "notificationRecipientTitle",
+      "notificationRecipientEditor",
+      "notificationRecipientList",
+      "notificationRecipientValidation",
+      "notificationRecipientCancelButton",
+      "notificationRecipientConfirmButton",
       "pcnAdminView",
       "mailRoutingView",
+      "adminUsersView",
       "adminRecordsButton",
       "adminMailRoutingButton",
+      "adminUsersButton",
       "mailRoutingMessage",
       "notificationHealthPanel",
       "notificationHealthStatus",
@@ -111,12 +123,39 @@
     els.adminStatusButton.addEventListener("click", updateSelectedStatus);
     els.notificationSaveButton.addEventListener("click", saveNotificationSettings);
     els.notificationReloadButton.addEventListener("click", reloadMailRouting);
+    els.notificationRecipientCancelButton.addEventListener("click", closeRecipientDialog);
+    els.notificationRecipientConfirmButton.addEventListener("click", confirmRecipientDialog);
+    els.notificationRecipientDialog.addEventListener("close", () => {
+      if (!els.notificationRecipientDialog.open && state.recipientTargetKey) finishRecipientDialog();
+    });
+    els.notificationRecipientDialog.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      const controls = [...els.notificationRecipientDialog.querySelectorAll("button:not([disabled]), input:not([type=hidden]):not([disabled])")]
+        .filter((control) => control.getClientRects().length);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    });
+    els.notificationRecipientDialog.addEventListener("cancel", (event) => {
+      const row = els.notificationRecipientList.querySelector(".notification-person");
+      const suggestions = row?.querySelector(".directory-suggestions");
+      if (suggestions && !suggestions.hidden) {
+        event.preventDefault();
+        dismissDirectoryLookup(row.querySelector("input"), row);
+        row.querySelector("input").focus();
+      } else {
+        event.preventDefault();
+        closeRecipientDialog();
+      }
+    });
     els.notificationHealthRefreshButton.addEventListener("click", refreshNotificationHealth);
     els.adminSearchInput.addEventListener("input", updateTableFilters);
     els.adminStatusFilter.addEventListener("change", updateTableFilters);
     els.adminRiskFilter.addEventListener("change", updateTableFilters);
     els.adminRecordsButton.addEventListener("click", () => setAdminView("pcns"));
     els.adminMailRoutingButton.addEventListener("click", () => setAdminView("mail"));
+    els.adminUsersButton.addEventListener("click", () => setAdminView("users"));
     window.addEventListener("hashchange", syncViewFromHash);
   }
 
@@ -197,6 +236,7 @@
       state.routingMessage = "Mail routing saved.";
       state.directoryLookupStatus = state.notificationSettings.directoryConfigured ? "Directory lookup saved" : "Directory lookup not configured";
       state.hasMailChanges = false;
+      state.mailDraftRows = null;
       state.mailConflict = false;
       showAdminNotice("success", "Mail routing saved", "Workflow notifications and directory lookup will use the updated settings.");
       return true;
@@ -220,6 +260,7 @@
       const settings = await apiFetch("/api/notification-settings");
       state.notificationSettings = settings;
       state.hasMailChanges = false;
+      state.mailDraftRows = null;
       state.mailConflict = false;
       state.routingMessage = "Latest saved routing loaded.";
       reloaded = true;
@@ -281,7 +322,14 @@
   function markMailChanged() {
     state.hasMailChanges = true;
     if (els.notificationGroups && els.notificationGroups.querySelector("[data-notification-group]")) {
-      state.notificationSettings = mergeNotificationSettings(getMailRoutingPayload());
+      state.mailDraftRows = Object.fromEntries([...els.notificationGroups.querySelectorAll("[data-notification-group]")].map((group) => [
+        group.dataset.notificationGroup,
+        getRecipientInputs(group).map((input) => ({
+          ...getRecipientPayload(input),
+          inputValue: input.value,
+          verifiedEmail: input.dataset.verifiedEmail || ""
+        }))
+      ]));
     }
     state.routingMessage = state.mailConflict ? "Routing changed on the server. Your unsaved draft is kept; reload saved routing to discard it." : "Unsaved recipient changes.";
     if (els.mailRoutingMessage) els.mailRoutingMessage.textContent = state.routingMessage;
@@ -680,13 +728,117 @@
     card.setAttribute("aria-label", group.label);
     card.innerHTML = `<div class="notification-group-header"><div><h4>${escapeHtml(heading)}</h4><small data-recipient-count></small></div><button class="ghost-button notification-add-button" type="button" aria-label="Add recipient to ${escapeHtml(group.label)}">Add</button></div><div class="notification-person-list"></div><div class="notification-group-warning" aria-live="polite" hidden></div>`;
     const list = card.querySelector(".notification-person-list");
-    const recipients = getNotificationGroupRecipients(group);
-    (recipients.length ? recipients : [""]).forEach((recipient) => appendRecipientRow(list, recipient));
+    const recipients = getEditorGroupRecipients(group);
+    recipients.forEach((recipient) => appendRecipientRow(list, recipient));
+    updateRecipientCount(list);
+    renderRecipientValidation(list);
     card.querySelector(".notification-add-button").addEventListener("click", () => {
-      appendRecipientRow(list, "", true);
-      markMailChanged();
+      openRecipientDialog(group);
     });
     return card;
+  }
+
+  function recipientTargetLabel(group) {
+    if (!group.action) return group.label;
+    const action = titleCase(group.action);
+    return `${group.label.slice(0, -(action.length + 1))} — ${action}`;
+  }
+
+  function getRecipientAdditionIssue(email, existingEmails) {
+    if (!isValidEmail(email)) return "Select a directory result with a valid email address.";
+    if (existingEmails.some((entry) => entry.toLowerCase() === email.toLowerCase())) return "This recipient is already in this list.";
+    if (existingEmails.length >= 30) return "Each list can contain at most 30 recipients.";
+    if ([...existingEmails, email].join("; ").length > 1000) return "Recipient emails must fit within 1,000 characters per list.";
+    return "";
+  }
+
+  function getDirectorySelectionIssue(input, selection, configured, targetKey) {
+    if (!configured) return "Directory lookup is unavailable. A recipient cannot be added until lookup is configured.";
+    if (!selection || selection.targetKey !== targetKey || input.dataset.directoryLookupState !== "verified"
+      || input.value.trim() !== selection.email) return "Select a recipient from the directory results. Typed text is only used for searching.";
+    return "";
+  }
+
+  function findRecipientTargetCard() {
+    return [...els.notificationGroups.querySelectorAll("[data-notification-group]")].find((card) => card.dataset.notificationGroup === state.recipientTargetKey);
+  }
+
+  function openRecipientDialog(group) {
+    if (isAnyBusy()) return;
+    state.recipientTargetKey = group.key;
+    els.notificationRecipientTitle.textContent = recipientTargetLabel(group);
+    els.notificationRecipientEditor.dataset.notificationGroup = group.key;
+    els.notificationRecipientEditor.setAttribute("aria-label", group.label);
+    els.notificationRecipientList.innerHTML = "";
+    const row = appendRecipientRow(els.notificationRecipientList, "");
+    row.querySelector(".notification-remove-button").remove();
+    const input = row.querySelector("input");
+    input.id = "notificationRecipientEmail";
+    input.setAttribute("aria-label", `Search name or email for ${group.label}`);
+    input.maxLength = 320;
+    input.setAttribute("aria-describedby", "notificationRecipientValidation");
+    updateRecipientDialog();
+    els.notificationRecipientDialog.showModal();
+    input.focus();
+  }
+
+  function updateRecipientDialog() {
+    const input = els.notificationRecipientList.querySelector("input");
+    const target = findRecipientTargetCard();
+    if (!input || !target) return;
+    const email = input.value.trim();
+    const existing = getRecipientInputs(target).map((entry) => entry.value.trim()).filter(Boolean);
+    const selection = directorySelections.get(input);
+    const issue = getDirectorySelectionIssue(input, selection, isDirectoryLookupConfigured(), state.recipientTargetKey)
+      || getRecipientAdditionIssue(email, existing);
+    els.notificationRecipientConfirmButton.disabled = Boolean(issue);
+    els.notificationRecipientValidation.hidden = false;
+    const lookupMessage = {
+      queued: "Searching directory...", searching: "Searching directory...", results: state.directoryLookupStatus,
+      "no-match": "No directory match.", failed: "Directory lookup is unavailable."
+    }[input.dataset.directoryLookupState] || "";
+    const entryMessage = email || !isDirectoryLookupConfigured() ? issue || "Selected directory recipient is ready to add." : "Search a name or email, then select a directory result.";
+    els.notificationRecipientValidation.textContent = [lookupMessage, entryMessage].filter(Boolean).join(" ");
+    input.setAttribute("aria-invalid", String(Boolean(email && issue)));
+    input.setCustomValidity(issue);
+  }
+
+  function notifyRecipientEdit(row) {
+    if (row.closest("#notificationRecipientDialog")) updateRecipientDialog();
+    else markMailChanged();
+  }
+
+  function confirmRecipientDialog() {
+    const target = findRecipientTargetCard();
+    const input = els.notificationRecipientList.querySelector("input");
+    if (!els.notificationRecipientDialog.open || !target || !input) return;
+    updateRecipientDialog();
+    if (els.notificationRecipientConfirmButton.disabled) return;
+    const recipient = directorySelections.get(input).recipient;
+    appendRecipientRow(target.querySelector(".notification-person-list"), recipient, false, Boolean(input.dataset.verifiedEmail));
+    markMailChanged();
+    const label = els.notificationRecipientTitle.textContent;
+    closeRecipientDialog();
+    showAdminNotice("success", "Recipient added", `${recipient.email} added to ${label}. Save Mail to save routing.`);
+  }
+
+  function closeRecipientDialog() {
+    els.notificationRecipientDialog.close();
+    finishRecipientDialog();
+  }
+
+  function finishRecipientDialog() {
+    const input = els.notificationRecipientList.querySelector("input");
+    if (input) {
+      directorySelections.delete(input);
+      window.clearTimeout(directoryLookupTimers.get(input));
+      abortDirectoryLookup(input);
+    }
+    const target = findRecipientTargetCard();
+    els.notificationRecipientList.innerHTML = "";
+    els.notificationRecipientEditor.removeAttribute("data-notification-group");
+    state.recipientTargetKey = null;
+    target?.querySelector(".notification-add-button")?.focus();
   }
 
   function renderLegacyContacts() {
@@ -750,7 +902,7 @@
     list.innerHTML = "";
     merged.forEach((recipient) => appendRecipientRow(list, recipient));
     markMailChanged();
-    list.querySelector("input")?.focus();
+    list.querySelector(".notification-remove-button")?.focus();
   }
 
   function appendRecipientRow(list, recipient, shouldFocus = false, isVerified = Boolean(getRecipientEmail(recipient))) {
@@ -767,30 +919,28 @@
     avatar.textContent = getRecipientInitial(email);
 
     const input = document.createElement("input");
-    input.type = "text";
+    const inDialog = Boolean(list.closest("#notificationRecipientDialog"));
+    input.type = inDialog ? "text" : "hidden";
     input.dataset.recipientEmail = "true";
-    input.placeholder = isDirectoryLookupConfigured() ? "Search name or email" : "person@example.com";
-    input.value = email;
-    input.dataset.verifiedEmail = email && isVerified ? email.toLowerCase() : "";
+    input.placeholder = isDirectoryLookupConfigured() ? "Search name or email" : "Directory lookup unavailable";
+    input.value = recipient && typeof recipient === "object" && Object.hasOwn(recipient, "inputValue") ? recipient.inputValue : email;
+    input.dataset.verifiedEmail = recipient && typeof recipient === "object" && Object.hasOwn(recipient, "verifiedEmail")
+      ? recipient.verifiedEmail : email && isVerified ? email.toLowerCase() : "";
     input.disabled = isAnyBusy();
     input.setAttribute("aria-label", `Recipient email for ${list.closest("[data-notification-group]").getAttribute("aria-label")}`);
     input.setAttribute("autocomplete", "off");
     input.addEventListener("input", () => {
+      if (inDialog) {
+        directorySelections.delete(input);
+        input.dataset.verifiedEmail = "";
+      }
       renderRecipientAvatar(avatar, null, input.value);
       syncRecipientVerificationState(input);
       renderSelectedRecipientMeta(input, null);
-      splitRecipientInput(list, input);
       updateRecipientCount(list);
       renderRecipientValidation(list);
-      markMailChanged();
+      notifyRecipientEdit(row);
       scheduleDirectoryLookup(input);
-    });
-    input.addEventListener("paste", () => {
-      window.setTimeout(() => {
-        splitRecipientInput(list, input);
-        syncRecipientVerificationState(input);
-        scheduleDirectoryLookup(input);
-      }, 0);
     });
     input.addEventListener("blur", () => {
       window.setTimeout(() => { if (!row.contains(document.activeElement)) closeDirectorySuggestions(row); }, 140);
@@ -800,35 +950,29 @@
         const first = row.querySelector(".directory-suggestion:not(.is-message)");
         if (first) { event.preventDefault(); first.focus(); }
       }
-      if (event.key === "Escape") closeDirectorySuggestions(row);
+      if (event.key === "Escape" && (!row.querySelector(".directory-suggestions").hidden || ["queued", "searching", "results"].includes(input.dataset.directoryLookupState))) {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissDirectoryLookup(input, row);
+      }
     });
 
     const removeButton = document.createElement("button");
     removeButton.className = "danger-button notification-remove-button";
     removeButton.type = "button";
     removeButton.textContent = "Remove";
-    removeButton.setAttribute("aria-label", `Remove recipient from ${list.closest("[data-notification-group]").getAttribute("aria-label")}`);
+    removeButton.setAttribute("aria-label", `Remove ${email} from ${list.closest("[data-notification-group]").getAttribute("aria-label")}`);
     removeButton.disabled = isAnyBusy();
     removeButton.addEventListener("click", () => {
-      if (list.querySelectorAll(".notification-person").length === 1) {
-        input.value = "";
-        input.dataset.verifiedEmail = "";
-        renderRecipientAvatar(avatar, null, "");
-        renderSelectedRecipientMeta(input, null);
-        input.focus();
-        markMailChanged();
-        updateRecipientCount(list);
-        renderRecipientValidation(list);
-        showAdminNotice("info", "Recipient cleared", "The last box stays available for a new email.");
-        return;
-      }
-
+      window.clearTimeout(directoryLookupTimers.get(input));
+      abortDirectoryLookup(input);
       row.remove();
-      list.querySelector("input")?.focus();
+      const focusTarget = list.querySelector(".notification-remove-button") || list.closest("[data-notification-group]").querySelector(".notification-add-button");
+      focusTarget?.focus();
       markMailChanged();
       updateRecipientCount(list);
       renderRecipientValidation(list);
-      showAdminNotice("info", "Recipient removed", "The email box was removed from this routing group.");
+      showAdminNotice("info", "Recipient removed", "The recipient was removed from this list.");
     });
 
     const suggestions = document.createElement("div");
@@ -845,6 +989,12 @@
     meta.hidden = true;
 
     body.append(input, meta);
+    if (!inDialog) {
+      const contact = document.createElement("span");
+      contact.className = "notification-person-email";
+      contact.textContent = email;
+      body.insertBefore(contact, meta);
+    }
     row.append(avatar, body, removeButton, suggestions);
     list.appendChild(row);
 
@@ -859,6 +1009,7 @@
     if (shouldFocus) {
       input.focus();
     }
+    return row;
   }
 
   function getRecipientInitial(value) {
@@ -879,6 +1030,13 @@
       email,
       ...(savedByEmail.get(email.toLowerCase()) || {})
     }));
+  }
+
+  function getEditorGroupRecipients(group) {
+    // Draft rows are individual user-added fields; never parse their raw values as a saved email list.
+    return state.mailDraftRows && Object.hasOwn(state.mailDraftRows, group.key)
+      ? state.mailDraftRows[group.key].map((row) => ({ ...row }))
+      : getNotificationGroupRecipients(group);
   }
 
   function getRecipientEmail(recipient) {
@@ -947,10 +1105,18 @@
     }
   }
 
+  function dismissDirectoryLookup(input, row) {
+    window.clearTimeout(directoryLookupTimers.get(input));
+    abortDirectoryLookup(input);
+    input.dataset.directoryLookupState = "";
+    closeDirectorySuggestions(row);
+    renderRecipientValidation(input.closest(".notification-person-list"));
+  }
+
   async function lookupDirectoryUsers(input, query) {
     const row = input.closest(".notification-person");
 
-    if (!row || !isDirectoryLookupConfigured() || input.value.trim() !== query) {
+    if (!row || !input.isConnected || !row.contains(document.activeElement) || !isDirectoryLookupConfigured() || input.value.trim() !== query) {
       return;
     }
 
@@ -964,7 +1130,7 @@
 
     try {
       const body = await apiFetch(`/api/admin/directory-users?query=${encodeURIComponent(query)}`, { signal: controller.signal });
-      if (input.value.trim() !== query) return;
+      if (!input.isConnected || !row.contains(document.activeElement) || input.value.trim() !== query || directoryLookupControllers.get(input) !== controller) return;
       const users = normalizeDirectoryUsers(body).slice(0, 6);
       input.dataset.directoryLookupState = users.length ? "results" : "no-match";
       state.directoryLookupStatus = users.length ? `${users.length} directory result${users.length === 1 ? "" : "s"}` : "No directory match";
@@ -974,7 +1140,7 @@
       );
       renderRecipientValidation(input.closest(".notification-person-list"));
     } catch (error) {
-      if (error.name === "AbortError") {
+      if (error.name === "AbortError" || !input.isConnected || !row.contains(document.activeElement) || directoryLookupControllers.get(input) !== controller) {
         return;
       }
 
@@ -983,8 +1149,10 @@
       renderDirectorySuggestions(row, [{ displayName: "Directory lookup failed", mail: error.message, isMessage: true, isError: true }]);
       renderRecipientValidation(input.closest(".notification-person-list"));
     } finally {
-      directoryLookupControllers.delete(input);
-      syncWebhookControls();
+      if (directoryLookupControllers.get(input) === controller) {
+        directoryLookupControllers.delete(input);
+        syncWebhookControls();
+      }
     }
   }
 
@@ -1031,7 +1199,7 @@
         item.setAttribute("aria-selected", "false");
         item.addEventListener("click", () => selectDirectoryUser(row, user));
         item.addEventListener("keydown", (event) => {
-          if (event.key === "Escape") { closeDirectorySuggestions(row); row.querySelector("input").focus(); }
+          if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismissDirectoryLookup(row.querySelector("input"), row); row.querySelector("input").focus(); }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             const next = event.key === "ArrowDown" ? item.nextElementSibling : item.previousElementSibling;
@@ -1065,8 +1233,16 @@
 
   function selectDirectoryUser(row, user) {
     const input = row.querySelector("[data-recipient-email]");
+    if (!row.isConnected || !row.closest("#notificationRecipientDialog") || !els.notificationRecipientDialog.open
+      || !isDirectoryLookupConfigured() || !findRecipientTargetCard()) return;
     const avatar = row.querySelector(".notification-person-avatar");
     const list = row.closest(".notification-person-list");
+
+    directorySelections.set(input, {
+      targetKey: state.recipientTargetKey,
+      email: user.mail,
+      recipient: { email: user.mail, displayName: user.displayName || "", jobTitle: user.jobTitle || "", department: user.department || "", photo: user.photo || "" }
+    });
 
     input.value = user.mail;
     input.dataset.verifiedEmail = user.mail.toLowerCase();
@@ -1075,7 +1251,7 @@
     renderRecipientAvatar(avatar, user.photo, user.displayName || user.mail);
     renderSelectedRecipientMeta(input, user);
     closeDirectorySuggestions(row);
-    markMailChanged();
+    notifyRecipientEdit(row);
     updateRecipientCount(list);
     renderRecipientValidation(list);
     input.focus();
@@ -1159,22 +1335,11 @@
     }
   }
 
-  function splitRecipientInput(list, input) {
-    const recipients = parseEmailList(input.value);
-
-    if (recipients.length <= 1) {
-      renderRecipientValidation(list);
+  function renderRecipientValidation(list) {
+    if (list.closest("#notificationRecipientDialog")) {
+      updateRecipientDialog();
       return;
     }
-
-    input.value = recipients[0];
-    syncRecipientVerificationState(input);
-    recipients.slice(1).forEach((recipient) => appendRecipientRow(list, recipient, false, false));
-    updateRecipientCount(list);
-    renderRecipientValidation(list);
-  }
-
-  function renderRecipientValidation(list) {
     const card = list.closest("[data-notification-group]");
     const warning = card ? card.querySelector(".notification-group-warning") : null;
     const inputs = [...list.querySelectorAll("[data-recipient-email]")];
@@ -1298,7 +1463,7 @@
   }
 
   function isValidEmail(value) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+    return /^[^\s@;,]+@[^\s@;,]+\.[^\s@;,]+$/.test(value);
   }
 
   function renderLoadingRows() {
@@ -1488,13 +1653,18 @@
 
   function renderAdminView() {
     const isMailView = state.view === "mail";
-    els.pcnAdminView.classList.toggle("is-active", !isMailView);
+    const isRecordsView = state.view === "pcns";
+    const isUsersView = state.view === "users";
+    els.pcnAdminView.classList.toggle("is-active", isRecordsView);
     els.mailRoutingView.classList.toggle("is-active", isMailView);
-    els.adminRecordsButton.classList.toggle("is-active", !isMailView);
+    els.adminUsersView.classList.toggle("is-active", isUsersView);
+    els.adminRecordsButton.classList.toggle("is-active", isRecordsView);
     els.adminMailRoutingButton.classList.toggle("is-active", isMailView);
-    setCurrentButton(els.adminRecordsButton, !isMailView);
+    els.adminUsersButton.classList.toggle("is-active", isUsersView);
+    setCurrentButton(els.adminRecordsButton, isRecordsView);
     setCurrentButton(els.adminMailRoutingButton, isMailView);
-    els.adminRefreshButton.hidden = isMailView;
+    setCurrentButton(els.adminUsersButton, isUsersView);
+    els.adminRefreshButton.hidden = !isRecordsView;
   }
 
   function setCurrentButton(button, isCurrent) {
@@ -1507,7 +1677,7 @@
   }
 
   function setAdminView(view) {
-    const nextHash = view === "mail" ? "#mail-routing" : "#records";
+    const nextHash = view === "mail" ? "#mail-routing" : view === "users" ? "#users" : "#records";
 
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
@@ -1575,7 +1745,7 @@
   }
 
   function getViewFromHash() {
-    return window.location.hash === "#mail-routing" ? "mail" : "pcns";
+    return window.location.hash === "#mail-routing" ? "mail" : window.location.hash === "#users" ? "users" : "pcns";
   }
 
   function parseEmailList(value) {

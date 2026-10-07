@@ -51,14 +51,14 @@ test('unsafe IDs, versions, counters, commits and archive names fail even when s
 test('only tracked runtime allowlist paths are packaged', () => {
   const selected = selectRuntimeFiles([
     'server.js', 'package.json', 'package-lock.json', 'src/authService.js', 'src/clientAddress.js',
-    'login.html', 'auth.css', 'tokin-header-logo.png', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1',
+    'login.html', 'auth.css', 'admin-users.js', 'tokin-header-logo.png', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1', 'scripts/ad-directory.ps1',
     '.env', '.env.production', '.github/workflows/deploy.yml', 'test/foo.js', 'plans/foo.md',
     'sql/migrations/001_core.sql', 'scripts/db-migrate.js', 'data/pcn.json', 'firebase-client.js',
     'src/.env', 'src/key.pem', 'src/nested/file.js', 'src/not-supported.js', 'workbook.xlsx', 'node_modules/evil.js',
   ]);
   assert.deepEqual(selected, [
-    'CairoliClassic-Bold.otf', 'auth.css', 'login.html', 'package-lock.json', 'package.json',
-    'scripts/read-sql-credential.ps1', 'server.js', 'src/authService.js', 'src/clientAddress.js', 'tokin-header-logo.png',
+    'CairoliClassic-Bold.otf', 'admin-users.js', 'auth.css', 'login.html', 'package-lock.json', 'package.json',
+    'scripts/ad-directory.ps1', 'scripts/read-sql-credential.ps1', 'server.js', 'src/authService.js', 'src/clientAddress.js', 'tokin-header-logo.png',
   ]);
   for (const unsafe of ['src/../.env', 'src\\evil.js', '/src/evil.js', 'src//evil.js']) {
     assert.throws(() => selectRuntimeFiles([unsafe]), /path/i);
@@ -97,19 +97,21 @@ test('Windows packaging and verifier CLI round trip excludes untracked private c
   const root = path.join(temporary, 'source');
   const output = path.join(temporary, 'output');
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
+  await fs.mkdir(path.join(root, 'scripts'), { recursive: true });
   await fs.mkdir(path.join(root, 'node_modules', 'fixture'), { recursive: true });
   for (const [file, content] of Object.entries({
     'server.js': '// isolated fixture', 'package.json': '{}', 'package-lock.json': '{}',
     'src/httpServer.js': '// isolated fixture', 'src/runtimeEnv.js': '// isolated fixture',
+    'admin-users.js': '// employee UI fixture', 'scripts/ad-directory.ps1': '# AD helper fixture',
     'login.html': '<!doctype html>', '.env': 'NOT_A_REAL_SECRET=excluded',
     'node_modules/fixture/index.js': 'module.exports = {};',
   })) await fs.writeFile(path.join(root, file), content);
   await run('git', ['init', '--quiet'], { cwd: root, windowsHide: true });
-  await run('git', ['add', 'server.js', 'package.json', 'package-lock.json', 'src/httpServer.js', 'src/runtimeEnv.js', 'login.html'], { cwd: root, windowsHide: true });
+  await run('git', ['add', 'server.js', 'package.json', 'package-lock.json', 'src/httpServer.js', 'src/runtimeEnv.js', 'login.html', 'admin-users.js', 'scripts/ad-directory.ps1'], { cwd: root, windowsHide: true });
   const inheritedCoreEnvironment = { ...process.env, PSModulePath: path.join(temporary, 'pcn-artifact-bad-core-modules') };
   const manifest = await packageRelease({ root, output, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1, signingKey: keys.privateKey, env: inheritedCoreEnvironment });
   assert.equal(manifest.releaseId, 'pcn-test-42-1');
-  assert.deepEqual((await fs.readdir(path.join(output, 'runtime'))).sort(), ['login.html', 'node_modules', 'package-lock.json', 'package.json', 'server.js', 'src']);
+  assert.deepEqual((await fs.readdir(path.join(output, 'runtime'))).sort(), ['admin-users.js', 'login.html', 'node_modules', 'package-lock.json', 'package.json', 'scripts', 'server.js', 'src']);
   const publicKeyPath = path.join(temporary, 'public.pem');
   await fs.writeFile(publicKeyPath, keys.publicKey.export({ type: 'spki', format: 'pem' }));
   const args = [path.resolve(__dirname, '../scripts/verify-release.js'),
@@ -133,6 +135,8 @@ Expand-VerifiedArchive $env:PCN_FIXTURE_ARCHIVE (Join-Path $script:Base 'extract
       PCN_FIXTURE_BASE: temporary, PCN_FIXTURE_ARCHIVE: path.join(output, 'pcn.zip'), PSExecutionPolicyPreference: 'Restricted' }),
   });
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/src/runtimeEnv.js'), 'utf8'), '// isolated fixture');
+  assert.equal(await fs.readFile(path.join(temporary, 'extracted/admin-users.js'), 'utf8'), '// employee UI fixture');
+  assert.equal(await fs.readFile(path.join(temporary, 'extracted/scripts/ad-directory.ps1'), 'utf8'), '# AD helper fixture');
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/node_modules/fixture/index.js'), 'utf8'), 'module.exports = {};');
   await fs.appendFile(path.join(output, 'pcn.zip'), 'tampered');
   await assert.rejects(run(process.execPath, args, { windowsHide: true }), error => error.code === 1 && error.stderr.trim() === 'Release verification failed');

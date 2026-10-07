@@ -1,9 +1,20 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
+const { employeeRoles, employeeDepartments, validateEmployeeIdentity } = require('./employeeAccounts');
 
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
-const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive, mustChangePassword: user.mustChangePassword });
+const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive, mustChangePassword: user.directoryId ? false : user.mustChangePassword,
+  ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null, directoryId: user.directoryId || null, identityProvider: user.directoryId ? 'windows' : 'password' } : {}) });
+
+function sessionPrincipal(user, session, tokenHash) {
+  const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
+  Object.defineProperties(principal, {
+    sessionSecurityStamp: { value: session.securityStamp },
+    sessionTokenHash: { value: tokenHash }
+  });
+  return principal;
+}
 
 class AuthService {
   constructor(repository, options = {}) {
@@ -13,6 +24,9 @@ class AuthService {
     this.verifyPassword = options.passwordVerifier || verifyPassword;
     this.dummyHash = null;
     this.attempts = new Map();
+    this.authMode = options.authMode || 'password';
+    this.windowsDomain = options.windowsDomain || 'KEMET';
+    this.directoryService = options.directoryService;
   }
 
   now() { return new Date(this.clock()); }
@@ -42,17 +56,22 @@ class AuthService {
   }
 
   async login({ username, password, remember = false } = {}, requestInfo = {}) {
+    if (this.authMode === 'windows') throw new ApiError(403, 'Use Windows sign-in to access PCN');
     this.throttle(requestInfo.ip);
     if (typeof username !== 'string' || username.length > 320 || typeof password !== 'string' || password.length > 128) throw new ApiError(401, 'Invalid username or password');
     const user = await this.repository.getUserByLogin(username.trim().toLowerCase());
     if (!this.dummyHash) this.dummyHash = this.hashPassword(crypto.randomBytes(32).toString('hex'));
     const verified = await this.verifyPassword(user?.passwordHash || await this.dummyHash, password);
     const locked = user?.lockoutUntil && new Date(user.lockoutUntil) > this.now();
-    if (!user || !verified || !user.isActive || locked) {
+    if (!user || !verified || !user.isActive || locked || user.directoryId) {
       if (user && user.isActive && !locked) await this.repository.recordLoginFailure(user.id, this.now());
       throw new ApiError(401, 'Invalid username or password');
     }
     await this.repository.resetLoginFailures(user.id);
+    return this.issueSession(user, remember === true);
+  }
+
+  async issueSession(user, remember = false) {
     const token = crypto.randomBytes(32).toString('hex');
     const csrfToken = crypto.randomBytes(32).toString('hex');
     const ttl = remember === true ? 30 * 86400000 : 8 * 3600000;
@@ -61,13 +80,76 @@ class AuthService {
     return { user: safeUser(user), token, csrfToken, expiresAt };
   }
 
+  async resolveEmployee(directoryId, directoryService = this.directoryService) {
+    if (!directoryService) throw new ApiError(503, 'Directory service is unavailable');
+    const profile = await directoryService.getById(directoryId);
+    if (!profile || profile.isActive !== true) throw new ApiError(400, 'Select an active directory employee');
+    validateEmployeeIdentity(profile);
+    return profile;
+  }
+
+  async createEmployee({ directoryId, roles, department } = {}, directoryService = this.directoryService) {
+    if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
+    if (!employeeDepartments.some(item => item.key === department)) throw new ApiError(400, 'Select a valid department');
+    const profile = await this.resolveEmployee(directoryId, directoryService);
+    const user = await this.repository.createEmployeeUser({
+      employeeCode: profile.samAccountName, displayName: profile.displayName, email: profile.email || null,
+      roles: [...new Set(roles)], department, adObjectGuid: profile.directoryId, adSid: profile.adSid
+    });
+    return safeUser(user);
+  }
+
+  async linkEmployee({ userId, directoryId } = {}, directoryService = this.directoryService) {
+    const prior = await this.repository.getUserById(userId);
+    if (!prior) throw new ApiError(404, 'User not found');
+    if (!prior.isActive) throw new ApiError(400, 'Only active users can be linked to a directory employee');
+    if (this.authMode === 'password' && prior.roles.includes('admin')) throw new ApiError(400, 'Enable Windows sign-in before linking an existing administrator. Create a separate Windows administrator for rollout.');
+    const profile = await this.resolveEmployee(directoryId, directoryService);
+    const user = await this.repository.linkEmployeeIdentity(userId, profile);
+    return safeUser(user);
+  }
+
+  async resolveWindowsEmployee(identity) {
+    if (this.authMode !== 'windows' || !identity || typeof identity.domain !== 'string' || identity.domain.toLowerCase() !== this.windowsDomain.toLowerCase()) throw new ApiError(401, 'Windows sign-in could not be verified');
+    if (!this.directoryService) throw new ApiError(503, 'Directory service is unavailable');
+    const profile = await this.directoryService.getBySamAccountName(identity.samAccountName);
+    if (!profile || profile.isActive !== true || profile.samAccountName.toLowerCase() !== String(identity.samAccountName).toLowerCase()) throw new ApiError(401, 'Windows sign-in could not be verified');
+    validateEmployeeIdentity(profile);
+    return profile;
+  }
+
+  matchesEmployee(user, profile) {
+    return Boolean(user?.isActive && typeof user.directoryId === 'string' && user.directoryId.toLowerCase() === profile.directoryId.toLowerCase()
+      && user.adSid === profile.adSid && typeof user.employeeCode === 'string' && user.employeeCode.toLowerCase() === profile.samAccountName.toLowerCase());
+  }
+
+  async loginWindows(identity, requestInfo = {}) {
+    this.throttle(requestInfo.ip);
+    const profile = await this.resolveWindowsEmployee(identity);
+    const user = await this.repository.getUserByAdObjectGuid(profile.directoryId);
+    if (!this.matchesEmployee(user, profile)) throw new ApiError(403, 'Your Windows account has not been provisioned for PCN access');
+    return this.issueSession(user);
+  }
+
+  async validateWindowsPrincipal(principal, identity) {
+    if (!principal?.user || !principal.sessionTokenHash) throw new ApiError(401, 'Windows sign-in required');
+    const profile = await this.resolveWindowsEmployee(identity);
+    const session = await this.repository.getSession(principal.sessionTokenHash);
+    const user = await this.repository.getUserById(principal.user.id);
+    if (!session || session.revokedAt || session.userId !== principal.user.id || new Date(session.expiresAt) <= this.now()
+      || session.securityStamp !== principal.sessionSecurityStamp || user?.securityStamp !== session.securityStamp
+      || !this.matchesEmployee(user, profile)) throw new ApiError(401, 'Windows sign-in no longer matches this session');
+    return sessionPrincipal(user, session, principal.sessionTokenHash);
+  }
+
   async session(token) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
     const session = await this.repository.getSession(hashToken(token));
     if (!session || session.revokedAt || new Date(session.expiresAt) <= this.now()) return null;
     const user = await this.repository.getUserById(session.userId);
     if (!user?.isActive || session.securityStamp !== user.securityStamp) return null;
-    return { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
+    if (user.directoryId && this.authMode !== 'windows') return null;
+    return sessionPrincipal(user, session, hashToken(token));
   }
 
   async logout(token) {
@@ -75,11 +157,13 @@ class AuthService {
   }
 
   async changePassword(token, { currentPassword, newPassword } = {}) {
+    if (this.authMode === 'windows') throw new ApiError(403, 'Windows accounts use their domain password');
     const principal = await this.session(token);
     if (!principal) throw new ApiError(401, 'Sign in required');
     validatePassword(newPassword);
     if (typeof currentPassword !== 'string' || currentPassword.length > 128) throw new ApiError(400, 'Invalid current password');
     const user = await this.repository.getUserById(principal.user.id);
+    if (user.directoryId) throw new ApiError(403, 'Windows accounts use their domain password');
     if (!await this.verifyPassword(user.passwordHash, currentPassword)) throw new ApiError(400, 'Invalid current password');
     if (currentPassword === newPassword) throw new ApiError(400, 'Choose a different password');
     await this.repository.updatePassword(user.id, await this.hashPassword(newPassword), crypto.randomUUID(), user.securityStamp);

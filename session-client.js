@@ -56,7 +56,12 @@
   }
 
   async function load() {
-    return apiFetch('/api/session');
+    try { return await apiFetch('/api/session'); }
+    catch (error) {
+      if (error.status !== 401) throw error;
+      session = { authenticated: false, user: null, csrfToken: '' };
+      return session;
+    }
   }
 
   async function requireSession(role) {

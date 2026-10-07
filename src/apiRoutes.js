@@ -3,20 +3,33 @@ const { getClientAddress } = require('./clientAddress');
 const { readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal } = require('./authHttp');
 const { hasRole, isInternal, assertRecordAccess } = require('./workflowAccess');
 const { buildWorkflow } = require('./masterData');
+const { readWindowsIdentity } = require('./windowsIdentity');
+const { normalizeAdObjectGuid } = require('./employeeAccounts');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
-  const { service, repository, authService } = context;
+  const { service, repository, authService, authMode, directoryService } = context;
   const send = (data, status = 200) => writeJson(res, status, {success:true,data});
   const route = url.pathname;
   const method = req.method;
   const token = readSessionToken(req);
   if (route === '/api/health' && method === 'GET') return send({status:'ok',service:'supplier-pcn-workflow',requestId});
+  if (route === '/api/auth/config' && method === 'GET') return send({mode:authMode,employeeProvisioningConfigured:Boolean(directoryService)});
   if (route === '/api/ready' && method === 'GET') {
     try { await repository.readiness(); return send({status:'ready'}); }
     catch { throw new ApiError(503, 'Database is unavailable'); }
   }
+  if (route === '/api/auth/windows' && method === 'POST') {
+    if (authMode !== 'windows') throw new ApiError(404,'Windows sign-in is not enabled');
+    enforceSameOrigin(req, context.publicOrigin);
+    assertBodyKeys(await readJsonBody(req), []);
+    const identity = readWindowsIdentity(req, context.windowsAuth);
+    const session = await authService.loginWindows(identity, {ip:context.clientAddress});
+    setSessionCookie(res, session, {secure:context.secureCookies});
+    return send({authenticated:true,user:session.user,csrfToken:session.csrfToken,expiresAt:session.expiresAt});
+  }
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
+    if (authMode === 'windows') throw new ApiError(403,'Use Windows sign-in to access PCN');
     enforceSameOrigin(req, context.publicOrigin);
     const body = await readJsonBody(req);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
@@ -27,16 +40,18 @@ async function handleApi(req, res, url, context, requestId) {
     setSessionCookie(res, session, {secure:context.secureCookies});
     return send({authenticated:true,user:session.user,csrfToken:session.csrfToken,expiresAt:session.expiresAt});
   }
-  const principal = await authService.session(token);
-  if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
-    return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
-  }
+  if (route === '/api/auth/change-password' && authMode === 'windows') throw new ApiError(403,'Windows accounts use their domain password');
+  let principal = await authService.session(token);
   if (['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     if (principal) enforceCsrf(req, principal);
     await authService.logout(token);
     clearSessionCookie(res, {secure:context.secureCookies});
     return send({authenticated:false});
+  }
+  if (principal && authMode === 'windows') principal = await authService.validateWindowsPrincipal(principal, readWindowsIdentity(req, context.windowsAuth));
+  if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
+    return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
   }
   const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
   if (!['GET','HEAD'].includes(method)) {
@@ -52,10 +67,28 @@ async function handleApi(req, res, url, context, requestId) {
   const admin = () => { if (!hasRole(user,'admin')) throw new ApiError(403,'Administrator access required'); };
   if (route.startsWith('/api/admin/')) {
     admin();
-    if (route === '/api/admin/users' && method === 'GET') return send(await authService.repository.listUsers());
+    if (route === '/api/admin/users' && method === 'GET') return send((await authService.repository.listUsers()).map(publicAccount));
+    if (route === '/api/admin/employees' && method === 'GET') {
+      if (!directoryService) throw new ApiError(503,'Employee directory is not configured');
+      const employees = await directoryService.search(url.searchParams.get('query') || '');
+      return send(employees.map(employee => ({directoryId:employee.directoryId,employeeCode:employee.samAccountName,displayName:employee.displayName,email:employee.email || null,adDepartment:employee.adDepartment || null})));
+    }
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
+      if (Object.hasOwn(body,'directoryId') || authMode === 'windows' || directoryService) {
+        assertBodyKeys(body, ['directoryId','roles','department']);
+        normalizeAdObjectGuid(body.directoryId);
+        return send(await authService.createEmployee(body,directoryService),201);
+      }
       return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+    }
+    const employeeLink = /^\/api\/admin\/users\/([^/]+)\/directory$/.exec(route);
+    if (employeeLink && method === 'POST') {
+      const userId = normalizeAdObjectGuid(employeeLink[1]);
+      const body = await readJsonBody(req);
+      assertBodyKeys(body,['directoryId']);
+      normalizeAdObjectGuid(body.directoryId);
+      return send(await authService.linkEmployee({userId,directoryId:body.directoryId},directoryService));
     }
     if (route === '/api/admin/directory-users' && method === 'GET') {
       if (!context.integrationService) throw new ApiError(503,'Directory lookup is not configured');
@@ -138,6 +171,15 @@ async function handleApi(req, res, url, context, requestId) {
     return res.end(file.Bytes);
   }
   throw new ApiError(405,'Method not allowed');
+}
+
+function assertBodyKeys(body, allowed) {
+  if (Object.keys(body).some(key => !allowed.includes(key))) throw new ApiError(400,'Unexpected request fields');
+}
+
+function publicAccount(user) {
+  const fields = ['id','username','email','roles','isActive','mustChangePassword','createdAt','employeeCode','displayName','department','directoryId','identityProvider'];
+  return Object.fromEntries(fields.filter(key => Object.hasOwn(user,key)).map(key => [key,user[key]]));
 }
 
 function requireVersion(body) {

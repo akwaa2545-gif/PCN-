@@ -6,6 +6,8 @@ Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master
 
 Department/action routing-v2 is implemented locally, not pushed/deployed. Existing pcn-test-6-1 acceptance predates it. See [routing design](mail-routing-design.md): no new DDL or live SQL/mail action occurred for this change.
 
+Employee AD provisioning/Windows authentication is also implemented locally, with live AD/IIS/SQL acceptance pending. It requires migration 002 before startup/release selection and is not part of deployed pcn-test-6-1. See [employee Windows-authentication runbook](employee-windows-authentication.md); no deployment, live identity change or AD/SQL write is claimed for this feature.
+
 ## Shared contract
 
 - JSON success: `{success:true,data}`; errors: `{success:false,error,details?,code?,requestId}`. Download returns file bytes.
@@ -26,15 +28,19 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 |---|---|---|
 | `GET /api/health` | Public process liveness | Does not test SQL |
 | `GET /api/ready` | Public schema/table/master readiness | SQL unavailable returns 503 without SQL details |
-| `POST /api/auth/login` | Username/email, password, optional remember | Account lockout; in-process source-IP throttling |
-| `GET /api/session` | Safe identity or authenticated:false | SQL expiry/revocation/stamp/account check |
+| `GET /api/auth/config` | Public local auth-mode/provisioning capability | `{mode,employeeProvisioningConfigured}`; no private domains/keys |
+| `POST /api/auth/windows` | Local Windows-mode sign-in with empty JSON body | Trusted loopback IIS identity/key; active AD GUID/SID/employee-code SQL mapping required; no automatic registration |
+| `POST /api/auth/login` | Username/email, password, optional remember | Account lockout; source-IP throttling; 403 in local Windows mode |
+| `GET /api/session` | Safe identity or authenticated:false | SQL expiry/revocation/stamp/account check; local Windows mode also revalidates trusted IIS/AD identity |
 | `POST /api/auth/logout` | Revoke session and clear cookie | Idempotent when logged out |
-| `POST /api/auth/change-password` | Current/new password | Nonempty, at most 128 characters; revokes sessions; re-login |
+| `POST /api/auth/change-password` | Current/new password | Nonempty, at most 128 characters; revokes sessions; 403 for local Windows accounts/mode |
 | `POST /api/admin/login` | Admin-only compatibility alias | Non-admin session revoked |
 | `GET /api/admin/session` | Compatibility session alias | authenticated reflects admin role |
 | `POST /api/admin/logout` | Compatibility logout alias | SQL revocation |
-| `GET /api/admin/users` | Admin safe account list | No pagination/UI |
-| `POST /api/admin/users` | Admin creates user/roles/password | Normal password policy, forced change, optional email; no invitation |
+| `GET /api/admin/users` | Admin safe account list | Local employee identity/department fields and provisioning UI; no pagination |
+| `GET /api/admin/employees?query=...` | Local admin read-only active AD employee search | 2–100 characters, at most 20 profiles; distinct from Power Automate recipient lookup |
+| `POST /api/admin/users` | Admin account creation | Local AD configuration requires directoryId/roles/department, re-queried AD mapping and no PCN password; old password path only without AD config in password mode |
+| `POST /api/admin/users/:uuid/directory` | Local admin links existing account to selected active AD identity | directoryId only; preserves user ID/roles and legacy hash, revokes sessions and blocks linked password login/change in every mode; existing-admin link blocked in password mode |
 | `GET /api/admin/directory-users?query=...` | Admin backend directory lookup with distinct private endpoint | query/searchTerm payload; profile fields and safe inline photos; no Firebase runtime |
 | `GET /api/admin/notifications/health` | Admin read-only local endpoint validation + SQL queue/worker outcomes | No fetch, flow invocation, queue mutation or email; normal session required |
 | `POST /api/admin/notifications/test` | Admin compatibility mail test using recipient/groupId | Explicit admin recipient allowed; invokes mail only when explicitly requested; not called by health UI |
@@ -57,6 +63,8 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `DELETE /api/pcns/:id/documents/:uuid` | Authorized hard deletion | Required version, locked owner/stage check, atomic parent version and audit |
 
 Schema roles: `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa`, `tapbu`. Department review permissions are enforced; admin/reviewer can manage all review fields. Supplier ownership is per user, not display name/email domain.
+
+Local employee provisioning uses SamAccountName as Empcode and persists AD object GUID/SID for identity matching. Create User assigns explicit PCN roles and department; AD department does not grant signing rights. Existing signing/ownership rules remain unchanged. Stage `AUTH_MODE=password` with `AD_DOMAIN=KEMET.COM`, create a separate AD-mapped administrator, verify the NetBIOS domain and PCN-only IIS proxy/authentication settings, then enable Windows mode. The runbook separates these unverified live steps from existing deployed release and mail-routing test evidence.
 
 ## Notification health and original mail contract
 

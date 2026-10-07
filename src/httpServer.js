@@ -8,13 +8,17 @@ const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 
-const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','login.js','session-client.js','auth.css','styles.css','tokin-header-logo.png','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
+const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','admin-users.js','login.js','session-client.js','auth.css','styles.css','tokin-header-logo.png','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.otf':'font/otf' };
 
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');
   if (!options.authService) throw new Error('A SQL authentication service is required');
-  const context = { ...options, trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
+  const authMode = options.authMode || options.authService.authMode || 'password';
+  if (!['password','windows'].includes(authMode)) throw new Error('Invalid authentication mode');
+  const context = { ...options, authMode, directoryService: options.directoryService || options.authService.directoryService,
+    windowsAuth: authMode === 'windows' ? {...options.windowsAuth,mode:authMode} : null,
+    trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
   const rateLimiter = options.rateLimiter || new ApiRateLimiter();
   return async (req, res) => {

@@ -4,6 +4,8 @@ Updated: 2026-10-06. Target: existing `svr120a / Scn_DB`. Sources: `sql/migratio
 
 The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are Unicode text parsed/validated in Node; the migration avoids unavailable SQL JSON functions. Migration 001 is applied, with 21 application tables plus migration history, master-data version 1 and a hashed, forced-change `itadmin` account. Seven routing groups were initialized empty. Live SQL verification writes were rolled back. Existing Firebase records have not been imported.
 
+Local employee provisioning adds [migration 002](../sql/migrations/002_employee_identity.sql), which must be applied before startup or release selection for this source version. No live application of 002 is claimed. Runtime ZIPs exclude migration files and startup never performs DDL. See [the staged Windows-authentication runbook](employee-windows-authentication.md).
+
 ## PCN aggregate
 
 SQL normalizes parent fields and ordered child tables while retaining complete nested payloads as `nvarchar(max)`. This saves PCN data in SQL even though some evolving form fields retain JSON representation.
@@ -60,7 +62,7 @@ Review dates stay text. Checkbox snapshots do not prove a historical approver id
 
 | Table | Actual key and important columns | Runtime use |
 |---|---|---|
-| Users | Id uniqueidentifier; Username/NormalizedUsername nvarchar(100); nullable Email/NormalizedEmail nvarchar(320); PasswordHash nvarchar(512); active/force-change/stamp/lockout fields | Custom application users; unique normalized username and filtered unique non-null email; Argon2id hashes |
+| Users | Id uniqueidentifier; Username/NormalizedUsername nvarchar(100); nullable Email/NormalizedEmail nvarchar(320); PasswordHash nvarchar(512); active/force-change/stamp/lockout fields; local migration-002 identity columns below | Password accounts retain Argon2id hashes; new AD accounts have a null hash, linked accounts retain an unusable legacy hash; explicit GUID/SID mapping |
 | Roles | Id int identity; Name nvarchar(40) unique | admin, reviewer, supplier, gsc, productionengineering, qa, tapbu |
 | UserRoles | UserId uniqueidentifier + RoleId int composite PK/FKs | Role membership |
 | Sessions | Id uniqueidentifier; UserId; TokenHash char(64) unique; CsrfToken char(64); SecurityStamp; ExpiresAt/CreatedAt/RevokedAt | Opaque cookie hash, expiry/revocation/account stamp checks; 8-hour/30-day durations |
@@ -77,6 +79,8 @@ Review dates stay text. Checkbox snapshots do not prove a historical approver id
 | SchemaMigrations | MigrationId nvarchar(120) PK; Checksum char(64); AppliedAt datetime2(3) | Created by migration runner; checksum mismatch rejects modified applied migrations |
 
 There are 21 application tables in the core migration plus SchemaMigrations. The runner creates the application schema and migration metadata before versioned core DDL. Application startup checks readiness and never runs DDL.
+
+Migration 002 adds nullable `EmployeeCode`/`NormalizedEmployeeCode` nvarchar(100), `DepartmentKey` nvarchar(80), `AdObjectGuid` uniqueidentifier, `AdSid` nvarchar(184) and `DisplayName` nvarchar(200) to Users, makes PasswordHash nullable and creates filtered unique indexes on non-null normalized employee code/GUID/SID. SamAccountName is Empcode; AD department is a profile hint while DepartmentKey is administrator-assigned PCN data. Existing IDs, role grants and ownership are retained; the migration does not auto-link/backfill users. Newly created AD accounts have no PCN password. Explicit links preserve the legacy hash, rotate the security stamp and revoke sessions while preserving IDs/roles; linked password login/change are blocked in every mode. Password-mode rollback neither unlinks accounts nor makes the retained hash usable. No new identity table is introduced, and old signing permissions remain unchanged.
 
 The SQL connection account `scndb` is not an end-user identity. Bootstrap creates `itadmin` with optional email and forced password change when private environment values are supplied. Runtime user creation follows normal password policy. No plaintext application password is stored in SQL.
 
@@ -98,6 +102,7 @@ Legacy groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tap
 The earlier full migration design includes Suppliers/UserSuppliers, LegacyIdentityLinks, PcnSignoffEvents, NotificationAttempts, ApiIdempotencyKeys and MigrationBatches. These tables are not in the implemented core migration. Company scope, invitation/reset flows, signoff events, general request idempotency, scan pipeline and mail operations require further implementation.
 
 - [x] Apply SQL2014-compatible migration on the target and verify manifest/table/master readiness.
+- [ ] Apply migration 002 and verify AD account creation/linking and Windows identity matching before deploying the local employee-authentication feature; no live SQL/AD acceptance yet.
 - [x] Confirm empty routing and hashed first account without exposing credentials.
 - [ ] Reconcile actual source counts, payloads, null/omitted fields, audits, counters and unresolved owners.
 - [x] Verify live transactions, Unicode workbook fields, stale-version rejection and rollback.
