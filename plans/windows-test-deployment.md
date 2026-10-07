@@ -1,6 +1,6 @@
 # Windows HTTPS deployment and employee-code cutover
 
-Updated: 2026-10-07. The user selected [SQL employee-code-only login](employee-code-authentication.md), replacing the retired AD / Windows SSO design. Replacement source work is in progress. The live server cutover is **not complete**: migration 003, verified administrator source-code mapping, replacement release deployment and real GUI acceptance remain pending. The existing live release is `pcn-test-9-1` from `9b00da23`, still using its former Windows authentication configuration.
+Updated: 2026-10-07. [SQL employee-code-only login](employee-code-authentication.md) is deployed as signed `pcn-test-10-1` from `c827d9c1c23c27631604936807dbbc352101c11e`. Migration 003, the separate approved employee Administrator / IT account and PCN-only IIS cutover are complete. Real local and HTTPS API acceptance passed; the user's own Edge GUI remains unobserved. The former AD / Windows SSO runtime is retired.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Live former-auth release | `C:\SupplierPCN\releases\pcn-test-9-1`; replacement release not selected yet |
+| Current release | `C:\SupplierPCN\releases\pcn-test-10-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -48,17 +48,17 @@ PUBLIC_ORIGIN=https://172.30.77.137:8443
 
 `employee-code` is the normal runtime default. Explicit `AUTH_MODE=password` is maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings and proxy secrets are removed from the replacement environment; their presence must not activate Windows mode. Normal employee-code sign-in requires neither a PCN password nor a Windows-authenticated browser.
 
-## Reviewed cutover sequence — pending
+## Reviewed cutover sequence
 
 1. Pause the `SupplierPCNTestDeployment` SYSTEM polling task for reviewed cutover; preserve its trust anchors, version records and current service/IIS configuration. Keep the live application running during preparation where possible.
-2. Confirm the intended administrator's source `EmpCode` with the user. The former AD SamAccountName is not assumed to identify the same SQL-source employee. Preserve the intended PCN account ID, roles and ownership through an explicit verified link.
+2. Confirm the intended administrator's source `EmpCode` with the user. The former AD SamAccountName is not assumed to identify the same SQL-source employee. For this rollout create the separately approved `2205529` Administrator / IT account; preserve the prior accounts and their ownership without relinking the unrelated former AD administrator.
 3. Check protected SQL/source connectivity and preserve an appropriate before-state. Apply reviewed migration 003 to `Scn_DB`, then verify readiness. Startup/deployment does not run DDL. The source `KEY_Code_DB` table must remain unchanged.
 4. On **PCNTest only**, enable Anonymous Authentication and disable Windows Authentication. Archive/remove its old Windows identity module and separate key file/configuration. Retain HTTPS, certificate validation and other IIS sites.
 5. Keep the ordinary loopback proxy and overwrite `X-PCN-Client-IP` with observed `REMOTE_ADDR` on every request, including forged caller values. Remove Windows identity forwarding; no AD header is authentication evidence for the replacement.
 6. Set employee-code mode in the private backend environment, validate the reviewed signed replacement runtime and installed consumer, switch only the PCN service and verify exact Node/WinSW identity, loopback listener, schema/SQL/source behavior.
 7. Verify real employee-code administrator login/session/authorization/logout through HTTPS, selected user creation/linking and source-outage denial; retain cookie/origin/CSRF protections and PCN signing/ownership permissions. Record the actual release and results before resuming the task.
 
-These steps are not a declaration that the live cutover has occurred. The initial source-code confirmation and final deployment/GUI evidence are still pending.
+This rollout completed the sequence. PCNTest has Windows Authentication disabled / Anonymous Authentication enabled with empty anonymous username and its existing pool identity. The obsolete Windows module DLL/key were archived in protected maintenance storage and removed from the live site. Existing pool read/execute permissions, HTTPS binding, service-SID secret isolation and native `REMOTE_ADDR` client-IP rewrite remain intact. Real GUI automation against the local SQL-backed runtime passed; the user's own Edge observation remains separate.
 
 ## TLS and client setup retained
 
@@ -80,11 +80,13 @@ Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 
 
 The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
-## Acceptance and recovery
+## Current acceptance and recovery
 
-Migration 001/002 and the original SQL-backed PCN pilot have verified historical readiness. Migration 003, the selected source-code administrator, normal employee-code login and a replacement release are pending. Keep automated tests, real HTTPS/API checks and actual GUI observation separate. No operational PCN save or notification delivery has been performed as part of the former authentication checks.
+[Actions 37567205169](https://github.com/akwaa2545-gif/PCN-/actions/runs/37567205169) succeeded with 240 tests, 59 isolated browser checks and the high/critical audit gate. Signed `pcn-test-10-1` was installed at observed server time `2026-10-07T03:42:57.7868092Z`. Migration 003 was applied at `2026-10-07T03:35:30.942Z`, with 001/002 unchanged. The separate verified `2205529` Administrator / IT account was added while retaining the prior three accounts.
 
-Before migration 002, a DPAPI-encrypted export of 22 PCN tables / 108 rows was decrypted and verified. The SQL login lacked native backup permission; this was not a native SQL backup and full restore was not tested. Maintain that limitation in the recovery record and arrange an appropriate protected before-state before migration 003.
+NetworkService / WinSW / exclusive loopback identity and SQL readiness passed. Real HTTPS acceptance passed 26 checks with CA/IP validation and no Windows authentication challenge; the local SQL-backed headless browser passed login, Users/lookup, role/department controls and logout. Default Web Site HTTP :80 remained available. The polling task is enabled / Ready / result 0 and a repeated poll was a no-op. See [the complete acceptance record](employee-code-authentication.md#acceptance--2026-10-07) for scope, coverage and account evidence; these checks do not claim the user's Edge GUI or email delivery was observed.
+
+Before migration 003, a DPAPI-encrypted logical export of 22 PCN tables / 121 rows passed decryption/SHA-256 verification. The SQL login lacked native backup permission; this was not a native SQL backup and full restore was not tested. Preserve that recovery limitation; the earlier 108-row export preceded migration 002.
 
 Keep the task paused if cutover fails. Restore only a reviewed, schema-compatible release/configuration and the approved account access needed for recovery. Migration 003 retires Windows mappings and revokes sessions; switching old application files alone is insufficient to recreate former access. Do not undo operational PCN data or enable all source/retired users. Retain version high-water records and service-SID ACLs; inspect protected safe logs/readiness without exposing secrets.
 

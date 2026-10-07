@@ -1,8 +1,8 @@
 # SQL Server API inventory and checklist
 
-Updated: 2026-10-07. The replacement runtime uses employee-code authentication with read-only `KEY_Code_DB.dbo.tblEmployee` lookup. Migration 003, a separate Administrator / IT account for verified code `2205529`, and IIS cutover are pending live execution. See [employee-code authentication](employee-code-authentication.md) and the [Windows deployment runbook](windows-test-deployment.md) for current evidence.
+Updated: 2026-10-07. Signed `pcn-test-10-1` uses employee-code authentication with read-only `KEY_Code_DB.dbo.tblEmployee` lookup. Migration 003, the separate verified `2205529` Administrator / IT account and PCN-only IIS cutover are complete. Real local and certificate-validated HTTPS API acceptance each passed 26 checks; local SQL-backed headless browser login/Users/lookup/controls/logout passed. See [the acceptance record](employee-code-authentication.md#acceptance--2026-10-07); the user's own Edge GUI and email delivery remain unobserved.
 
-PCN records, workbook data, users, roles, departments, sessions and routing remain in `Scn_DB`. Existing Firebase data import remains pending. Migrations 001/002 are applied; former AD provisioning is historical and is retired by migration 003 without bulk employee import.
+PCN records, workbook data, users, roles, departments, sessions and routing remain in `Scn_DB`. Existing Firebase data import remains pending. Migrations 001/002 were unchanged; 003 was applied at `2026-10-07T03:35:30.942Z`, retiring former AD mappings without importing the 1,935 source employees. The prior three PCN accounts were preserved and one separately approved employee administrator was added.
 ## Shared contract
 
 - JSON success: `{success:true,data}`; errors: `{success:false,error,details?,code?,requestId}`. Download returns file bytes.
@@ -130,7 +130,7 @@ The ignored local `.env` enables only directory lookup; local mail remains disab
 - [x] Release CI 155 tests/16 browser checks passed; pcn-test-6-1 deployed with verified process identity and HTTPS SQL readiness. Host backend lookup returned one matching profile with inline photo; private configuration stays external to releases.
 - [ ] Verify actual authenticated directory UI on a client; isolated browser rendering tests do not establish that result.
 
-The earlier 148-test mail-health and 155-test directory coverage are historical. Current local routing verification is 184/184 with 95.33% lines, 88.87% branches and 95.32% functions; deployed pcn-test-6-1 evidence remains separate.
+The earlier 148-test mail-health, 155-test directory and 184-test routing results are historical. Current employee-code verification passed 240 tests with 95.85% lines / 89.32% branches / 96.32% functions, plus 59 isolated browser checks. Real API/browser evidence is recorded separately in the linked acceptance record.
 
 ## Implemented browser/integration changes
 

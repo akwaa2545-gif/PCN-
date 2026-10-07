@@ -4,7 +4,7 @@ Updated: 2026-10-07. Target: existing `svr120a / Scn_DB`. Sources: migrations 00
 
 The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are Unicode text parsed/validated in Node; the migration avoids unavailable SQL JSON functions. Migration 001 is applied, with 21 application tables plus migration history, master-data version 1 and a hashed, forced-change `itadmin` account. Seven routing groups were initialized empty. Live SQL verification writes were rolled back. Existing Firebase records have not been imported.
 
-Employee source `KEY_Code_DB.dbo.tblEmployee` is read-only and is not imported. PCN owns `pcn.Users` (employee mapping, IdentityProvider, DepartmentKey, IsActive), `pcn.Roles` and `pcn.UserRoles` in `Scn_DB`. Migration 003 adds provider separation and retires old Windows mappings/session state. Only explicitly provisioned active employee-code accounts can sign in. Source department hints never grant PCN permissions. Migration 003 and separate verified administrator `2205529` are pending live execution; see [employee-code authentication](employee-code-authentication.md).
+Employee source `KEY_Code_DB.dbo.tblEmployee` is read-only and its 1,935 records are not imported. PCN owns `pcn.Users` (employee mapping, IdentityProvider, DepartmentKey, IsActive), `pcn.Roles` and `pcn.UserRoles` in `Scn_DB`. Migration 003 was applied at `2026-10-07T03:35:30.942Z`, adding provider separation and retiring old Windows mappings/session state; 001/002 were unchanged. The prior three accounts were preserved and separate verified `2205529` Administrator / IT account added. Only explicitly provisioned active employee-code accounts can sign in; source department hints never grant permissions. See [current acceptance](employee-code-authentication.md#acceptance--2026-10-07).
 ## PCN aggregate
 
 SQL normalizes parent fields and ordered child tables while retaining complete nested payloads as `nvarchar(max)`. This saves PCN data in SQL even though some evolving form fields retain JSON representation.
@@ -81,7 +81,7 @@ There are 21 application tables in the core migration plus SchemaMigrations. The
 
 Migration 002 historically added nullable `EmployeeCode`/`NormalizedEmployeeCode`, `DepartmentKey`, `AdObjectGuid`, `AdSid` and `DisplayName` plus unique non-null identity indexes. Migration 003 retains those historical columns and adds `IdentityProvider` (`password`, `employee-code`, `retired-windows`) with integrity constraints. Old AD users are retired and their sessions/tokens revoked. New employee accounts have a canonical source code, administrator-assigned department/roles, null password and no AD mapping. Explicit links preserve user ID, roles, department and ownership while clearing obsolete AD/password state and revoking sessions. No source row grants access automatically and no new duplicate user table is needed.
 
-The SQL connection account `scndb` is not an end-user identity. Legacy bootstrap created `itadmin` from private environment values. With AD configured, runtime creation resolves an administrator-selected AD employee and assigns explicit PCN roles/department without a PCN password. No plaintext application password is stored in SQL.
+The SQL connection account `scndb` is not an end-user identity. Legacy bootstrap created `itadmin` from private environment values. Current runtime creation resolves an administrator-selected SQL-source employee and assigns explicit PCN roles/department without a PCN password. The source has unique non-null `EmpCode nvarchar(10)`, English/Thai names, job-title and source-department hints, but no email or active flag. No source data is written and no plaintext application password is stored in SQL.
 
 Legacy groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tapbu.qa, qateFinal.signoff, supplierNotification. Local schema 2 uses department.{gscTet,prodEngTet,qaTet,gscTapbu,qaTapbu}.{approved,checked,prepared} plus supplierNotification; QA final judgment reuses QA/TET lists. Legacy contacts are preserved server-side and explicitly copied by an administrator. Signed URLs remain backend configuration; import excludes routing. See [routing design](mail-routing-design.md).
 
@@ -101,7 +101,8 @@ Legacy groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tap
 The earlier full migration design includes Suppliers/UserSuppliers, LegacyIdentityLinks, PcnSignoffEvents, NotificationAttempts, ApiIdempotencyKeys and MigrationBatches. These tables are not in the implemented core migration. Company scope, invitation/reset flows, signoff events, general request idempotency, scan pipeline and mail operations require further implementation.
 
 - [x] Apply SQL2014-compatible migration on the target and verify manifest/table/master readiness.
-- [x] Apply migration 002; verify selected AD administrator creation, Windows identity matching and sign-in on the deployed release.
+- [x] Historical migration 002 / selected AD administrator / Windows sign-in pilot; superseded by employee-code authentication.
+- [x] Apply migration 003 unchanged against SQL2014, retire old identity sessions and provision only the separately approved employee administrator; signed 10-1 local/HTTPS acceptance passed.
 - [ ] Observe live account linking and pilot signing/ownership flows; isolated automated coverage is recorded separately.
 - [x] Confirm empty routing and hashed first account without exposing credentials.
 - [ ] Reconcile actual source counts, payloads, null/omitted fields, audits, counters and unresolved owners.
@@ -110,5 +111,7 @@ The earlier full migration design includes Suppliers/UserSuppliers, LegacyIdenti
 - [x] Verify actual attachment bytes, quarantine, deletion and audit separately from uploaded flags.
 - [ ] Restrict migration archives and sensitive identity tables; use a separate DDL-capable migration account where feasible.
 - [ ] Complete operational policies for scanning, file retention, job cancellation/uncertain outcomes and secret configuration.
+
+Before migration 003, a DPAPI-encrypted logical export of 22 PCN tables / 121 rows passed decryption/SHA-256 verification. This is not a native SQL backup and full restore was not tested. The source remained read-only; current account counts and release/test scope are in the linked acceptance record.
 
 Related: [API inventory](sql-server-api-checklist.md), [migration plan](sql-server-migration.md), [setup](../README.md).

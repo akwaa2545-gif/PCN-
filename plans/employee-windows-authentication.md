@@ -1,6 +1,6 @@
 # Retired AD / Windows authentication pilot record
 
-Updated: 2026-10-07. **Historical record only.** The user replaced this design with [SQL employee-code authentication](employee-code-authentication.md). Do not use the former AD/IIS setup as current rollout guidance. The live `pcn-test-9-1` Windows runtime has not yet been cut over; replacement migration 003, verified administrator source-code mapping and live release acceptance remain pending.
+Updated: 2026-10-07. **Historical record only.** The user replaced this design with [SQL employee-code authentication](employee-code-authentication.md), deployed in signed `pcn-test-10-1`. Migration 003, the separate Administrator / IT account for employee code `2205529`, and PCN-only IIS cutover are complete. Do not use the former AD/IIS setup as current rollout guidance.
 
 ## Former identity model
 
@@ -8,7 +8,7 @@ The pilot used AD SamAccountName as Empcode, with an administrator-selected acco
 
 New AD accounts had no PCN password. Explicit account linking preserved PCN user IDs, role grants and ownership, rotated security stamps and revoked sessions; retained legacy hashes were unusable after linking. Duplicate GUID, SID or employee code was rejected rather than merged. Existing signing/ownership and mail-recipient permissions were unchanged.
 
-The former Windows login route was `POST /api/auth/windows`, and AD create/link requests used a selected `directoryId`. Those Windows/AD runtime paths are being removed. The replacement uses source `EmpCode` and explicit provider state; it does not convert old SamAccountName mappings automatically.
+The former Windows login route was `POST /api/auth/windows`, and AD create/link requests used a selected `directoryId`. Those Windows/AD runtime paths have been removed. The replacement uses source `EmpCode` and explicit provider state; it does not convert old SamAccountName mappings automatically.
 
 ## Verified pilot evidence — 2026-10-07
 
