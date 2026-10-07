@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const sql = require('mssql');
+const { lockUserMailRouting, readUserMailAssignments, filterPendingRecipients } = require('./userMailRouting');
 
 class NotificationWorker {
   constructor(pool, options = {}) {
@@ -22,21 +23,12 @@ class NotificationWorker {
 
   async processNext() {
     const claimToken = crypto.randomUUID();
-    // An expired sending lease is ambiguous: the previous sender may have delivered mail.
-    const result = await this.pool.request().input('token', sql.UniqueIdentifier, claimToken).query(`
-      SET XACT_ABORT ON; BEGIN TRY BEGIN TRANSACTION;
-      UPDATE pcn.NotificationJobs SET Status=N'uncertain', LastError=N'Worker lease expired; operator review required'
-      WHERE Status=N'sending' AND LeaseExpiresAt < SYSUTCDATETIME();
-      ;WITH candidate AS (SELECT TOP(1) * FROM pcn.NotificationJobs WITH(UPDLOCK,READPAST,ROWLOCK)
-        WHERE Status=N'pending' ORDER BY CreatedAt,Id)
-      UPDATE candidate SET Status=N'sending',Attempts=Attempts+1,ClaimedAt=SYSUTCDATETIME(),
-        LeaseExpiresAt=DATEADD(second,60,SYSUTCDATETIME()),ClaimToken=@token OUTPUT inserted.Id,inserted.PayloadJson;
-      COMMIT; END TRY BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; THROW; END CATCH;`);
-    const job = result.recordset[0];
+    const job = await this.claim(claimToken);
     if (!job) return { status: 'idle' };
+    if (job.cancelled) return { jobId: job.Id, status: 'cancelled' };
     let status = 'sent';
     let errorMessage = null;
-    try { await this.integrationService.sendMail(JSON.parse(job.PayloadJson)); }
+    try { await this.integrationService.sendMail(job.payload); }
     catch { status = 'uncertain'; errorMessage = 'Mail delivery outcome is unknown; operator review required'; }
     await this.pool.request().input('id', sql.UniqueIdentifier, job.Id).input('token', sql.UniqueIdentifier, claimToken)
       .input('status', sql.NVarChar(20), status).input('error', sql.NVarChar(1000), errorMessage)
@@ -44,6 +36,38 @@ class NotificationWorker {
         SentAt=CASE WHEN @status=N'sent' THEN SYSUTCDATETIME() ELSE NULL END,LeaseExpiresAt=NULL
         WHERE Id=@id AND ClaimToken=@token AND Status=N'sending';`);
     return { jobId: job.Id, status };
+  }
+
+  async claim(claimToken) {
+    const tx = this.pool.transaction();
+    await tx.begin(sql.ISOLATION_LEVEL.READ_COMMITTED);
+    try {
+      await lockUserMailRouting(tx);
+      // Expired leases are ambiguous; never return them to the pending queue.
+      const result = await tx.request().query(`UPDATE pcn.NotificationJobs SET Status=N'uncertain',
+        LastError=N'Worker lease expired; operator review required' WHERE Status=N'sending' AND LeaseExpiresAt<SYSUTCDATETIME();
+        SELECT TOP(1) Id,PayloadJson FROM pcn.NotificationJobs WITH(UPDLOCK,READPAST,ROWLOCK)
+        WHERE Status=N'pending' ORDER BY CreatedAt,Id;`);
+      const row = result.recordset[0];
+      if (!row) { await tx.commit(); return null; }
+      const savedPayload = JSON.parse(row.PayloadJson);
+      const payload = savedPayload.routingSnapshot ? filterPendingRecipients(savedPayload, await readUserMailAssignments(tx)) : savedPayload;
+      const cancelled = Boolean(savedPayload.routingSnapshot && !payload.to);
+      await tx.request().input('id', sql.UniqueIdentifier, row.Id).input('token', sql.UniqueIdentifier, claimToken)
+        .input('recipient', sql.NVarChar(1000), payload.to || '').input('payload', sql.NVarChar(sql.MAX), JSON.stringify(payload))
+        .query(cancelled
+          ? "UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Assigned recipients changed before sending' WHERE Id=@id AND Status=N'pending'"
+          : `UPDATE pcn.NotificationJobs SET Status=N'sending',Attempts=Attempts+1,ClaimedAt=SYSUTCDATETIME(),
+            LeaseExpiresAt=DATEADD(second,60,SYSUTCDATETIME()),ClaimToken=@token,Recipient=@recipient,PayloadJson=@payload
+            WHERE Id=@id AND Status=N'pending'`);
+      await tx.commit();
+      // Account changes after the committed claim do not recall an in-flight send.
+      const { routingSnapshot: omitted, ...mail } = payload;
+      return { Id: row.Id, payload: mail, cancelled };
+    } catch (error) {
+      try { await tx.rollback(); } catch { /* Preserve the original database error. */ }
+      throw error;
+    }
   }
 
   async health() {

@@ -5,6 +5,8 @@ const { createApp } = require('../../src/httpServer');
 const { NotificationService } = require('../../src/notificationService');
 const TEST_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_NEW_PASSWORD = crypto.randomBytes(24).toString('hex');
+const TEST_ACCESS_VERSION = '0000000000000001';
+const TEST_SECURITY_STAMP = '00000000-0000-4000-8000-000000000001';
 
 const validPayload = {
   changeForm: 'rawMaterial', riskLevel: 'RL2',
@@ -22,6 +24,7 @@ const validPayload = {
     }, tapbu: { need: true, noNeed: false, gsc: { approved: true, checked: true, prepared: true }, qa: { approved: true, checked: true, prepared: true } },
     qateFinal: { signoff: { approved: true, checked: true, prepared: true, preparedName: 'QA reviewer' } } }
 };
+const { internalReview: historicalReview, ...unsignedPayload } = validPayload;
 
 function memoryRepository() {
   let records = {};
@@ -31,6 +34,13 @@ function memoryRepository() {
   return {
     async list(filters = {}) { return structuredClone(Object.values(records).filter(row => (!filters.status || row.status === filters.status) && (!filters.ownerUserId || row.ownerUserId === filters.ownerUserId))); },
     async findById(id) { return structuredClone(records[id] || null); },
+    // Simulate a historical SQL record without creating privileged signatures through HTTP.
+    async seedHistoricalReview(id, review) {
+      if (!records[id]) throw new Error('Historical fixture requires an existing PCN');
+      const seeded = { ...records[id], version: version(), internalReview: { ...structuredClone(review), pcnCode: id } };
+      records = { ...records, [id]: seeded };
+      return structuredClone(seeded);
+    },
     async create(record) {
       const id = `PCN-${record.createdAt.slice(0, 4)}-${String(Object.keys(records).length + 1).padStart(4, '0')}`;
       const created = { ...structuredClone(record), id, version: version(), internalReview: { ...record.internalReview, pcnCode: id } };
@@ -57,10 +67,12 @@ function memoryRepository() {
   };
 }
 
-function fakeAuthService() {
+function fakeAuthService({ additionalUsers = [] } = {}) {
   let users = ['admin', 'supplier', 'other', 'temporary'].map(username => ({ id: `${username}-id`, username,
     email: null, roles: username === 'supplier' || username === 'other' ? ['supplier'] : ['admin'],
-    isActive: true, mustChangePassword: username === 'temporary', password: TEST_PASSWORD }));
+    isActive: true, version: TEST_ACCESS_VERSION, mustChangePassword: username === 'temporary', password: TEST_PASSWORD }));
+  users = [...users, ...additionalUsers.map(user => ({ id: `${user.username}-id`, email: null,
+    isActive: true, mustChangePassword: false, password: TEST_PASSWORD, ...structuredClone(user) }))];
   let sessions = {};
   let counter = 0;
   const safeUser = candidate => {
@@ -86,7 +98,9 @@ function fakeAuthService() {
     async session(token) {
       if (!sessions[token]) return null;
       const { token: omitted, ...principal } = sessions[token];
-      return structuredClone(principal);
+      const result = structuredClone(principal);
+      Object.defineProperty(result.user, 'sessionSecurityStamp', { value: TEST_SECURITY_STAMP });
+      return result;
     },
     async logout(token) { const { [token]: removed, ...remaining } = sessions; sessions = remaining; },
     async changePassword(token, input) {
@@ -102,7 +116,17 @@ function fakeAuthService() {
 async function startApi(t, overrides = {}) {
   const repository = memoryRepository();
   const messages = [];
-  const notificationService = new NotificationService({ request() { messages.push('job-write'); throw new Error('Unexpected outbox write'); } },
+  const notificationPool = { transaction() {
+    return { async begin() {}, async commit() {}, async rollback() {}, request() {
+      return { input() { return this; }, async query(statement) {
+        if (statement.includes('sp_getapplock')) return { recordset: [{ LockResult: 0 }] };
+        if (statement.includes('SELECT IsActive,SecurityStamp,AccessVersion')) return { recordset: [{ IsActive: true, SecurityStamp: TEST_SECURITY_STAMP, AccessVersion: Buffer.from(TEST_ACCESS_VERSION, 'hex') }] };
+        if (statement.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(await repository.getNotificationSettings()) }] };
+        messages.push('job-write'); throw new Error('Unexpected outbox write');
+      } };
+    } };
+  } };
+  const notificationService = new NotificationService(notificationPool,
     { repository, publicOrigin: 'http://localhost', mailUrl: 'https://mail.example.test' });
   const app = createApp({ repository, authService: fakeAuthService(), publicOrigin: 'http://localhost', secureCookies: false,
     rootDir: path.resolve(__dirname, '../..'), notificationService, ...overrides });
@@ -131,4 +155,4 @@ async function startApi(t, overrides = {}) {
   return { repository, messages, request, login };
 }
 
-module.exports = { startApi, validPayload, memoryRepository, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD };
+module.exports = { startApi, validPayload, unsignedPayload, memoryRepository, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD };

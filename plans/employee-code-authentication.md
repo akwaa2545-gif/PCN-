@@ -18,7 +18,7 @@ The source has no email address or enabled/disabled flag. An employee must have 
 
 Employee-code-only login deliberately allows anyone who knows an enabled employee's code to sign in as that employee. This is the user's chosen access model; it does not prove identity through a password, AD or Windows SSO.
 
-Existing roles remain `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa` and `tapbu`. PCN department choices remain `gscTet`, `prodEngTet`, `qaTet`, `gscTapbu`, `qaTapbu`, `it` and `other`. Signing permissions, ownership rules and recipient routing remain independent of employee lookup.
+Existing roles remain `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa` and `tapbu`. PCN department choices remain `gscTet`, `prodEngTet`, `qaTet`, `gscTapbu`, `qaTapbu`, `it` and `other`. The local migration-004 feature adds one explicit signing step and a verified directory email per user, automatically deriving the matching mail recipient list. See [mail routing](mail-routing-design.md). Employee lookup never assigns permissions automatically. Migration 004 was applied at `2026-10-07T04:56:51.338Z`, preserving all four users and existing role assignments without adding signing grants. The new code runs locally; its server deployment remains pending.
 
 ## Runtime and API contract
 
@@ -31,7 +31,8 @@ The normal login page accepts one employee code without a password. Code validat
 | `GET /api/auth/config` | Public auth mode and whether employee provisioning is configured; no credentials or source infrastructure |
 | `POST /api/auth/login` | In employee-code mode, `{employeeCode, remember?}`; no password or Windows identity input |
 | `GET /api/admin/employees?query=...` | Administrator-only bounded employee-code/name search against the SQL source |
-| `POST /api/admin/users` | Administrator selects `{employeeCode, roles, department}`; server re-queries the source before creating the account |
+| `POST /api/admin/users` | Administrator selects `{employeeCode, roles, department, signingStep, mailSelection?}`; server re-queries the employee source and selected directory mail |
+| `PATCH /api/admin/users/:id` | Complete `{roles, department, signingStep, isActive, version, mailSelection?}` assignment edit; stale versions conflict and sessions are revoked |
 | `POST /api/admin/users/:uuid/employee` | Explicit link with `{employeeCode}`; selected source record is verified server-side |
 | `POST /api/auth/logout` | Revoke the SQL session and clear the cookie, retaining origin/CSRF protection |
 

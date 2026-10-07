@@ -1,5 +1,5 @@
 const { ApiError } = require("./apiError");
-const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, isInternal } = require('./workflowAccess');
+const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, isInternal } = require('./workflowAccess');
 const { isDeepStrictEqual } = require('node:util');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
 const { emailList } = require('./integrationService');
@@ -58,7 +58,7 @@ class PcnService {
     return { ...settings, flowConfigured: Boolean(process.env.POWER_AUTOMATE_MAIL_URL), directoryConfigured: Boolean(process.env.POWER_AUTOMATE_DIRECTORY_URL) };
   }
 
-  async updateNotificationSettings(input, actor = "web") {
+  async updateNotificationSettings(input, actor = "web", user) {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiError(400, 'Mail routing body must be an object');
     if (input.schemaVersion !== undefined && input.schemaVersion !== 2) throw new ApiError(400, 'Unsupported mail routing schema version');
     const current = await this.repository.getNotificationSettings();
@@ -66,7 +66,7 @@ class PcnService {
       throw new ApiError(409, 'Mail routing changed; reload before saving');
     }
     const settings = input?.schemaVersion === 2 ? sanitizeDepartmentRouting(input, current) : sanitizeNotificationSettings(input);
-    await this.repository.saveNotificationSettings(settings, actor, settingsVersion(current));
+    await this.repository.saveNotificationSettings(settings, actor, settingsVersion(current), user);
     return this.getNotificationSettings();
   }
 
@@ -97,11 +97,11 @@ class PcnService {
       ...data
     };
     record.internalReview = {
-      ...(record.internalReview || {}),
+      ...(user ? applySignatureIdentity({}, record.internalReview || {}, user, now) : record.internalReview || {}),
       pcnCode: ''
     };
 
-    return this.repository.create(record, actor);
+    return this.repository.create(record, actor, user);
   }
 
   async update(id, input, actor = "web", user) {
@@ -152,13 +152,14 @@ class PcnService {
           changeType: formDefinitions[data.changeForm].changeHeading,
           route: buildWorkflow(data.riskLevel).map((step) => step.owner),
           internalReview: {
-            ...(data.internalReview || {}),
+            ...(user ? applySignatureIdentity(current.internalReview || {}, data.internalReview || {}, user, now) : data.internalReview || {}),
             pcnCode: current.id
           }
         };
       },
       actor,
-      input.version
+      input.version,
+      user
     );
 
     if (!updated) {
@@ -168,9 +169,9 @@ class PcnService {
     return updated;
   }
 
-  async remove(id, actor = "web", version) {
+  async remove(id, actor = "web", version, user) {
     assertValidId(id);
-    const deleted = await this.repository.delete(id, actor, version);
+    const deleted = await this.repository.delete(id, actor, version, user);
 
     if (!deleted) {
       throw new ApiError(404, "PCN not found");
@@ -203,7 +204,8 @@ class PcnService {
         ]
       }); },
       actor,
-      input.version
+      input.version,
+      user
     );
 
     if (!updated) {
@@ -248,7 +250,8 @@ class PcnService {
         ]
       }); },
       actor,
-      input.version
+      input.version,
+      user
     );
 
     if (!updated) {

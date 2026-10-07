@@ -16,7 +16,7 @@ function fixture(results = []) {
         const result = results[state.calls.length];
         state.calls = [...state.calls, { query, inputs }];
         if (result instanceof Error) throw result;
-        return result || { rowsAffected: [1], recordset: [] };
+        return { rowsAffected: [1], recordset: [], ...result };
       }
     };
   }
@@ -32,10 +32,69 @@ function hydrated() {
     PasswordHash: null, SecurityStamp: 'stamp' }], [{ Name: 'qa' }]] };
 }
 
+test('migration004 adds nullable scalar assignments and rowversion without granting historical users',()=>{
+  assert.equal(migrationManifest.includes('004_user_signing_permissions.sql'),true);
+  const migration=fs.readFileSync(path.join(__dirname,'..','sql','migrations','004_user_signing_permissions.sql'),'utf8');
+  for(const column of ['SigningStep','MailDirectoryId','MailVerifiedAt','MailProfileJson','AccessVersion'])assert.match(migration,new RegExp('ADD '+column));
+  assert.match(migration,/AccessVersion rowversion/);
+  assert.match(migration,/EXEC\(N'ALTER TABLE pcn.Users ADD CONSTRAINT CK_Users_SigningStep/);
+  assert.doesNotMatch(migration,/UPDATE pcn.Users|JSON_VALUE|ISJSON/);
+});
+
+test('account assignment update uses routing lock, version guard, revocation and audit in one transaction',async()=>{
+  const row={Id:'account-id',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',SigningStep:null,AccessVersion:Buffer.from('0011223344556677','hex')};
+  const {repo,state}=fixture([{},{recordsets:[[row],[{Name:'qa'}]]},{rowsAffected:[1]},{},{rowsAffected:[1]},{},{},{},{},hydrated()]);
+  const result=await repo.updateEmployeeAccount('account-id',{roles:['qa'],department:'qaTet',signingStep:'checked',isActive:true,version:'0011223344556677',email:'person@example.com',mailDirectoryId:'directory-1',mailVerifiedAt:new Date(),mailProfile:{id:'directory-1',email:'person@example.com'}},'user:admin');
+  assert.equal(state.calls[0].inputs.resource,'pcn:user-mail-routing');
+  assert.equal(state.calls[0].inputs.mode,'Exclusive');
+  const update=state.calls.find(call=>/SigningStep=@signingStep/.test(call.query));
+  assert.match(update.query,/AccessVersion=@version/);
+  assert.equal(update.inputs.signingStep,'checked');
+  assert.ok(Buffer.isBuffer(update.inputs.version));
+  assert.ok(state.calls.some(call=>/UPDATE pcn.Sessions/.test(call.query)&&/AccountTokens/.test(call.query)));
+  const audit=state.calls.find(call=>/INSERT pcn.AuditLogs/.test(call.query));
+  assert.equal(audit.inputs.actor,'user:admin');
+  assert.doesNotMatch(audit.inputs.metadata,/mailVerifiedAt|stamp|token|password/i);
+  assert.equal(state.committed,true);
+  assert.equal(result.id,'account-id');
+});
+
+test('stale account edit rolls back before grants and last active administrator cannot be disabled or demoted',async()=>{
+  const row={Id:'account-id',IdentityProvider:'employee-code',IsActive:true,AccessVersion:Buffer.from('0011223344556677','hex')};
+  const input={roles:['qa'],department:'qaTet',signingStep:null,isActive:true,version:'8899aabbccddeeff',email:null};
+  const stale=fixture([{},{recordsets:[[row],[{Name:'qa'}]]}]);
+  await assert.rejects(stale.repo.updateEmployeeAccount('account-id',input),{statusCode:409});
+  assert.equal(stale.state.rolledBack,true);
+  assert.equal(stale.state.calls.length,2);
+  for(const change of [{roles:['qa']},{isActive:false}]){
+    const last=fixture([{},{recordsets:[[row],[{Name:'admin'}]]},{recordset:[{Total:1}]}]);
+    await assert.rejects(last.repo.updateEmployeeAccount('account-id',{...input,version:'0011223344556677',roles:['admin'],...change}),{statusCode:409});
+    assert.equal(last.state.rolledBack,true);
+    assert.equal(last.state.calls.some(call=>/UPDATE pcn.Users/.test(call.query)),false);
+  }
+});
+
+test('an assignment exceeding effective recipient capacity rolls back all account writes',async()=>{
+  const row={Id:'account-id',IdentityProvider:'employee-code',IsActive:true,AccessVersion:Buffer.from('0011223344556677','hex')};
+  const settings={schemaVersion:2,groups:[{key:'department.qaTet.checked',emails:Array.from({length:30},(_,i)=>`u${i}@example.com`).join('; ')}]};
+  const profile={id:'directory-1',email:'person@example.com'};
+  const assigned={Id:'account-id',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',SigningStep:'checked',Email:profile.email,MailDirectoryId:profile.id,MailVerifiedAt:new Date(),MailProfileJson:JSON.stringify(profile),RoleName:'qa'};
+  const {repo,state}=fixture([{},{recordsets:[[row],[{Name:'qa'}]]},{rowsAffected:[1]},{},{rowsAffected:[1]},{},{recordset:[{SettingsJson:JSON.stringify(settings)}]},{recordset:[assigned]}]);
+  await assert.rejects(repo.updateEmployeeAccount('account-id',{roles:['qa'],department:'qaTet',signingStep:'checked',isActive:true,version:'0011223344556677',email:profile.email,mailDirectoryId:profile.id,mailVerifiedAt:assigned.MailVerifiedAt,mailProfile:profile}),{statusCode:400});
+  assert.equal(state.rolledBack,true);assert.equal(state.committed,false);
+});
+
+test('a revoked administrator cannot complete a delayed account change',async()=>{
+  const {repo,state}=fixture([{},{recordset:[{IsActive:false,SecurityStamp:'changed',AccessVersion:Buffer.from('0011223344556677','hex')}] }]);
+  await assert.rejects(repo.createEmployeeUser(identity,'user:administrator',{id:'administrator',version:'0011223344556677',sessionSecurityStamp:'prior'}),{statusCode:401});
+  assert.equal(state.committed,false);
+  assert.equal(state.calls.some(call=>/INSERT pcn.Users/.test(call.query)),false);
+});
+
 test('employee creation preserves leading zeros and transactionally stores explicit provider and assigned role', async () => {
-  const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [1] }, hydrated()]);
+  const { repo, state } = fixture([{}, { rowsAffected: [1] }, { rowsAffected: [1] }, {}, {}, {}, hydrated()]);
   const account = await repo.createEmployeeUser({ ...identity, roles: ['qa', 'qa'] });
-  const insert = state.calls[0];
+  const insert = state.calls[1];
   assert.equal(insert.inputs.employeeCode, '001Employe');
   assert.equal(insert.inputs.normalizedEmployeeCode, '001employe');
   assert.equal(insert.inputs.username, '001Employe');
@@ -45,7 +104,7 @@ test('employee creation preserves leading zeros and transactionally stores expli
   assert.equal(insert.inputs.adSid, undefined);
   assert.equal(insert.inputs.adObjectGuid, undefined);
   assert.equal(insert.inputs.hash, undefined);
-  assert.equal(state.calls.length, 3);
+  assert.equal(state.calls.length, 7);
   assert.equal(state.committed, true);
   assert.equal(account.identityProvider, 'employee-code');
   assert.equal(account.passwordHash, null);
@@ -53,12 +112,12 @@ test('employee creation preserves leading zeros and transactionally stores expli
 
 test('collisions and invalid persisted grants roll back safely', async () => {
   for (const number of [2601, 2627]) {
-    const { repo, state } = fixture([Object.assign(new Error('private SQL detail'), { number })]);
+    const { repo, state } = fixture([{},Object.assign(new Error('private SQL detail'), { number })]);
     await assert.rejects(repo.createEmployeeUser(identity), error => error.statusCode === 409 && !error.message.includes('private'));
     assert.equal(state.rolledBack, true);
     assert.equal(state.committed, false);
   }
-  const failed = fixture([{ rowsAffected: [1] }, { rowsAffected: [0] }]);
+  const failed = fixture([{}, { rowsAffected: [1] }, { rowsAffected: [0] }]);
   await assert.rejects(failed.repo.createEmployeeUser(identity), { statusCode: 400 });
   assert.equal(failed.state.rolledBack, true);
 });
@@ -66,7 +125,8 @@ test('collisions and invalid persisted grants roll back safely', async () => {
 test('invalid source profile or assignments are rejected before SQL writes', async () => {
   const invalidProfiles = [{ employeeCode: 123 }, { employeeCode: '' }, { employeeCode: 'a'.repeat(11) },
     { employeeCode: 'user\\spoof' }, { roles: [] }, { roles: ['superadmin'] }, { email: 'invalid' },
-    { department: 'unknown' }, { displayName: 42 }, { displayName: 'A'.repeat(201) }];
+    { department: 'unknown' }, { displayName: 42 }, { displayName: 'A'.repeat(201) },
+    {email:'person@example.com',mailDirectoryId:'id',mailVerifiedAt:null,mailProfile:{id:'id',email:'person@example.com'}}];
   for (const invalid of invalidProfiles) {
     const { repo, state } = fixture();
     await assert.rejects(repo.createEmployeeUser({ ...identity, ...invalid }), { statusCode: 400 });
@@ -86,18 +146,19 @@ test('employee code lookup uses normalized parameter and provider with no SQL in
 });
 
 test('explicit linking preserves user ownership, assigned department and roles while removing credentials and old AD identity', async () => {
-  const { repo, state } = fixture([{ recordset: [{ Id: 'old', IdentityProvider: 'retired-windows', EmployeeCode: 'old-sam', IsActive: true }] },
-    { rowsAffected: [1] }, { rowsAffected: [2, 1] }, hydrated()]);
+  const { repo, state } = fixture([{}, { recordset: [{ Id: 'old', IdentityProvider: 'retired-windows', EmployeeCode: 'old-sam', IsActive: true }] },
+    { rowsAffected: [1] }, { rowsAffected: [2, 1] }, {}, {}, {}, hydrated()]);
   const user = await repo.linkEmployeeIdentity('old', identity);
-  const update = state.calls[1];
+  const update = state.calls[2];
   assert.equal(update.inputs.employeeCode, '001Employe');
   assert.match(update.query, /IdentityProvider='employee-code'/);
   assert.match(update.query, /AdObjectGuid=NULL,AdSid=NULL/);
   assert.match(update.query, /PasswordHash=NULL/);
   assert.match(update.query, /SecurityStamp=@stamp/);
   assert.doesNotMatch(update.query, /DepartmentKey=|UserRoles|PcnRequests/);
-  assert.match(state.calls[2].query, /UPDATE pcn.Sessions SET RevokedAt/);
-  assert.match(state.calls[2].query, /UPDATE pcn.AccountTokens SET UsedAt/);
+  assert.match(update.query,/Email=CASE WHEN MailVerifiedAt IS NOT NULL THEN Email/);
+  assert.match(state.calls[3].query, /UPDATE pcn.Sessions SET RevokedAt/);
+  assert.match(state.calls[3].query, /UPDATE pcn.AccountTokens SET UsedAt/);
   assert.equal(state.committed, true);
   assert.equal(user.identityProvider, 'employee-code');
 });
@@ -106,12 +167,12 @@ test('linking rejects conflicting employee links and missing or disabled account
   const cases = [[[], 404], [[{ IdentityProvider: 'employee-code', EmployeeCode: 'other', IsActive: true }], 409],
     [[{ IdentityProvider: 'password', IsActive: false }], 400]];
   for (const [recordset, status] of cases) {
-    const { repo, state } = fixture([{ recordset }]);
+    const { repo, state } = fixture([{}, { recordset }]);
     await assert.rejects(repo.linkEmployeeIdentity('old', identity), { statusCode: status });
     assert.equal(state.rolledBack, true);
-    assert.equal(state.calls.length, 1);
+    assert.equal(state.calls.length, 2);
   }
-  const collision = fixture([{ recordset: [{ IdentityProvider: 'password', IsActive: true }] },
+  const collision = fixture([{}, { recordset: [{ IdentityProvider: 'password', IsActive: true }] },
     Object.assign(new Error('private constraint'), { number: 2601 })]);
   await assert.rejects(collision.repo.linkEmployeeIdentity('old', identity), error => error.statusCode === 409 && !error.message.includes('private'));
   assert.equal(collision.state.committed, false);

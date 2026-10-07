@@ -1212,7 +1212,7 @@
   function updateApprovalCheckLocks() {
     getApprovalRouteControls().forEach((control) => {
       const rule = getApprovalLockRule(control.dataset.internalField);
-      control.disabled = rule.locked && !control.checked;
+      control.disabled = rule.unauthorized || (rule.locked && !control.checked);
       const label = control.closest(".excel-check, .qate-signoff-check");
 
       if (label) {
@@ -1220,6 +1220,29 @@
         label.title = control.disabled ? rule.reason : "";
       }
     });
+    document.querySelectorAll('[data-internal-field]').forEach(control => {
+      const field = control.dataset.internalField;
+      if (/^(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)(Name|Date)$/.test(field)) {
+        control.disabled = true;
+        control.title = 'Signer name and date are recorded when signing.';
+      } else if (/^(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\./.test(field) && !parseApprovalField(field) && !field.endsWith('.comment')) {
+        control.disabled = true;
+        control.title = 'Historical signoff information is read-only.';
+      } else if (/^qateFinal\./.test(field) && !field.startsWith('qateFinal.signoff.')) {
+        control.disabled = !canSignStep('qateFinal.signoff', 'prepared');
+        control.title = control.disabled ? 'Requires the QA/TET Prepared assignment.' : '';
+      }
+    });
+  }
+
+  function canSignStep(group, action) {
+    const departments = { 'signoff.gscTet': 'gscTet', 'signoff.prodEngTet': 'prodEngTet', 'signoff.qaTet': 'qaTet',
+      'tapbu.gsc': 'gscTapbu', 'tapbu.qa': 'qaTapbu', 'qateFinal.signoff': 'qaTet' };
+    const roles = (state.user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
+    const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
+    const department = departments[group];
+    return Boolean(department && state.user?.isActive !== false && state.user?.department === department && state.user?.signingStep === action &&
+      !roles.includes('supplier') && ['admin', 'reviewer', departmentRoles[department]].some(role => roles.includes(role)));
   }
 
   function getApprovalRouteControls() {
@@ -1233,6 +1256,10 @@
 
     if (!current) {
       return { locked: false, reason: "" };
+    }
+
+    if (!canSignStep(current.group, current.action)) {
+      return { locked: true, unauthorized: true, reason: 'Your assigned department and signing step do not permit this signature.' };
     }
 
     if (current.group.startsWith("tapbu.") && !isControlChecked("tapbu.need")) {

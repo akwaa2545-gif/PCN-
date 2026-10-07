@@ -39,7 +39,7 @@ async function main() {
   const repository = new SqlPcnRepository(pool,{notifications:atomicNotifications});
   await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
-  const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory});
+  const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory,integrationService});
   server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
   let sending = false;
   timer = setInterval(async()=>{

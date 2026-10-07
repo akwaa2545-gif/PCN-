@@ -157,6 +157,23 @@
     els.adminMailRoutingButton.addEventListener("click", () => setAdminView("mail"));
     els.adminUsersButton.addEventListener("click", () => setAdminView("users"));
     window.addEventListener("hashchange", syncViewFromHash);
+    window.addEventListener('pcn-users-changed', refreshManagedRecipients);
+  }
+
+  async function refreshManagedRecipients() {
+    try {
+      const settings = await apiFetch('/api/notification-settings');
+      if (!state.hasMailChanges) state.notificationSettings = settings;
+      else {
+        const fresh = new Map(settings.groups.map((group) => [group.key, group]));
+        state.notificationSettings = { ...state.notificationSettings, routingVersion: settings.routingVersion,
+          groups: state.notificationSettings.groups.map((group) => ({ ...group,
+            automaticRecipients: fresh.get(group.key)?.automaticRecipients || [],
+            effectiveEmails: fresh.get(group.key)?.effectiveEmails || '',
+            effectiveRecipients: fresh.get(group.key)?.effectiveRecipients || [] })) };
+      }
+      renderNotificationSettings();
+    } catch (error) { state.routingMessage = `User access saved; mail routing could not refresh: ${error.message}`; render(); }
   }
 
   async function loadPcns(successMessage, action = "load") {
@@ -725,17 +742,46 @@
     const card = document.createElement("section");
     card.className = "notification-group notification-step";
     card.dataset.notificationGroup = group.key;
+    card.managedRecipients = Array.isArray(group.automaticRecipients) ? group.automaticRecipients.map((recipient) => ({ ...recipient })) : [];
     card.setAttribute("aria-label", group.label);
     card.innerHTML = `<div class="notification-group-header"><div><h4>${escapeHtml(heading)}</h4><small data-recipient-count></small></div><button class="ghost-button notification-add-button" type="button" aria-label="Add recipient to ${escapeHtml(group.label)}">Add</button></div><div class="notification-person-list"></div><div class="notification-group-warning" aria-live="polite" hidden></div>`;
     const list = card.querySelector(".notification-person-list");
     const recipients = getEditorGroupRecipients(group);
     recipients.forEach((recipient) => appendRecipientRow(list, recipient));
+    if (card.managedRecipients.length) {
+      const managed = document.createElement('div'); managed.className = 'notification-managed-recipients';
+      const title = document.createElement('h5'); title.textContent = 'Managed from Users'; managed.appendChild(title);
+      card.managedRecipients.forEach((recipient) => managed.appendChild(createManagedRecipient(recipient)));
+      const help = document.createElement('small'); help.textContent = 'Change the user’s department, signing step or active status in Users to update this list.'; managed.appendChild(help);
+      card.appendChild(managed);
+    }
     updateRecipientCount(list);
     renderRecipientValidation(list);
     card.querySelector(".notification-add-button").addEventListener("click", () => {
       openRecipientDialog(group);
     });
     return card;
+  }
+
+  function createManagedRecipient(recipient) {
+    const row = document.createElement('div');
+    row.className = 'notification-person notification-person-managed';
+    row.dataset.managedRecipient = recipient.email || '';
+    const avatar = document.createElement('span');
+    avatar.className = 'notification-person-avatar'; avatar.setAttribute('aria-hidden', 'true');
+    const fallback = recipient.displayName || recipient.email;
+    const image = typeof recipient.photo === 'string' ? recipient.photo.trim() : '';
+    const match = /^data:image\/(?:png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(image);
+    renderRecipientAvatar(avatar, image.length <= 100 * 1024 && match && match[1].length % 4 === 0 ? image : '', fallback);
+    avatar.querySelector('img')?.addEventListener('error', () => renderRecipientAvatar(avatar, '', fallback), { once: true });
+    const body = document.createElement('div'); body.className = 'notification-person-body';
+    const name = document.createElement('span'); name.className = 'notification-person-identity';
+    name.textContent = [recipient.displayName, recipient.employeeCode].filter(Boolean).join(' · ');
+    const email = document.createElement('span'); email.className = 'notification-person-email'; email.textContent = recipient.email || '';
+    const meta = document.createElement('div'); meta.className = 'notification-person-meta';
+    meta.textContent = [recipient.jobTitle, recipient.department].filter(Boolean).join(' - '); meta.hidden = !meta.textContent;
+    body.append(name, email, meta); row.append(avatar, body);
+    return row;
   }
 
   function recipientTargetLabel(group) {
@@ -1326,12 +1372,12 @@
   function updateRecipientCount(list) {
     const card = list.closest("[data-notification-group]");
     const counter = card ? card.querySelector("[data-recipient-count]") : null;
-    const boxCount = [...list.querySelectorAll("[data-recipient-email]")]
-      .filter((input) => input.value.trim())
-      .length;
+    const manual = [...list.querySelectorAll("[data-recipient-email]")].map((input) => input.value.trim()).filter(Boolean);
+    const managed = (card?.managedRecipients || []).map((recipient) => recipient.email).filter(Boolean);
+    const boxCount = new Set([...manual, ...managed].map((email) => email.toLowerCase())).size;
 
     if (counter) {
-      counter.textContent = `${boxCount} recipient${boxCount === 1 ? "" : "s"}`;
+      counter.textContent = `${boxCount} recipient${boxCount === 1 ? "" : "s"}${managed.length ? ` · ${managed.length} managed from Users` : ''}`;
     }
   }
 
@@ -1397,7 +1443,7 @@
       return;
     }
 
-    if (emails.length === 0) {
+    if (emails.length === 0 && !(card?.managedRecipients || []).some((recipient) => isValidEmail(recipient.email))) {
       warning.hidden = false;
       warning.className = "notification-group-warning";
       warning.textContent = "Empty — no email will be sent to this list.";

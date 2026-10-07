@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PCN Administration</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="admin.css" />
   </head>
   <body class="admin-page">
     <div class="app-shell">
@@ -228,11 +229,23 @@
               <div id="employeeAssignments" class="employee-assignments">
                 <label for="employeeRole">PCN role<select id="employeeRole" required><option value="">Select role</option><option value="admin">Administrator</option><option value="reviewer">Reviewer</option><option value="supplier">Requester</option><option value="gsc">GSC</option><option value="productionengineering">Production engineering</option><option value="qa">QA</option><option value="tapbu">TaPBU</option></select></label>
                 <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
+                <label for="employeeSigningStep">Signing step<select id="employeeSigningStep" aria-describedby="employeeRoutePreview"><option value="">No signing assignment</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option></select></label>
+                <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
+                <p id="employeeRoleHelp" class="employee-assignment-help"></p>
+                <div class="employee-mail-assignment">
+                  <label for="employeeMailSearch">Confirm mail recipient</label>
+                  <p class="employee-assignment-help">The selected employee's English name is searched automatically. Confirm the correct person; an email cannot be saved as typed text.</p>
+                  <input id="employeeMailSearch" type="search" autocomplete="off" maxlength="100" aria-describedby="employeeMailStatus" aria-controls="employeeMailResults" disabled />
+                  <p id="employeeMailStatus" role="status" aria-live="polite"></p>
+                  <div id="employeeMailResults" class="employee-results" role="group" aria-label="Mail recipient search results" hidden></div>
+                  <p id="employeeMailSelected" role="status" aria-live="polite"></p>
+                </div>
+                <p id="employeeRoutePreview" class="employee-route-preview" role="status" aria-live="polite">No signing assignment.</p>
               </div>
               <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. The employee code becomes their sign-in code and existing sessions will be signed out.</p>
               <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Clear selection</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
             </form>
-            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee code</th><th scope="col">Employee</th><th scope="col">Role</th><th scope="col">PCN department</th><th scope="col">Status</th><th scope="col">Sign-in</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
+            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee code</th><th scope="col">Employee</th><th scope="col">Role</th><th scope="col">PCN department</th><th scope="col">Signing step</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
           </section>
         </section>
       </main>

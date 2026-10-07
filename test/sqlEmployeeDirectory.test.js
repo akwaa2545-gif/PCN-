@@ -21,7 +21,7 @@ function fixture(rows = [employee]) {
 
 test('employee source uses the fixed readonly table and a parameterized exact employee code', async () => {
   const { directory, calls } = fixture();
-  assert.deepEqual(await directory.getByCode(' 001aB '), { employeeCode: '001Ab', displayName: 'Example Employee',
+  assert.deepEqual(await directory.getByCode(' 001aB '), { employeeCode: '001Ab', displayName: 'Example Employee', englishName: 'Example Employee',
     email: null, sourceDepartment: 'IT', jobTitle: 'Engineer', isActive: true });
   assert.equal(calls[0].inputs.employeeCode.value, '001ab');
   assert.match(calls[0].query, /SELECT TOP \(2\)/i);
@@ -73,7 +73,7 @@ test('profiles prefer English names, fall back to Thai or employee code, and hav
   const thai = { ...employee, PersonFNameEng: null, PersonLNameEng: ' ', PersonFNameThai: 'สมชาย',
     PersonLNameThai: 'ทดสอบ', PostNameEng: null, OrgID: null };
   assert.deepEqual(await fixture([thai]).directory.getByCode('001Ab'), { employeeCode: '001Ab',
-    displayName: 'สมชาย ทดสอบ', email: null, sourceDepartment: null, jobTitle: null, isActive: true });
+    displayName: 'สมชาย ทดสอบ', englishName: '', email: null, sourceDepartment: null, jobTitle: null, isActive: true });
   const unnamed = { ...thai, PersonFNameThai: null, PersonLNameThai: null };
   assert.equal((await fixture([unnamed]).directory.getByCode('001Ab')).displayName, '001Ab');
 });

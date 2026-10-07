@@ -3,7 +3,8 @@ const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { scalarFields, childTables, splitRecord, hydratePcn, versionHex } = require('./sqlPcnHydration');
 const { migrationManifest } = require('./sqlDatabase');
-const { settingsVersion } = require('./mailRouting');
+const { settingsVersion, normalizeMailRouting } = require('./mailRouting');
+const { lockUserMailRouting, readUserMailAssignments, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
 
 const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'], ['signoff.qaTet', 'QA/TET'],
@@ -68,8 +69,10 @@ class SqlPcnRepository {
     return `PCN-${year}-${String(sequence).padStart(4, '0')}`;
   }
 
-  async create(record, actor = 'system') {
+  async create(record, actor = 'system', user) {
     return this.transaction(async tx => {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, user);
       const year = Number(String(record.createdAt || new Date().toISOString()).slice(0, 4));
       const id = record.id || await this.allocateCode(tx, year);
       assertCode(id);
@@ -92,8 +95,10 @@ class SqlPcnRepository {
     }
   }
 
-  async update(code, updater, actor = 'system', expectedVersion) {
+  async update(code, updater, actor = 'system', expectedVersion, user) {
     return this.transaction(async tx => {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, user);
       const parent = await this.readParent(tx, code, true);
       if (!parent) return null;
       this.checkVersion(parent, expectedVersion);
@@ -113,8 +118,10 @@ class SqlPcnRepository {
     });
   }
 
-  async delete(code, actor = 'system', expectedVersion) {
+  async delete(code, actor = 'system', expectedVersion, user) {
     return this.transaction(async tx => {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, user);
       const parent = await this.readParent(tx, code, true);
       if (!parent) return false;
       this.checkVersion(parent, expectedVersion);
@@ -179,20 +186,29 @@ class SqlPcnRepository {
   }
 
   async getNotificationSettings() {
-    const result = await this.pool.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WHERE Id=1');
-    return result.recordset[0] ? JSON.parse(result.recordset[0].SettingsJson) : structuredClone(emptySettings);
+    return this.transaction(async tx => {
+      await lockUserMailRouting(tx);
+      const result = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WHERE Id=1');
+      const settings = result.recordset[0] ? JSON.parse(result.recordset[0].SettingsJson) : structuredClone(emptySettings);
+      return applyUserMailRouting(settings, await readUserMailAssignments(tx));
+    });
   }
 
-  async saveNotificationSettings(settings, actor = 'system', expectedVersion) {
+  async saveNotificationSettings(settings, actor = 'system', expectedVersion, user) {
     return this.transaction(async tx => {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, user);
       if (expectedVersion !== undefined) {
         const locked = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (UPDLOCK,HOLDLOCK) WHERE Id=1');
         const current = locked.recordset[0] ? JSON.parse(locked.recordset[0].SettingsJson) : structuredClone(emptySettings);
         if (settingsVersion(current) !== expectedVersion) throw new ApiError(409, 'Mail routing changed; reload before saving');
       }
+      const effective = applyUserMailRouting(settings, await readUserMailAssignments(tx));
+      // Validate the full effective list before persisting any manual recipient changes.
+      normalizeMailRouting(effective);
       await this.writeSettings(tx, settings);
       await this.audit(tx, 'notification-settings', 'updated', actor, { groups: settings.groups.length });
-      return structuredClone(settings);
+      return effective;
     });
   }
 

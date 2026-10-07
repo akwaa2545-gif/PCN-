@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { startApi, validPayload, memoryRepository, TEST_PASSWORD } = require('./helpers/apiHarness');
+const { startApi, unsignedPayload, memoryRepository, TEST_PASSWORD } = require('./helpers/apiHarness');
 
 test('health and readiness reflect database availability without exposing driver errors', async t => {
   const api = await startApi(t);
@@ -47,7 +47,9 @@ test('workflow, progress, status filtering, audit and unsupported methods are sc
   const master = await api.request('/api/master-data', { session: admin });
   assert.equal(master.status, 200);
   assert.equal(master.body.data.versionId, 1);
-  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: validPayload })).body.data;
+  const creation = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(creation.status, 201);
+  const record = creation.body.data;
   const workflow = await api.request(`/api/pcns/${record.id}/workflow`, { session: admin });
   assert.equal(workflow.status, 200);
   assert.ok(workflow.body.data.length >= 4);
@@ -98,7 +100,9 @@ test('document upload, attachment download and delete retain record permissions'
   };
   const api = await startApi(t, { documents });
   const admin = await api.login('admin');
-  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: validPayload })).body.data;
+  const creation = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(creation.status, 201);
+  const record = creation.body.data;
   assert.equal((await api.request(`/api/pcns/${record.id}/documents`, { method: 'POST', session: admin, body: {} })).status, 400);
   const upload = await api.request(`/api/pcns/${record.id}/documents`, { method: 'POST', session: admin, body: { version: record.version, fileName: 'pilot report.txt', contentType: 'text/plain', base64: Buffer.from('saved attachment').toString('base64') } });
   assert.equal(upload.status, 201);

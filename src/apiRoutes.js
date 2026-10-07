@@ -63,23 +63,30 @@ async function handleApi(req, res, url, context, requestId) {
       let employees;
       try { employees = await employeeDirectory.search(url.searchParams.get('query') || ''); }
       catch (error) { if (error instanceof ApiError && error.statusCode === 400) throw error; throw new ApiError(503,'Employee service is unavailable'); }
-      return send(employees.map(employee => ({employeeCode:employee.employeeCode,displayName:employee.displayName,email:employee.email || null,sourceDepartment:employee.sourceDepartment || null,jobTitle:employee.jobTitle || null})));
+      return send(employees.map(employee => ({employeeCode:employee.employeeCode,displayName:employee.displayName,englishName:typeof employee.englishName === 'string' ? employee.englishName : '',email:employee.email || null,sourceDepartment:employee.sourceDepartment || null,jobTitle:employee.jobTitle || null})));
     }
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
       if (Object.hasOwn(body,'employeeCode') || authMode === 'employee-code' || employeeDirectory) {
-        assertBodyKeys(body, ['employeeCode','roles','department']);
-        return send(await authService.createEmployee(body,employeeDirectory),201);
+        assertBodyKeys(body, ['employeeCode','roles','department','signingStep','mailSelection']);
+        return send(await authService.createEmployee(body,employeeDirectory,actor,user),201);
       }
       assertBodyKeys(body,['username','email','password','roles']);
       return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+    }
+    const accountEdit=/^\/api\/admin\/users\/([^/]+)$/.exec(route);
+    if(accountEdit && method==='PATCH') {
+      const userId=normalizeUserId(accountEdit[1]);
+      const body=await readJsonBody(req);
+      assertBodyKeys(body,['roles','department','signingStep','mailSelection','isActive','version']);
+      return send(await authService.updateEmployee({...body,userId},actor,user));
     }
     const employeeLink = /^\/api\/admin\/users\/([^/]+)\/employee$/.exec(route);
     if (employeeLink && method === 'POST') {
       const userId = normalizeUserId(employeeLink[1]);
       const body = await readJsonBody(req);
       assertBodyKeys(body,['employeeCode']);
-      return send(await authService.linkEmployee({userId,employeeCode:body.employeeCode},employeeDirectory));
+      return send(await authService.linkEmployee({userId,employeeCode:body.employeeCode},employeeDirectory,actor,user));
     }
     if (route === '/api/admin/directory-users' && method === 'GET') {
       if (!context.integrationService) throw new ApiError(503,'Directory lookup is not configured');
@@ -103,7 +110,7 @@ async function handleApi(req, res, url, context, requestId) {
   if (route === '/api/notification-settings') {
     admin();
     if (method === 'GET') return send(await service.getNotificationSettings());
-    if (['PUT','PATCH'].includes(method)) return send(await service.updateNotificationSettings(await readJsonBody(req),actor));
+    if (['PUT','PATCH'].includes(method)) return send(await service.updateNotificationSettings(await readJsonBody(req),actor,user));
   }
   if (route === '/api/pcns') {
     if (method === 'GET') return send(await service.list({status:url.searchParams.get('status') || undefined},user));
@@ -123,7 +130,7 @@ async function handleApi(req, res, url, context, requestId) {
     admin();
     const body = await readJsonBody(req);
     requireVersion(body);
-    return send(await service.remove(code,actor,body.version));
+    return send(await service.remove(code,actor,body.version,user));
   }
   if (subroute === 'progress' && method === 'GET') return send(await service.getProgress(code));
   if (subroute === 'workflow' && method === 'GET') return send(buildWorkflow(record.riskLevel));
@@ -169,7 +176,7 @@ function assertBodyKeys(body, allowed) {
 }
 
 function publicAccount(user) {
-  const fields = ['id','username','email','roles','isActive','mustChangePassword','createdAt','employeeCode','displayName','department','identityProvider'];
+  const fields = ['id','username','email','roles','isActive','mustChangePassword','createdAt','employeeCode','displayName','department','identityProvider','signingStep','mailProfile','version'];
   return Object.fromEntries(fields.filter(key => Object.hasOwn(user,key)).map(key => [key,user[key]]));
 }
 

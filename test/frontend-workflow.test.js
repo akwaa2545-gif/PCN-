@@ -3,11 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-function app() {
+function app(controls = []) {
   const calls = [];
   const window = { location: { pathname: '/form.html', search: '?id=PCN-2026-0007' }, PCN_SESSION: { fetch: async (route, options) => { calls.push({ route, options }); return { queued: false, reason: 'recipient_not_configured' }; } } };
-  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replace(/\}\)\(\);\s*$/, 'window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, toApiPayload };})();');
-  vm.runInNewContext(source, { window, URLSearchParams, document: { addEventListener() {} } });
+  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8').replace(/\}\)\(\);\s*$/, 'window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, toApiPayload, canSignStep, updateApprovalCheckLocks };})();');
+  vm.runInNewContext(source, { window, URLSearchParams, document: { addEventListener() {},
+    querySelector(selector) { const field = /data-internal-field="([^"]+)"/.exec(selector)?.[1]; return controls.find(control => control.dataset.internalField === field) || null; },
+    querySelectorAll() { return controls; }
+  } });
   return { app: window.PCN_TEST, calls };
 }
 test('notification links with query ID open their saved PCN', () => {
@@ -54,4 +57,26 @@ test('blocked or unchanged saved handoff never retries through the legacy endpoi
     if (reason !== 'no_transition') assert.match(message, /not queued/);
     else assert.equal(message, '');
   }
+});
+
+test('browser signing matches the single assigned department and step', () => {
+  const c = app();
+  c.app.state.user = { roles: ['admin'] };
+  assert.equal(c.app.canSignStep('signoff.gscTet', 'approved'), false);
+  c.app.state.user = { roles: ['qa'], department: 'qaTet', signingStep: 'prepared' };
+  assert.equal(c.app.canSignStep('signoff.qaTet', 'prepared'), true);
+  assert.equal(c.app.canSignStep('qateFinal.signoff', 'prepared'), true);
+  assert.equal(c.app.canSignStep('signoff.qaTet', 'checked'), false);
+  assert.equal(c.app.canSignStep('tapbu.qa', 'prepared'), false);
+});
+
+test('unauthorized existing signatures and metadata stay disabled in the browser', () => {
+  const controls = ['signoff.gscTet.approved', 'signoff.gscTet.approvedName', 'signoff.gscTet.date', 'qateFinal.approve'].map(field => ({
+    dataset: { internalField: field }, checked: true, disabled: false, closest() { return null; }
+  }));
+  const c = app(controls);
+  c.app.state.user = { roles: ['admin'] };
+  c.app.updateApprovalCheckLocks();
+  assert.ok(controls.every(control => control.disabled));
+  assert.ok(controls.every(control => control.checked));
 });

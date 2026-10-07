@@ -12,7 +12,7 @@ function fixture(results) {
         state.calls = [...state.calls, { query, inputs }];
         const result = results[state.calls.length - 1];
         if (result instanceof Error) throw result;
-        return result || { rowsAffected: [1], recordset: [] };
+        return { rowsAffected: [1], recordset: [], ...result };
       }
     };
   };
@@ -85,19 +85,30 @@ test('SQL sessions persist hash instead of token and hydrate expiry', async () =
   await repo.revokeSession('hash');
   await repo.recordLoginFailure('user', expires);
   await repo.resetLoginFailures('user');
-  await repo.deactivateUser('user');
-  assert.equal(state.calls.at(-1).inputs.id, 'user');
-  assert.ok(state.calls.at(-1).inputs.stamp);
+  assert.match(state.calls.at(-1).query,/FailedLoginCount=0/);
 });
 
 test('role changes invalidate old session stamp and roll back missing user', async () => {
-  const first = fixture([{ rowsAffected: [1, 1] }, { rowsAffected: [1] }]);
+  const user={Id:'user',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',AccessVersion:Buffer.from('0011223344556677','hex')};
+  const hydrated={recordsets:[[user],[{Name:'qa'}]]};
+  const first = fixture([hydrated, {},hydrated, { rowsAffected: [1] },{}, {rowsAffected:[1]}, {},{}, {}, {},hydrated]);
   await first.repo.setUserRoles('user', ['qa', 'qa']);
-  assert.equal(first.state.calls.length, 2);
   assert.equal(first.state.committed, true);
-  assert.ok(first.state.calls[0].inputs.stamp);
-  const missing = fixture([{ rowsAffected: [0] }]);
+  const update=first.state.calls.find(call=>/UPDATE pcn.Users SET DepartmentKey/.test(call.query));
+  assert.ok(update.inputs.stamp);
+  assert.equal(update.inputs.signingStep,null);
+  assert.ok(first.state.calls.some(call=>/UPDATE pcn.Sessions/.test(call.query)));
+  const missing = fixture([{recordsets:[[],[]]}]);
   await assert.rejects(missing.repo.setUserRoles('missing', ['supplier']), error => error.statusCode === 404);
-  assert.equal(missing.state.rolledBack, true);
   await assert.rejects(first.repo.setUserRoles('user', ['invalid']), error => error.statusCode === 400);
+});
+
+test('deactivating a user routes through versioned edit and revokes sessions atomically',async()=>{
+  const user={Id:'user',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',AccessVersion:Buffer.from('0011223344556677','hex')};
+  const hydrated={recordsets:[[user],[{Name:'qa'}]]};
+  const {repo,state}=fixture([hydrated,{},hydrated,{rowsAffected:[1]},{},{rowsAffected:[1]},{},{},{},{},hydrated]);
+  await repo.deactivateUser('user');
+  const update=state.calls.find(call=>/UPDATE pcn.Users SET DepartmentKey/.test(call.query));
+  assert.equal(update.inputs.active,false);assert.equal(state.committed,true);
+  assert.ok(state.calls.some(call=>/UPDATE pcn.Sessions/.test(call.query)));
 });
