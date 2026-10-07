@@ -94,6 +94,8 @@ async function main() {
       if(request.url().includes('/api/admin/notifications/')) notificationRequests.push({method:request.method(),path:new URL(request.url()).pathname});
     });
     await page.goto('http://127.0.0.1:3099/login?returnTo=%2Fadmin%23mail-routing');
+    await page.locator('#loginForm').waitFor({state:'visible'});
+    assert.equal(await page.locator('#authRetryButton').isVisible(),false,'Healthy password sign-in hides setup retry');
     await page.locator('#username').fill('temporary');
     await page.locator('#password').fill(TEST_PASSWORD);
     await page.locator('#loginForm button').click();
@@ -548,6 +550,7 @@ async function main() {
     windowsSessionStatus=401;
     await windowsPage.locator('#authRetryButton').click();
     await windowsPage.getByRole('button',{name:'Continue with Windows',exact:true}).waitFor();
+    assert.equal(await windowsPage.locator('#authRetryButton').isVisible(),false,'Recovered Windows sign-in hides setup retry');
     assert.equal(await windowsPage.locator('#loginForm').isVisible(),false);
     assert.equal(await windowsPage.locator('input:visible').count(),0,'Windows mode exposes no PCN credential fields');
     await windowsPage.getByRole('button',{name:'Continue with Windows',exact:true}).click();

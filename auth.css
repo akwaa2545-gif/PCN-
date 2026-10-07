@@ -2,7 +2,7 @@
 .auth-card { width: min(100%, 440px); padding: 32px; border-radius: 18px; background: white; box-shadow: 0 12px 40px #12294a12; }
 .auth-card h1 { margin: 16px 0 8px; }
 .auth-card form { display: grid; gap: 12px; }
-.auth-card form[hidden] { display: none; }
+.auth-card [hidden] { display: none; }
 .auth-card input:not([type="checkbox"]) { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid #8b99aa; border-radius: 7px; font: inherit; }
 .auth-card button { min-height: 44px; }
 .auth-card label { font-weight: 600; }
