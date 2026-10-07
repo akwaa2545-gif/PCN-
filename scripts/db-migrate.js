@@ -15,12 +15,14 @@ async function main() {
     const version = await repository.seedMasterData({formDefinitions,commonDocuments,workflowBase,statusDefinitions,adminItems});
     const authRepository = new SqlAuthRepository(pool);
     let bootstrap = 'not_requested';
-    if (process.env.PCN_BOOTSTRAP_USERNAME && process.env.PCN_BOOTSTRAP_PASSWORD) {
-      const exists = await authRepository.getUserByLogin(process.env.PCN_BOOTSTRAP_USERNAME.toLowerCase());
+    const bootstrapEmployeeId = process.env.PCN_BOOTSTRAP_EMPLOYEE_ID || null;
+    const bootstrapUsername = process.env.PCN_BOOTSTRAP_USERNAME || bootstrapEmployeeId;
+    if (bootstrapUsername && (bootstrapEmployeeId || process.env.PCN_BOOTSTRAP_PASSWORD)) {
+      const exists = await authRepository.getUserByLogin(bootstrapUsername.toLowerCase());
       if (exists) bootstrap = 'already_exists';
       else {
-        await new AuthService(authRepository).createUser({username:process.env.PCN_BOOTSTRAP_USERNAME,email:process.env.PCN_BOOTSTRAP_EMAIL || null,password:process.env.PCN_BOOTSTRAP_PASSWORD,roles:['admin'],mustChangePassword:true,bootstrap:true});
-        bootstrap = 'created_force_password_change';
+        await new AuthService(authRepository).createUser({username:bootstrapUsername,employeeId:bootstrapEmployeeId,email:process.env.PCN_BOOTSTRAP_EMAIL || null,password:process.env.PCN_BOOTSTRAP_PASSWORD,roles:['admin'],mustChangePassword:!bootstrapEmployeeId,bootstrap:true});
+        bootstrap = bootstrapEmployeeId ? 'created_employee_id' : 'created_force_password_change';
       }
     }
     await repository.readiness();

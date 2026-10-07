@@ -4,7 +4,7 @@ const { ApiError } = require('./apiError');
 
 function mapUser(row, roles) {
   if (!row) return null;
-  return { id: row.Id, username: row.Username, email: row.Email, passwordHash: row.PasswordHash, isActive: row.IsActive, mustChangePassword: row.MustChangePassword, securityStamp: row.SecurityStamp, failedLoginCount: row.FailedLoginCount, lockoutUntil: row.LockoutUntil, roles };
+  return { id: row.Id, username: row.Username, employeeId: row.EmployeeId, email: row.Email, passwordHash: row.PasswordHash, isActive: row.IsActive, mustChangePassword: row.MustChangePassword, securityStamp: row.SecurityStamp, failedLoginCount: row.FailedLoginCount, lockoutUntil: row.LockoutUntil, roles };
 }
 
 class SqlAuthRepository {
@@ -19,21 +19,26 @@ class SqlAuthRepository {
     return this.userQuery(this.pool.request().input('login', sql.NVarChar(320), login), '(u.NormalizedUsername=@login OR u.NormalizedEmail=@login)');
   }
 
+  async getUserByEmployeeId(employeeId) {
+    return this.userQuery(this.pool.request().input('employeeId', sql.NVarChar(7), employeeId), 'u.EmployeeId=@employeeId');
+  }
+
   async getUserById(id) {
     return this.userQuery(this.pool.request().input('id', sql.UniqueIdentifier, id), 'u.Id=@id');
   }
 
-  async createUser({ username, email, passwordHash, roles, mustChangePassword }) {
+  async createUser({ username, employeeId = null, email, passwordHash, roles, mustChangePassword }) {
     const transaction = this.pool.transaction();
     await transaction.begin();
     const id = crypto.randomUUID();
     try {
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('username', sql.NVarChar(100), username).input('normalizedUsername', sql.NVarChar(100), username.toLowerCase())
+        .input('employeeId', sql.NVarChar(7), employeeId)
         .input('email', sql.NVarChar(320), email).input('normalizedEmail', sql.NVarChar(320), email?.toLowerCase() || null)
         .input('hash', sql.NVarChar(512), passwordHash).input('change', sql.Bit, mustChangePassword)
         .input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
-        .query('INSERT pcn.Users (Id,Username,NormalizedUsername,Email,NormalizedEmail,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@email,@normalizedEmail,@hash,1,@change,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())');
+        .query('INSERT pcn.Users (Id,Username,NormalizedUsername,EmployeeId,Email,NormalizedEmail,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@employeeId,@email,@normalizedEmail,@hash,1,@change,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())');
       for (const role of roles) {
         const result = await transaction.request().input('id', sql.UniqueIdentifier, id).input('role', sql.NVarChar(40), role)
           .query('INSERT pcn.UserRoles (UserId,RoleId) SELECT @id,Id FROM pcn.Roles WHERE Name=@role');
@@ -42,7 +47,7 @@ class SqlAuthRepository {
       await transaction.commit();
     } catch (error) {
       try { await transaction.rollback(); } catch { /* Preserve the original SQL error if SQL Server already aborted the transaction. */ }
-      if ([2601, 2627].includes(error.number)) throw new ApiError(409, 'Username or email already exists');
+      if ([2601, 2627].includes(error.number)) throw new ApiError(409, 'Username, email or Employee ID already exists');
       throw error;
     }
     return this.getUserById(id);
@@ -75,6 +80,30 @@ class SqlAuthRepository {
     await this.pool.request().input('id', sql.UniqueIdentifier, id).query('UPDATE pcn.Users SET FailedLoginCount=0,LockoutUntil=NULL WHERE Id=@id');
   }
 
+  async assignEmployeeId(username, employeeId) {
+    if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,100}$/.test(username) || typeof employeeId !== 'string' || !/^[0-9]{7}$/.test(employeeId)) {
+      throw new ApiError(400, 'Valid username and 7 digit Employee ID required');
+    }
+    const transaction = this.pool.transaction();
+    await transaction.begin();
+    try {
+      const result = await transaction.request()
+        .input('username', sql.NVarChar(100), username.toLowerCase())
+        .input('employeeId', sql.NVarChar(7), employeeId)
+        .input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
+        .query('UPDATE pcn.Users SET EmployeeId=@employeeId,MustChangePassword=0,SecurityStamp=@stamp,UpdatedAt=SYSUTCDATETIME() WHERE NormalizedUsername=@username');
+      if (result.rowsAffected[0] !== 1) throw new ApiError(404, 'User not found');
+      await transaction.request().input('username', sql.NVarChar(100), username.toLowerCase())
+        .query('UPDATE s SET RevokedAt=SYSUTCDATETIME() FROM pcn.Sessions s JOIN pcn.Users u ON u.Id=s.UserId WHERE u.NormalizedUsername=@username AND s.RevokedAt IS NULL');
+      await transaction.commit();
+    } catch (error) {
+      try { await transaction.rollback(); } catch { /* Preserve the original SQL error. */ }
+      if ([2601, 2627].includes(error.number)) throw new ApiError(409, 'Employee ID already exists');
+      throw error;
+    }
+    return this.getUserByLogin(username.toLowerCase());
+  }
+
   async updatePassword(id, passwordHash, securityStamp, expectedStamp) {
     const transaction = this.pool.transaction();
     await transaction.begin();
@@ -89,11 +118,11 @@ class SqlAuthRepository {
   }
 
   async listUsers() {
-    const result = await this.pool.request().query('SELECT u.Id,u.Username,u.Email,u.IsActive,u.MustChangePassword,r.Name AS Role FROM pcn.Users u LEFT JOIN pcn.UserRoles ur ON ur.UserId=u.Id LEFT JOIN pcn.Roles r ON r.Id=ur.RoleId ORDER BY u.Username');
+    const result = await this.pool.request().query('SELECT u.Id,u.Username,u.EmployeeId,u.Email,u.IsActive,u.MustChangePassword,r.Name AS Role FROM pcn.Users u LEFT JOIN pcn.UserRoles ur ON ur.UserId=u.Id LEFT JOIN pcn.Roles r ON r.Id=ur.RoleId ORDER BY u.Username');
     const grouped = new Map();
     for (const row of result.recordset) {
       const prior = grouped.get(row.Id);
-      grouped.set(row.Id, prior ? { ...prior, roles: [...prior.roles, ...(row.Role ? [row.Role] : [])] } : { id: row.Id, username: row.Username, email: row.Email, isActive: row.IsActive, mustChangePassword: row.MustChangePassword, roles: row.Role ? [row.Role] : [] });
+      grouped.set(row.Id, prior ? { ...prior, roles: [...prior.roles, ...(row.Role ? [row.Role] : [])] } : { id: row.Id, username: row.Username, employeeId: row.EmployeeId, email: row.Email, isActive: row.IsActive, mustChangePassword: row.MustChangePassword, roles: row.Role ? [row.Role] : [] });
     }
     return [...grouped.values()];
   }

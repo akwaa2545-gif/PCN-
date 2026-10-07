@@ -86,7 +86,7 @@
       const session = await window.PCN_SESSION.require();
       if (!session) return;
       state.user = session.user;
-      document.getElementById("signOutButton")?.addEventListener("click", () => window.PCN_SESSION.logout().catch((error) => showNotice("error", "Sign out failed", error.message)));
+      window.PCN_SESSION.mountProfile(session.user, (error) => showNotice("error", "Sign out failed", error.message));
       await loadFromApi();
       renderAll();
     } catch (error) {

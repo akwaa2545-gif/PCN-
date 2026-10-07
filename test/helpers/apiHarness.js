@@ -58,7 +58,7 @@ function memoryRepository() {
 }
 
 function fakeAuthService() {
-  let users = ['admin', 'supplier', 'other', 'temporary'].map(username => ({ id: `${username}-id`, username,
+  let users = ['admin', 'supplier', 'other', 'temporary'].map((username, index) => ({ id: `${username}-id`, username, employeeId: String(index + 1).padStart(7, '0'),
     email: null, roles: username === 'supplier' || username === 'other' ? ['supplier'] : ['admin'],
     isActive: true, mustChangePassword: username === 'temporary', password: TEST_PASSWORD }));
   let sessions = {};
@@ -74,9 +74,11 @@ function fakeAuthService() {
       users = [...users, created];
       return safeUser(created);
     },
-    async login({ username, password }) {
-      const user = users.find(candidate => candidate.username === username && candidate.password === password);
-      if (!user) throw new ApiError(401, 'Invalid username or password');
+    async login({ username, password, employeeId }) {
+      const user = users.find(candidate => employeeId !== undefined
+        ? candidate.employeeId === employeeId && /^[0-9]{7}$/.test(employeeId)
+        : candidate.username === username && candidate.password === password);
+      if (!user) throw new ApiError(401, employeeId !== undefined ? 'Invalid Employee ID' : 'Invalid username or password');
       const { password: omitted, ...safe } = user;
       const token = `test-session-${++counter}`;
       const result = { token, user: safe, csrfToken: `test-csrf-${counter}`, expiresAt: new Date(Date.now() + 3600000).toISOString() };

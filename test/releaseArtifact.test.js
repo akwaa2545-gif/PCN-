@@ -51,14 +51,14 @@ test('unsafe IDs, versions, counters, commits and archive names fail even when s
 test('only tracked runtime allowlist paths are packaged', () => {
   const selected = selectRuntimeFiles([
     'server.js', 'package.json', 'package-lock.json', 'src/authService.js', 'src/clientAddress.js',
-    'login.html', 'auth.css', 'tokin-header-logo.png', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1',
+    'login.html', 'auth.css', 'tokin-header-logo.png', 'thailand-login.jpg', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1',
     '.env', '.env.production', '.github/workflows/deploy.yml', 'test/foo.js', 'plans/foo.md',
     'sql/migrations/001_core.sql', 'scripts/db-migrate.js', 'data/pcn.json', 'firebase-client.js',
     'src/.env', 'src/key.pem', 'src/nested/file.js', 'src/not-supported.js', 'workbook.xlsx', 'node_modules/evil.js',
   ]);
   assert.deepEqual(selected, [
     'CairoliClassic-Bold.otf', 'auth.css', 'login.html', 'package-lock.json', 'package.json',
-    'scripts/read-sql-credential.ps1', 'server.js', 'src/authService.js', 'src/clientAddress.js', 'tokin-header-logo.png',
+    'scripts/read-sql-credential.ps1', 'server.js', 'src/authService.js', 'src/clientAddress.js', 'thailand-login.jpg', 'tokin-header-logo.png',
   ]);
   for (const unsafe of ['src/../.env', 'src\\evil.js', '/src/evil.js', 'src//evil.js']) {
     assert.throws(() => selectRuntimeFiles([unsafe]), /path/i);

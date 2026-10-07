@@ -3,7 +3,7 @@ const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
 
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
-const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive, mustChangePassword: user.mustChangePassword });
+const safeUser = user => ({ id: user.id, username: user.username, employeeId: user.employeeId || null, email: user.email || null, roles: [...user.roles], isActive: user.isActive, mustChangePassword: user.mustChangePassword });
 
 class AuthService {
   constructor(repository, options = {}) {
@@ -31,26 +31,36 @@ class AuthService {
     if (next.count > 15) throw new ApiError(429, 'Too many sign-in attempts. Try again shortly');
   }
 
-  async createUser({ username, email = null, password, roles = ['supplier'], mustChangePassword = false, bootstrap = false }) {
+  async createUser({ username, employeeId = null, email = null, password, roles = ['supplier'], mustChangePassword = false, bootstrap = false }) {
     if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,100}$/.test(username)) throw new ApiError(400, 'Username must contain 3 to 100 letters, numbers, dots, underscores or hyphens');
+    if (employeeId !== null && (typeof employeeId !== 'string' || !/^[0-9]{7}$/.test(employeeId))) throw new ApiError(400, 'Employee ID must contain exactly 7 digits');
     if (email !== null && (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new ApiError(400, 'Invalid email address');
     if (!Array.isArray(roles) || !roles.length || roles.some(role => !['admin', 'reviewer', 'supplier', 'gsc', 'productionengineering', 'qa', 'tapbu'].includes(role))) throw new ApiError(400, 'Invalid user roles');
-    if (bootstrap && !mustChangePassword) throw new ApiError(400, 'Bootstrap users must change their password');
-    validatePassword(password);
-    const user = await this.repository.createUser({ username, email, passwordHash: await this.hashPassword(password), roles: [...new Set(roles)], mustChangePassword });
+    if (bootstrap && !mustChangePassword && employeeId === null) throw new ApiError(400, 'Bootstrap users must change their password');
+    const accountPassword = password || (employeeId !== null ? crypto.randomBytes(32).toString('hex') : password);
+    validatePassword(accountPassword);
+    const user = await this.repository.createUser({ username, employeeId, email, passwordHash: await this.hashPassword(accountPassword), roles: [...new Set(roles)], mustChangePassword: employeeId === null && mustChangePassword });
     return safeUser(user);
   }
 
-  async login({ username, password, remember = false } = {}, requestInfo = {}) {
+  async login({ username, password, employeeId, remember = false } = {}, requestInfo = {}) {
     this.throttle(requestInfo.ip);
-    if (typeof username !== 'string' || username.length > 320 || typeof password !== 'string' || password.length > 128) throw new ApiError(401, 'Invalid username or password');
-    const user = await this.repository.getUserByLogin(username.trim().toLowerCase());
-    if (!this.dummyHash) this.dummyHash = this.hashPassword(crypto.randomBytes(32).toString('hex'));
-    const verified = await this.verifyPassword(user?.passwordHash || await this.dummyHash, password);
+    let user;
+    let verified;
+    if (employeeId !== undefined) {
+      if (typeof employeeId !== 'string' || !/^[0-9]{7}$/.test(employeeId)) throw new ApiError(401, 'Invalid Employee ID');
+      user = await this.repository.getUserByEmployeeId(employeeId);
+      verified = Boolean(user);
+    } else {
+      if (typeof username !== 'string' || username.length > 320 || typeof password !== 'string' || password.length > 128) throw new ApiError(401, 'Invalid username or password');
+      user = await this.repository.getUserByLogin(username.trim().toLowerCase());
+      if (!this.dummyHash) this.dummyHash = this.hashPassword(crypto.randomBytes(32).toString('hex'));
+      verified = await this.verifyPassword(user?.passwordHash || await this.dummyHash, password);
+    }
     const locked = user?.lockoutUntil && new Date(user.lockoutUntil) > this.now();
     if (!user || !verified || !user.isActive || locked) {
       if (user && user.isActive && !locked) await this.repository.recordLoginFailure(user.id, this.now());
-      throw new ApiError(401, 'Invalid username or password');
+      throw new ApiError(401, employeeId !== undefined ? 'Invalid Employee ID' : 'Invalid username or password');
     }
     await this.repository.resetLoginFailures(user.id);
     const token = crypto.randomBytes(32).toString('hex');

@@ -11,6 +11,7 @@ function setup(options = {}) {
   const repo = {
     async createUser(user) { const result = { ...user, id: 'user-1', isActive: true, securityStamp: 'stamp', failedLoginCount: 0 }; state.users = [...state.users, result]; return result; },
     async getUserByLogin(login) { return state.users.find(u => u.username.toLowerCase() === login || u.email?.toLowerCase() === login); },
+    async getUserByEmployeeId(employeeId) { return state.users.find(u => u.employeeId === employeeId); },
     async getUserById(id) { return state.users.find(u => u.id === id); },
     async saveSession(session) { state.sessions = [...state.sessions, session]; },
     async getSession(hash) { return state.sessions.find(s => s.tokenHash === hash && !s.revokedAt); },
@@ -48,6 +49,19 @@ test('password validation, generic login failure and logout', async () => {
   await assert.rejects(service.changePassword(login.token, { currentPassword: 'wrong', newPassword: TEST_NEW_PASSWORD }), /Invalid current password/);
   await service.logout(login.token);
   assert.equal(await service.session(login.token), null);
+});
+
+test('seven digit Employee ID signs in and preserves leading zeros', async () => {
+  const { service } = setup();
+  await service.createUser({ username: 'operator', employeeId: '0012345', roles: ['gsc'] });
+  const login = await service.login({ employeeId: '0012345' });
+  assert.equal(login.user.username, 'operator');
+  assert.equal(login.user.employeeId, '0012345');
+  assert.equal(login.user.mustChangePassword, false);
+  assert.equal((await service.session(login.token)).user.employeeId, '0012345');
+  for (const employeeId of ['123456', '12345678', '123456a', 1234567, '9999999']) {
+    await assert.rejects(service.login({ employeeId }), /Invalid Employee ID/);
+  }
 });
 
 test('short nonempty passwords work for new accounts and password changes', async () => {

@@ -6,7 +6,7 @@ const {chromium} = require('@playwright/test');
 const {createApp} = require('../src/httpServer');
 const {PcnService} = require('../src/pcnService');
 const {IntegrationService} = require('../src/integrationService');
-const {memoryRepository,fakeAuthService,TEST_PASSWORD} = require('../test/helpers/apiHarness');
+const {memoryRepository,fakeAuthService} = require('../test/helpers/apiHarness');
 const masterData = require('../src/masterData');
 
 async function main() {
@@ -64,17 +64,7 @@ async function main() {
       if(request.url().includes('/api/admin/notifications/')) notificationRequests.push({method:request.method(),path:new URL(request.url()).pathname});
     });
     await page.goto('http://127.0.0.1:3099/login?returnTo=%2Fadmin%23mail-routing');
-    await page.locator('#username').fill('temporary');
-    await page.locator('#password').fill(TEST_PASSWORD);
-    await page.locator('#loginForm button').click();
-    await page.locator('#passwordChangeForm').waitFor({state:'visible'});
-    await page.locator('#currentPassword').fill(TEST_PASSWORD);
-    await page.locator('#newPassword').fill('5678');
-    await page.locator('#confirmPassword').fill('5678');
-    await page.locator('#passwordChangeForm button[type=submit]').click();
-    await page.locator('#loginForm').waitFor({state:'visible'});
-    await page.locator('#username').fill('temporary');
-    await page.locator('#password').fill('5678');
+    await page.locator('#employeeId').fill('0000001');
     await page.locator('#loginForm button').click();
     await page.waitForURL('**/admin#mail-routing');
     await page.locator('[data-notification-group]').first().waitFor();
@@ -153,8 +143,7 @@ async function main() {
     supplier.setDefaultNavigationTimeout(15000);
     supplier.on('pageerror',error=>errors.push(error.message));
     await supplier.goto('http://127.0.0.1:3099/login?returnTo=%2Fcreate');
-    await supplier.locator('#username').fill('supplier');
-    await supplier.locator('#password').fill(TEST_PASSWORD);
+    await supplier.locator('#employeeId').fill('0000002');
     await supplier.locator('#loginForm button').click();
     await supplier.waitForURL('**/create');
     await supplier.locator('#submitButton:not([disabled])').waitFor();
@@ -204,7 +193,7 @@ async function main() {
     await fs.mkdir(path.resolve('test-results'),{recursive:true});
     await page.screenshot({path:path.resolve('test-results/notification-health-browser-smoke.png'),fullPage:true});
     await supplier.screenshot({path:path.resolve('test-results/pcn-browser-smoke.png'),fullPage:true});
-    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','editable-email-routing','original-directory-request-and-response-envelopes','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','no-page-errors'],storage:'isolated_test_adapters'}));
+    console.log(JSON.stringify({browser:'passed',checks:['employee-id-login','editable-email-routing','original-directory-request-and-response-envelopes','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','no-page-errors'],storage:'isolated_test_adapters'}));
   } finally {
     if(browser) await browser.close();
     await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});

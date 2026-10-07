@@ -79,5 +79,78 @@
     window.location.assign('/login');
   }
 
-  window.PCN_SESSION = Object.freeze({ fetch: apiFetch, load, require: requireSession, safeReturnTo, logout });
+  function mountProfile(user, onLogoutError) {
+    const container = document.getElementById('accountMenu');
+    if (!container || !user) return;
+    const username = String(user.username || 'User');
+    const fullName = String(user.fullName || '').trim();
+    const roleNames = {
+      admin: 'Admin', reviewer: 'Reviewer', supplier: 'Supplier',
+      gsc: 'GSC/TET', productionengineering: 'Prod. Eng./TET',
+      qa: 'QA/TET', tapbu: 'TaPBU'
+    };
+    const roles = (Array.isArray(user.roles) ? user.roles : []).map(role => roleNames[String(role).toLowerCase()] || String(role));
+    const roleText = roles.join(', ') || 'No role assigned';
+    const nameParts = (fullName || username).split(/[\s._-]+/).filter(Boolean);
+    const initials = (nameParts.length > 1 ? nameParts[0][0] + nameParts[nameParts.length - 1][0] : (nameParts[0] || 'U').slice(0, 2)).toUpperCase();
+    const element = (tag, className, value) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      if (value !== undefined) node.textContent = value;
+      return node;
+    };
+    const avatar = (className) => {
+      const node = element('span', className, initials);
+      node.setAttribute('aria-hidden', 'true');
+      return node;
+    };
+
+    const trigger = element('button', 'account-trigger');
+    trigger.type = 'button';
+    trigger.setAttribute('aria-label', `Open profile for ${username}`);
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', 'accountProfilePanel');
+    trigger.append(avatar('account-avatar'));
+
+    const panel = element('div', 'account-panel');
+    panel.id = 'accountProfilePanel';
+    panel.hidden = true;
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', 'User profile');
+    const heading = element('div', 'account-panel-heading');
+    const headingText = element('div', 'account-panel-heading-copy');
+    headingText.append(element('strong', 'account-panel-username', username), element('span', 'account-panel-caption', roleText));
+    const signOut = element('button', 'account-sign-out', 'Sign Out');
+    signOut.type = 'button';
+    heading.append(avatar('account-avatar account-avatar-large'), headingText, signOut);
+    panel.append(heading);
+    container.replaceChildren(trigger, panel);
+
+    const close = (returnFocus = false) => {
+      panel.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      if (returnFocus) trigger.focus();
+    };
+    trigger.addEventListener('click', () => {
+      const opening = panel.hidden;
+      panel.hidden = !opening;
+      trigger.setAttribute('aria-expanded', String(opening));
+    });
+    document.addEventListener('click', (event) => {
+      if (!container.contains(event.target)) close();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !panel.hidden) close(true);
+    });
+    signOut.addEventListener('click', async () => {
+      signOut.disabled = true;
+      try { await logout(); }
+      catch (error) {
+        signOut.disabled = false;
+        if (onLogoutError) onLogoutError(error);
+      }
+    });
+  }
+
+  window.PCN_SESSION = Object.freeze({ fetch: apiFetch, load, require: requireSession, safeReturnTo, logout, mountProfile });
 })();

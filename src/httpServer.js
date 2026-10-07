@@ -8,8 +8,8 @@ const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 
-const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','login.js','session-client.js','auth.css','styles.css','tokin-header-logo.png','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
-const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.otf':'font/otf' };
+const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','login.js','session-client.js','auth.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
+const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
 
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');

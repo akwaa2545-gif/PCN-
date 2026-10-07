@@ -13,6 +13,7 @@
     "db:check": "node scripts/db-check.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import": "node scripts/db-import.js",
+    "user:assign-id": "node scripts/assign-employee-id.js",
     "start:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-pcn.ps1"
   },
   "engines": {

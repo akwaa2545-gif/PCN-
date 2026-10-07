@@ -55,7 +55,7 @@ async function handleApi(req, res, url, context, requestId) {
     if (route === '/api/admin/users' && method === 'GET') return send(await authService.repository.listUsers());
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
-      return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+      return send(await authService.createUser({username:body.username,employeeId:body.employeeId ?? null,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
     }
     if (route === '/api/admin/directory-users' && method === 'GET') {
       if (!context.integrationService) throw new ApiError(503,'Directory lookup is not configured');

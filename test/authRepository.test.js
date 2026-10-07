@@ -29,6 +29,30 @@ test('SQL auth binds hostile login input and hydrates role grants', async () => 
   assert.equal(state.calls[0].query.includes(hostile), false);
 });
 
+test('SQL auth finds Employee ID with a bound parameter', async () => {
+  const { repo, state } = fixture([{ recordsets: [[{ Id: 'id', Username: 'operator', EmployeeId: '0012345' }], [{ Name: 'gsc' }]] }]);
+  const user = await repo.getUserByEmployeeId('0012345');
+  assert.equal(user.employeeId, '0012345');
+  assert.deepEqual(user.roles, ['gsc']);
+  assert.equal(state.calls[0].inputs.employeeId, '0012345');
+  assert.equal(state.calls[0].query.includes('0012345'), false);
+});
+
+test('assigning Employee ID revokes prior sessions and clears password-change requirement', async () => {
+  const { repo, state } = fixture([
+    { rowsAffected: [1] },
+    { rowsAffected: [1] },
+    { recordsets: [[{ Id: 'id', Username: 'itadmin', EmployeeId: '0012345', MustChangePassword: false }], [{ Name: 'admin' }]] }
+  ]);
+  const user = await repo.assignEmployeeId('ITadmin', '0012345');
+  assert.equal(user.employeeId, '0012345');
+  assert.equal(state.calls[0].inputs.username, 'itadmin');
+  assert.equal(state.calls[0].inputs.employeeId, '0012345');
+  assert.match(state.calls[0].query, /MustChangePassword=0/);
+  assert.match(state.calls[1].query, /pcn\.Sessions/);
+  assert.equal(state.committed, true);
+});
+
 test('password change rolls back when account stamp changed concurrently', async () => {
   const { repo, state } = fixture([{ rowsAffected: [0] }]);
   await assert.rejects(repo.updatePassword('id', 'new-hash', 'new-stamp', 'old-stamp'), error => error.statusCode === 409);

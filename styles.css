@@ -8199,3 +8199,144 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   animation: pcn-saving-spin 560ms linear infinite reverse !important;
   transform-origin: 50% 50%;
 }
+
+/* Signed-in account menu shared by the form and administration headers. */
+.topbar-actions .account-menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: 8px;
+}
+
+.topbar-actions .account-trigger {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.topbar-actions .account-trigger:hover,
+.topbar-actions .account-trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.19);
+}
+
+.topbar-actions .account-trigger:focus-visible,
+.account-sign-out:focus-visible {
+  outline: 3px solid #efbf4d;
+  outline-offset: 2px;
+}
+
+.account-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e7ebff;
+  color: #242b78;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.account-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  width: min(380px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid #dce2ee;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(18, 26, 65, 0.23);
+  color: #1f2937;
+}
+
+.account-panel[hidden] {
+  display: none;
+}
+
+.account-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  background: #f6f7fc;
+}
+
+.account-avatar-large {
+  width: 60px;
+  height: 60px;
+  font-size: 20px;
+}
+
+.account-panel-heading-copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.account-panel-username {
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.account-panel-caption {
+  color: #667085;
+  font-size: 13px;
+}
+
+.account-sign-out {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-left: auto;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: #242b78;
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.account-sign-out:hover {
+  color: #1b4e86;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.account-sign-out:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+@media (max-width: 720px) {
+  .topbar,
+  body.admin-page .topbar,
+  body.pcn-page .topbar {
+    position: relative;
+    z-index: 50;
+  }
+
+  .account-panel {
+    right: auto;
+    left: 0;
+  }
+}

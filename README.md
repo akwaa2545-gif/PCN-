@@ -42,20 +42,27 @@ npm run db:check
 
 The migration account needs database access and permission to create the `pcn` schema/tables and seed them. [The DBA permissions script](sql/grant-migration-permissions.sql) maps the existing login if needed, precreates the schema and grants scoped migration/data access without changing login credentials. It includes revocation steps for schema administration after migration. The runtime account needs application data access without schema alteration rights. Startup never creates tables automatically.
 
-Supply the requested first username `itadmin` and temporary password privately. This prompts for the password instead of including it in documentation or scripts:
+For a new database, provide the first administrator's real seven digit Employee ID. This creates `itadmin` without a password to enter on the sign in page:
 
 ```powershell
-$bootstrapCredential = Get-Credential -UserName 'itadmin' -Message 'Initial application administrator'
-$env:PCN_BOOTSTRAP_USERNAME = $bootstrapCredential.UserName
-$env:PCN_BOOTSTRAP_PASSWORD = $bootstrapCredential.GetNetworkCredential().Password
+$env:PCN_BOOTSTRAP_USERNAME = 'itadmin'
+$env:PCN_BOOTSTRAP_EMPLOYEE_ID = Read-Host 'Initial administrator Employee ID (7 digits)'
 try { npm run db:migrate }
 finally {
   Remove-Item Env:PCN_BOOTSTRAP_USERNAME -ErrorAction SilentlyContinue
-  Remove-Item Env:PCN_BOOTSTRAP_PASSWORD -ErrorAction SilentlyContinue
+  Remove-Item Env:PCN_BOOTSTRAP_EMPLOYEE_ID -ErrorAction SilentlyContinue
 }
 ```
 
-`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Bootstrap creates the administrator only if that username is absent. Passwords are stored as Argon2id hashes. First login requires changing the password; passwords must be nonempty and no more than 128 characters. There is no minimum-length policy. Password change revokes sessions and requires re-login. Email is optional (`PCN_BOOTSTRAP_EMAIL`).
+`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Bootstrap creates the administrator only if that username is absent. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Existing installations may still have password based accounts; passwords remain hashed with Argon2id, but the sign in page now uses Employee IDs.
+
+The sign in page now accepts a seven digit Employee ID. After updating the application, run `npm run db:migrate` to add the nullable, unique `EmployeeId` column, then assign a real ID to each existing account. The following command prompts for the actual ID for `itadmin`:
+
+```powershell
+npm run user:assign-id -- itadmin
+```
+
+The assignment clears the old first-login password-change requirement for that account and revokes its existing sessions. Repeat for other accounts. Accounts without an assigned Employee ID cannot use the sign in page. New accounts created through `POST /api/admin/users` can include `employeeId` with exactly seven digits; a password is not needed for those accounts. Employee ID sign in grants access to anyone who knows a registered ID, including an administrator's ID, so it should only be used where that access model is intended.
 
 Mail routing starts empty. Leave `POWER_AUTOMATE_MAIL_URL`, `POWER_AUTOMATE_DIRECTORY_URL` and `INTEGRATION_ALLOWED_HOSTS` empty until configured. No default recipient is used.
 

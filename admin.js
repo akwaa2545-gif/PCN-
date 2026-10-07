@@ -80,7 +80,6 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !els.adminRemoveDialog.hidden) closeRemoveDialog();
     });
-    document.getElementById("signOutButton")?.addEventListener("click", () => window.PCN_SESSION.logout().catch((error) => showAdminNotice("error", "Sign out failed", error.message)));
     checkAdminSession();
   }
 
@@ -89,6 +88,7 @@
       const session = await window.PCN_SESSION.require("admin");
       if (!session) return;
       state.user = session.user;
+      window.PCN_SESSION.mountProfile(session.user, (error) => showAdminNotice("error", "Sign out failed", error.message));
       initializeAdminControls();
       refreshNotificationHealth();
       await loadPcns();
