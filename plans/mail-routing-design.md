@@ -1,10 +1,22 @@
 ﻿# Department and signoff mail routing
 
-Updated: 2026-10-07. Status: on main and deployed in signed release pcn-test-8-1. [Current CI](https://github.com/akwaa2545-gif/PCN-/actions/runs/37559651975) passed 243 tests and 59 isolated browser checks. Earlier focused routing coverage and code, JavaScript, security and accessibility reviews passed. Live Windows sign-in checks exercised no routing save, notification send or delivery; routing behavior retains its isolated test evidence.
+Updated: 2026-10-07. The user-assignment integration below runs locally with migration 004 applied; its code deployment remains pending. The live employee-code release remains pcn-test-11-1. Automated verification of this change does not demonstrate live email delivery.
+
+Local verification: the full coverage suite passed 283 tests, with 96.12% lines, 89.56% branches and 96.52% functions. The subsequent explicit-English-name API fix passed 19 focused API/UI tests, including an additional missing-name regression. Isolated browser verification exercised 69 checks, including user creation, duplicate-name confirmation, one-step/verified-mail requirements, assignment editing, read-only automatic recipients, conflict retention and cancellation. Code, JavaScript and security reviews completed with the signature-ancestor removal issue corrected and no remaining high/critical findings.
+
+Migration 004 was applied on SQL Server 2014 / `Scn_DB` at `2026-10-07T04:56:51.338Z` after a DPAPI-encrypted logical snapshot of 22 tables / 145 rows was decrypted and hash-verified. This is not a native SQL backup and no full restore was exercised. All four user identities and existing role assignments were preserved; no signing grants were added and the employee source was not altered. Database readiness now reports four migrations. The local dev watcher resumed on `127.0.0.1:3000`; real API acceptance passed 26 checks and a SQL-backed headless browser passed login, Users, lookup, one-step controls, verified-mail requirement, English-name lookup and logout without account writes or page errors. Live operational mail and the new code's server deployment remain untested/pending.
 
 ## Scope and recipient model
 
-Mail Routing now separates five departments into Approved, Checked and Prepared recipient lists: **15 lists plus supplierNotification**. These are email recipients only. They do not create accounts, grant signing permissions or change SQL roles/record access. The current workbook order remains **Approved -> Checked -> Prepared**.
+Mail Routing separates five departments into Approved, Checked and Prepared recipient lists: **15 lists plus supplierNotification**. Each PCN user may have **one signing step** in their assigned department. Active employee-code accounts with a verified directory email become automatic recipients of that department/step list. Manual mail contacts grant no signing access. The current workbook order remains **Approved -> Checked -> Prepared**.
+
+In Users, selecting an employee searches the mail directory using `PersonFNameEng` + `PersonLNameEng` from `KEY_Code_DB.dbo.tblEmployee`. An administrator must confirm a directory result; names alone never establish an email identity. The server revalidates the selected directory ID and email before saving. Missing English names require a manual directory search. Source employee data remains read-only and contains no email address.
+
+The original directory flow may omit user IDs. For those results, the server supplies a stable SHA-256 selection ID derived from the normalized email; existing provider IDs are preserved. Saving still performs a fresh directory lookup and requires exactly one matching ID and email. The Users UI rejects unusable lookup results and displays validation reasons instead of silently disabling Create. A local SQL-backed browser verified that GSC/TET Approved with a confirmed ID-less mail result enables Create and reaches the submit handler; the test intercepted submission and created no account. A separate read-only check passed fresh verification against the actual directory flow. After this fix, all 288 coverage tests passed (96.13% lines, 89.58% branches, 96.52% functions), and scoped code/JavaScript/security reviews reported no high/critical findings.
+
+Broad Administrator/Reviewer roles manage records but do not bypass signing assignments. Flags and signer metadata require the exact department and step, including clearing an existing signature. QA/TET initial and final signatures share the assignment. Final judgment and final status require QA/TET Prepared. Signer names and dates are recorded by the server when signing.
+
+User edits atomically update roles, department, step, verified email and enabled status using `AccessVersion`; stale edits return 409. Sessions are revoked after a change, and the last active employee Administrator cannot be disabled or demoted. Migration 004 adds nullable assignment/mail-proof columns and a rowversion without assigning any existing user a step or altering previous migrations.
 
 | Department | Approved | Checked | Prepared |
 |---|---|---|---|
@@ -20,7 +32,9 @@ New recipients added through the popup must be selected from directory results. 
 
 ## Administrator UI
 
-The screen keeps the compact **Mail service / badge / Check status** row, then displays five department cards with three labelled recipient sections each and a separate supplier-notification card. QA/TET explains its review/final-judgment reuse. Add opens a square popup titled with the department and action. Lists show static contact/profile rows with Remove and empty-list indicators; visible search inputs appear only in the popup.
+The screen keeps the compact **Mail service / badge / Check status** row, then displays five department cards with three labelled recipient sections each and a separate supplier-notification card. Contacts managed from Users are displayed separately as read-only rows; edit their assignments in Users. Existing manual contacts retain Remove and the square Add popup. QA/TET explains its review/final-judgment reuse.
+
+Managed recipient cards and the assigned Users list display the saved verified profile photo, name, email and job/department; managed cards also identify the employee code. Only bounded inline raster photos are loaded, with initials for missing, unsafe or failed images. This presentation change passed 23 focused tests and isolated browser checks for both photo displays, initials and exclusion of managed recipients from manual saves. The final branch verification passed all 290 coverage tests (96.13% lines, 89.58% branches, 96.52% functions). No account data or routing permissions were changed.
 
 Previous whole-department contacts appear separately as read-only **Unassigned contacts from previous routing**. An administrator can copy a legacy contact group to a selected new list; merging/deduplication does not alter the preserved legacy group or guess step membership. The 15 step lists start empty when reading old seven-group settings. Existing supplierNotification recipients are retained for the new supplier list because its key/purpose is unchanged.
 
@@ -32,7 +46,7 @@ Loading, directory lookup, health checks, recipient edits and routing saves do n
 
 | Endpoint | Implemented contract |
 |---|---|
-| GET /api/notification-settings | Admin-only; schemaVersion=2, a 64-character SHA-256 version token, 16 fixed groups, seven safe legacyGroups, and configured flags; no integration URLs |
+| GET /api/notification-settings | Admin-only; schemaVersion=2, manual version, effective routingVersion, 16 groups with manual/automatic/effective contacts, seven safe legacyGroups, configured flags; no integration URLs |
 | PUT/PATCH /api/notification-settings | Admin/session/origin/CSRF protected; schemaVersion=2, fetched version and all 16 groups required; duplicate/unknown/missing keys are 400; stale version is 409 |
 | GET /api/admin/notifications/health | Unchanged read-only configuration/worker/queue contract |
 | POST /api/pcns/:id/notifications/workflow | Compatibility path for legacy-policy records; policy-2 records return queued:false / handled_on_save rather than enqueueing again |
@@ -40,6 +54,12 @@ Loading, directory lookup, health checks, recipient edits and routing saves do n
 The request field is **version**, not a new routingVersion column or an expectedVersion JSON field. Node hashes the stored settings document; the repository locks the singleton and compares the expected hash inside its SQL transaction before saving settings, relational mirrors and audit. PUT/PATCH remain full saves, not sparse group updates. A version-1 client cannot replace stored version-2 routing: it gets 409 and must reload.
 
 legacyGroups is server-owned and preserved from the prior settings during saves; client edits cannot overwrite it. Profiles returned by the API are sanitized/bounded. Preserving these legacy contacts is not an immutable archival/snapshot-table feature.
+
+Automatic contacts are derived from Users and never stored in the manual settings document. Effective addresses deduplicate manual and managed contacts case-insensitively. Removing a user assignment does not delete the same address if it was saved manually. The manual `version` stays stable when user assignments change; `routingVersion` also fingerprints current managed assignments. The existing 30-address/1,000-character bounds apply to the combined list.
+
+Account assignment writes acquire an exclusive transaction lock. PCN/settings saves and notification claims acquire the shared lock and recheck the actor's current version/security stamp, closing concurrent permission-revocation races. Notification creation reads manual settings and user assignments within the PCN transaction. At claim, pending jobs drop revoked automatic recipients while retaining manual snapshot addresses; jobs with no remaining recipients are cancelled. Already claimed, accepted and uncertain mail is not recalled or automatically retried.
+
+PCN account activation controls automatic mail membership. Removing an employee row from the source prevents their next sign-in/session validation, but administrators must also disable their PCN account to remove its saved mail assignment. The source has no active-status column.
 
 ## Routing policy and save-time mail
 

@@ -1,13 +1,7 @@
 const crypto = require('node:crypto');
 const { routeGroups } = require('./workflowAccess');
-
-const actions = Object.freeze(['approved', 'checked', 'prepared']);
-const departments = Object.freeze([
-  { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
-  { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' }, { key: 'qaTapbu', label: 'QA/TaPBU' }
-].map(Object.freeze));
-const stageDepartments = Object.freeze({ 'signoff.gscTet': 'gscTet', 'signoff.prodEngTet': 'prodEngTet',
-  'signoff.qaTet': 'qaTet', 'tapbu.gsc': 'gscTapbu', 'tapbu.qa': 'qaTapbu', 'qateFinal.signoff': 'qaTet' });
+const { getUserMailAssignments, managedRecipient, mergedEmails } = require('./userMailRouting');
+const { actions, departments, stageDepartments } = require('./signingPermissions');
 const mailGroups = Object.freeze([...departments.flatMap(department => actions.map(action => Object.freeze({
   key: `department.${department.key}.${action}`, label: `${department.label} ${action[0].toUpperCase()}${action.slice(1)}`,
   departmentKey: department.key, action
@@ -41,11 +35,20 @@ function normalizeMailRouting(value = {}) {
   const settings = value || {};
   const groups = Array.isArray(settings.groups) ? settings.groups : [];
   const legacy = settings.schemaVersion === 2 ? (Array.isArray(settings.legacyGroups) ? settings.legacyGroups : []) : groups;
+  const assignments = getUserMailAssignments(value);
+  const managed = assignments.map(user => ({ user, recipient: managedRecipient(user) })).filter(entry => entry.recipient);
   return {
     schemaVersion: 2, version: settingsVersion(value),
+    routingVersion: settingsVersion({ settings: value, assignments: managed.map(({ user, recipient }) => ({ userId: user.id, department: user.department, signingStep: user.signingStep, email: recipient.email, directoryId: user.mailDirectoryId })) }),
     groups: mailGroups.map(definition => {
       const stored = groups.find(group => group?.key === definition.key);
-      return { ...definition, emails: typeof stored?.emails === 'string' ? stored.emails.slice(0, 1000) : '', recipients: safeRecipients(stored?.recipients) };
+      const emails = typeof stored?.emails === 'string' ? stored.emails.slice(0, 1000) : '';
+      const recipients = safeRecipients(stored?.recipients);
+      const automaticRecipients = managed.filter(({ user }) => user.department === definition.departmentKey && user.signingStep === definition.action)
+        .map(({ recipient }) => ({ ...safeRecipients([recipient])[0], userId: recipient.userId, employeeCode: recipient.employeeCode, signingStep: recipient.signingStep }));
+      return { ...definition, emails, recipients, automaticRecipients,
+        effectiveEmails: mergedEmails(emails, automaticRecipients.map(entry => entry.email)),
+        effectiveRecipients: [...recipients, ...automaticRecipients.filter(entry => !recipients.some(manual => manual.email?.toLowerCase() === entry.email.toLowerCase()))] };
     }),
     // Older department contacts cannot be assigned to a signoff step automatically.
     // Preserve their complete profile records for explicit administrator assignment.

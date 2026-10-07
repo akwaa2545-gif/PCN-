@@ -35,7 +35,7 @@ function normalizeEmployee(row) {
   const employeeCode = normalizeEmployeeCode(row.EmpCode);
   const englishName = [profileText(row.PersonFNameEng, 50), profileText(row.PersonLNameEng, 50)].filter(Boolean).join(' ');
   const thaiName = [profileText(row.PersonFNameThai, 50), profileText(row.PersonLNameThai, 50)].filter(Boolean).join(' ');
-  return { employeeCode, displayName: englishName || thaiName || employeeCode, email: null,
+  return { employeeCode, displayName: englishName || thaiName || employeeCode, englishName, email: null,
     sourceDepartment: profileText(row.OrgID, 10) || null, jobTitle: profileText(row.PostNameEng, 50) || null,
     // The source has no enabled flag. PCN account grants determine whether this employee can sign in.
     isActive: true };

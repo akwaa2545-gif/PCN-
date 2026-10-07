@@ -4,13 +4,35 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function editor() {
+function editor(documentOverrides = {}) {
   const window = { location: { hash: '' } };
   const source = fs.readFileSync(path.join(__dirname, '..', 'admin.js'), 'utf8')
-    .replace(/\}\)\(\);\s*$/, 'window.EDITOR_TEST = { state, els, getMailRoutingPayload, mergeLegacyRecipients, isValidEmail, getEditorGroupRecipients, getRecipientAdditionIssue, recipientTargetLabel, getDirectorySelectionIssue };})();');
-  vm.runInNewContext(source, { window, document: { addEventListener() {} } });
+    .replace(/\}\)\(\);\s*$/, 'window.EDITOR_TEST = { state, els, getMailRoutingPayload, mergeLegacyRecipients, isValidEmail, getEditorGroupRecipients, getRecipientAdditionIssue, recipientTargetLabel, getDirectorySelectionIssue, updateRecipientCount, createManagedRecipient };})();');
+  vm.runInNewContext(source, { window, document: { addEventListener() {}, ...documentOverrides } });
   return window.EDITOR_TEST;
 }
+
+test('managed recipient cards retain profile photos and metadata without editable controls', () => {
+  const createElement = (tagName) => ({ tagName, children: [], dataset: {}, events: {}, textContent: '', innerHTML: '',
+    setAttribute() {}, appendChild(child) { this.children.push(child); }, append(...children) { this.children.push(...children); },
+    addEventListener(name, callback) { this.events[name] = callback; }, querySelector() { return this.children.find(child => child.tagName === 'img'); } });
+  const api = editor({ createElement });
+  const photo = 'data:image/png;base64,YWJj';
+  const person = { displayName: '<Employee>', employeeCode: '001234', email: 'person@example.test', jobTitle: 'Engineer', department: 'Engineering', photo };
+  const row = api.createManagedRecipient(person);
+  assert.match(row.className, /notification-person/);
+  assert.equal(row.dataset.managedRecipient, person.email);
+  assert.equal(row.children[0].children[0].src, photo);
+  assert.match(row.children[1].children.map(child => child.textContent).join(' '), /<Employee>.*001234.*person@example.test.*Engineer - Engineering/);
+  assert.equal(row.children.some(child => ['button', 'input'].includes(child.tagName)), false);
+  row.children[0].children[0].events.error();
+  assert.equal(row.children[0].textContent, '<');
+  for (const unsafe of ['https://external.example.test/photo.png', 'data:image/svg+xml;base64,YWJj', 'data:image/png;base64,YWJ', `data:image/png;base64,${'A'.repeat(102400)}`]) {
+    const fallback = api.createManagedRecipient({ ...person, displayName: 'Employee', photo: unsafe });
+    assert.equal(fallback.children[0].children.length, 0, unsafe.slice(0, 80));
+    assert.equal(fallback.children[0].textContent, 'E');
+  }
+});
 
 test('routing save carries the exact server version and only explicit editable groups', () => {
   const api = editor();
@@ -20,6 +42,26 @@ test('routing save carries the exact server version and only explicit editable g
   const result = JSON.parse(JSON.stringify(api.getMailRoutingPayload()));
   assert.deepEqual(result, { schemaVersion: 2, version: 'a'.repeat(64), groups: [{ key: 'department.gscTet.approved', emails: 'new@example.test', recipients: [{ email: 'new@example.test', displayName: '', jobTitle: '', department: '', photo: '' }] }] });
   assert.equal(Object.hasOwn(result, 'legacyGroups'), false);
+});
+
+test('automatic Users recipients never enter manual editor rows or routing saves', () => {
+  const api = editor();
+  const group = { key: 'department.qaTet.checked', emails: 'manual@example.test', recipients: [{ email: 'manual@example.test' }], automaticRecipients: [{ email: 'managed@example.test', employeeCode: '001234' }], effectiveEmails: 'manual@example.test;managed@example.test' };
+  api.state.notificationSettings = { schemaVersion: 2, version: 'c'.repeat(64), groups: [group] };
+  assert.deepEqual(JSON.parse(JSON.stringify(api.getEditorGroupRecipients(group))), group.recipients);
+  api.els.notificationGroups = { querySelectorAll: () => [{ dataset: { notificationGroup: group.key }, querySelectorAll: () => [{ value: 'manual@example.test', dataset: {} }] }] };
+  const saved = JSON.parse(JSON.stringify(api.getMailRoutingPayload()));
+  assert.equal(saved.groups[0].emails, 'manual@example.test');
+  assert.equal(JSON.stringify(saved).includes('managed@example.test'), false);
+});
+
+test('routing count unions manual and managed addresses without counting case duplicates', () => {
+  const api = editor();
+  const counter = { textContent: '' };
+  const card = { managedRecipients: [{ email: 'person@example.test' }, { email: 'managed@example.test' }], querySelector: () => counter };
+  const list = { closest: () => card, querySelectorAll: () => [{ value: 'PERSON@example.test' }, { value: 'manual@example.test' }] };
+  api.updateRecipientCount(list);
+  assert.equal(counter.textContent, '3 recipients · 2 managed from Users');
 });
 
 test('explicit legacy copy merges case-insensitively without editing its source', () => {

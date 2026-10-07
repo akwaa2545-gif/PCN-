@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { AuthService } = require('../src/authService');
+const { IntegrationService } = require('../src/integrationService');
 const person = Object.freeze({ employeeCode: '001234', displayName: 'Employee Name', email: null,
   sourceDepartment: 'IT', jobTitle: 'Engineer', isActive: true });
 
@@ -26,10 +27,92 @@ function fixture() {
       state.sessions = state.sessions.map(session => session.tokenHash === hash ? { ...session, revokedAt: new Date() } : session);
     },
     async createEmployeeUser(account) { state.created = account; return { ...state.user, ...account }; },
+    async updateEmployeeAccount(id, account) { state.updated = {id,account}; return { ...state.user, ...account }; },
     async linkEmployeeIdentity(id, profile) { state.linked = { id, profile }; return { ...state.user, ...profile }; }
   };
-  return { state, service: new AuthService(repository, { authMode: 'employee-code', employeeDirectory }) };
+  const integrationService = { async directory(query) {
+    state.mailQuery = query;
+    if(state.mailOutage) throw new Error('private workflow URL');
+    return {users:state.mailUsers || []};
+  }};
+  return { state, service: new AuthService(repository, { authMode: 'employee-code', employeeDirectory, integrationService }) };
 }
+
+test('one signing step requires an exact directory selection and stores only the re-resolved profile', async () => {
+  const {state,service}=fixture();
+  state.mailUsers=[{id:'directory-1',email:'Person@example.com',displayName:'Canonical Name',jobTitle:'Engineer',department:'QA',photo:''}];
+  const body={employeeCode:'001234',roles:['qa'],department:'qaTet',signingStep:'checked',mailSelection:{id:'directory-1',email:'person@example.com'}};
+  const result=await service.createEmployee(body);
+  assert.equal(state.mailQuery,'person@example.com');
+  assert.equal(state.created.signingStep,'checked');
+  assert.equal(state.created.email,'Person@example.com');
+  assert.equal(state.created.mailDirectoryId,'directory-1');
+  assert.equal(state.created.mailProfile.displayName,'Canonical Name');
+  assert.equal(result.mailVerifiedAt,undefined);
+  assert.equal(result.mailDirectoryId,undefined);
+  assert.equal(result.signingStep,'checked');
+  assert.equal(result.mailProfile.email,'Person@example.com');
+});
+
+test('ID-less original directory selections are reverified before granting a signing assignment', async () => {
+  const { state, service } = fixture();
+  const queries = [];
+  let entries = [{ displayName: 'Canonical Person', mail: 'Person@example.com' }];
+  const directory = new IntegrationService({ directoryUrl: 'https://directory.example/find', allowedHosts: ['directory.example'],
+    fetchImpl: async (url, options) => { queries.push(JSON.parse(options.body)); return new Response(JSON.stringify({ results: entries })); } });
+  service.integrationService = directory;
+  const selected = (await directory.directory('Employee Name')).users[0];
+  const body = { employeeCode: '001234', roles: ['gsc'], department: 'gscTet', signingStep: 'approved',
+    mailSelection: { id: selected.id, email: selected.email } };
+  await service.createEmployee(body);
+  assert.match(state.created.mailDirectoryId, /^directory-email:[a-f0-9]{64}$/);
+  assert.equal(state.created.mailProfile.displayName, 'Canonical Person');
+  assert.deepEqual(queries[1], { query: 'Person@example.com', searchTerm: 'Person@example.com' });
+  const saved = state.created;
+  await assert.rejects(service.createEmployee({ ...body, mailSelection: { ...body.mailSelection, id: 'forged-id' } }), { statusCode: 400 });
+  assert.equal(state.created, saved);
+  entries = [...entries, { ...entries[0], mail: 'PERSON@example.com' }];
+  await assert.rejects(service.createEmployee(body), { statusCode: 400 });
+  assert.equal(state.created, saved);
+});
+
+test('invalid signing assignments and unverified or ambiguous emails never write account data', async () => {
+  const bodies=[{signingStep:['approved','checked']},{signingStep:'admin'},{signingStep:'checked'},
+    {roles:['supplier'],signingStep:'checked'},{department:'it',signingStep:'checked'},
+    {roles:['gsc'],signingStep:'checked'},
+    {signingStep:'checked',mailSelection:{id:'forged',email:'person@example.com'}},
+    {mailSelection:{id:'directory-1',email:'person@example.com',displayName:'forged'}}];
+  for(const patch of bodies){
+    const {state,service}=fixture();
+    state.mailUsers=[{id:'directory-1',email:'person@example.com',displayName:'Name'}];
+    await assert.rejects(service.createEmployee({employeeCode:'001234',roles:['qa'],department:'qaTet',...patch}),{statusCode:400});
+    assert.equal(state.created,undefined);
+  }
+  const ambiguous=fixture();
+  ambiguous.state.mailUsers=[{id:'directory-1',email:'person@example.com'},{id:'directory-1',email:'PERSON@example.com'}];
+  await assert.rejects(ambiguous.service.createEmployee({employeeCode:'001234',roles:['qa'],department:'qaTet',signingStep:'approved',mailSelection:{id:'directory-1',email:'person@example.com'}}),{statusCode:400});
+  assert.equal(ambiguous.state.created,undefined);
+});
+
+test('assignment edit requires current version and preserves verified mail only when selection is omitted',async()=>{
+  const {state,service}=fixture();
+  state.user={...state.user,mailDirectoryId:'directory-1',mailVerifiedAt:new Date(),mailProfile:{id:'directory-1',email:'person@example.com',displayName:'Name'},email:'person@example.com',version:'0011223344556677'};
+  const account={roles:['qa'],department:'qaTet',signingStep:'prepared',isActive:true,version:state.user.version};
+  const result=await service.updateEmployee({userId:state.user.id,...account},'user:admin');
+  assert.equal(state.updated.account.mailDirectoryId,'directory-1');
+  assert.equal(state.updated.account.signingStep,'prepared');
+  assert.equal(result.version,state.user.version);
+  await assert.rejects(service.updateEmployee({userId:state.user.id,...account,mailSelection:null}),{statusCode:400});
+  await assert.rejects(service.updateEmployee({userId:state.user.id,...account,version:null}),{statusCode:400});
+  await service.updateEmployee({userId:state.user.id,...account,signingStep:null,mailSelection:null});
+  assert.equal(state.updated.account.email,null);
+});
+
+test('directory workflow failure is safe and causes no partial grant',async()=>{
+  const {state,service}=fixture();state.mailOutage=true;
+  await assert.rejects(service.createEmployee({employeeCode:'001234',roles:['qa'],department:'qaTet',signingStep:'approved',mailSelection:{id:'directory-1',email:'person@example.com'}}),error=>error.statusCode===503&&!error.message.includes('private'));
+  assert.equal(state.created,undefined);
+});
 
 test('password maintenance cannot convert its administrator and lose recovery access', async () => {
   const { state, service } = fixture();
@@ -101,7 +184,7 @@ test('employee provisioning validates assignments and only copies re-resolved SQ
   const { state, service } = fixture();
   await service.createEmployee({ employeeCode: '001234', roles: ['qa', 'qa'], department: 'qaTet' });
   assert.deepEqual(state.created, { employeeCode: '001234', displayName: 'Employee Name', email: null,
-    roles: ['qa'], department: 'qaTet' });
+    roles: ['qa'], department: 'qaTet',signingStep:null,mailDirectoryId:null,mailVerifiedAt:null,mailProfile:null });
   await assert.rejects(service.createEmployee({ employeeCode: '001234', roles: ['superadmin'], department: 'qaTet' }), { statusCode: 400 });
   await assert.rejects(service.createEmployee({ employeeCode: '001234', roles: ['qa'], department: 'unknown' }), { statusCode: 400 });
   await service.linkEmployee({ userId: 'user-1', employeeCode: '001234' });

@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { IntegrationService } = require('../src/integrationService');
+const emailIdentity = email => `directory-email:${crypto.createHash('sha256').update(email.toLowerCase()).digest('hex')}`;
 
 test('mail configuration health validates locally and discloses only an allowlisted status', () => {
   let requests = 0;
@@ -69,7 +71,7 @@ test('directory accepts original results envelope and all existing envelopes saf
     const service = new IntegrationService({ directoryUrl: 'https://directory.example/find', allowedHosts: ['directory.example'], fetchImpl: async () => new Response(JSON.stringify(body)) });
     assert.deepEqual(await service.directory('alex'), { users: [
       { id: 'one', displayName: 'Alex Reviewer', email: 'alex.reviewer@example.com', jobTitle: '', department: '', photo: '' },
-      { id: '', displayName: 'qa@example.com', email: 'qa@example.com', jobTitle: '', department: '', photo: '' }
+      { id: emailIdentity('qa@example.com'), displayName: 'qa@example.com', email: 'qa@example.com', jobTitle: '', department: '', photo: '' }
     ] });
   }
 });
@@ -104,10 +106,29 @@ test('directory preserves bounded profile metadata and normalized inline raster 
       photo: `  data:image/${type};base64, aG Vs\t\r\nbG8=  `
     }] })) });
     assert.deepEqual(await service.directory('alex.reviewer'), { users: [{
-      id: '', displayName: 'Alex Reviewer', email: 'alex.reviewer@example.com', jobTitle: 'Quality Reviewer', department: 'QA ไทย',
+      id: emailIdentity('alex.reviewer@example.com'), displayName: 'Alex Reviewer', email: 'alex.reviewer@example.com', jobTitle: 'Quality Reviewer', department: 'QA ไทย',
       photo: `data:image/${type};base64,aGVsbG8=`
     }] });
   }
+});
+
+test('original mail flow without an ID supplies a stable verified-email identity', async () => {
+  const identities = [];
+  for (const id of [undefined, null, '', '   ']) {
+    const service = new IntegrationService({ directoryUrl: 'https://directory.example/find', allowedHosts: ['directory.example'],
+      fetchImpl: async () => new Response(JSON.stringify({ results: [
+        { id, displayName: 'Selected Person', mail: 'Selected.Person@example.com' },
+        { id, displayName: 'Same Name', mail: 'other.person@example.com' },
+        { id: 'provider-object-id', mail: 'real.id@example.com' }
+      ] })) });
+    const result = await service.directory('Selected Person');
+    identities.push(result.users[0].id);
+    assert.match(result.users[0].id, /^directory-email:[a-f0-9]{64}$/);
+    assert.notEqual(result.users[0].id, result.users[1].id);
+    assert.equal(result.users[2].id, 'provider-object-id');
+  }
+  assert.equal(new Set(identities).size, 1);
+  assert.equal(identities[0], emailIdentity('selected.person@example.com'));
 });
 
 test('directory drops unsafe photos and invalid metadata without losing a valid email', async () => {

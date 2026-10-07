@@ -1,14 +1,16 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
-const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode } = require('./employeeAccounts');
+const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode, validateUserAssignment, validateVerifiedMail } = require('./employeeAccounts');
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const providerOf = user => user?.identityProvider || (user?.directoryId ? 'retired-windows' : 'password');
 const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive,
+  signingStep:user.signingStep || null,mailProfile:user.mailProfile || null,version:user.version || null,
   mustChangePassword: providerOf(user) === 'employee-code' ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
   ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null } : {}) });
 function sessionPrincipal(user, session, tokenHash) {
   const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
+  Object.defineProperty(principal.user,'sessionSecurityStamp',{value:session.securityStamp});
   Object.defineProperties(principal, { sessionSecurityStamp: { value: session.securityStamp }, sessionTokenHash: { value: tokenHash } });
   return principal;
 }
@@ -26,6 +28,7 @@ class AuthService {
     this.authMode = options.authMode || 'employee-code';
     if (!['employee-code', 'password'].includes(this.authMode)) throw new Error('Invalid authentication mode');
     this.employeeDirectory = options.employeeDirectory;
+    this.integrationService = options.integrationService;
   }
   now() { return new Date(this.clock()); }
   throttle(address) {
@@ -106,15 +109,53 @@ class AuthService {
     if(!profile)throw new ApiError(400,'Select an employee from the employee database');
     return profile;
   }
-  async createEmployee(body = {}, directory = this.employeeDirectory) {
-    assertFields(body,['employeeCode','roles','department']);
-    const {employeeCode,roles,department}=body;
+  validateAssignments({roles,department,signingStep=null}) {
     if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
     if (!employeeDepartments.some(item => item.key === department)) throw new ApiError(400, 'Select a valid department');
-    const profile=await this.resolveEmployee(employeeCode,directory);
-    return safeUser(await this.repository.createEmployeeUser({ employeeCode: normalizeEmployeeCode(profile.employeeCode), displayName: profile.displayName, email: profile.email || null, roles: [...new Set(roles)], department }));
+    validateUserAssignment({roles,department,signingStep});
   }
-  async linkEmployee(body = {}, directory = this.employeeDirectory) {
+  async resolveMail(selection,prior={}) {
+    if (selection === undefined) {
+      if (!prior.mailDirectoryId || !prior.mailVerifiedAt || !prior.mailProfile) return {email:null,mailDirectoryId:null,mailVerifiedAt:null,mailProfile:null};
+      const mail={email:prior.email,mailDirectoryId:prior.mailDirectoryId,mailVerifiedAt:prior.mailVerifiedAt,mailProfile:prior.mailProfile};
+      validateVerifiedMail(mail); return mail;
+    }
+    if(selection===null) return {email:null,mailDirectoryId:null,mailVerifiedAt:null,mailProfile:null};
+    assertFields(selection,['id','email']);
+    if(typeof selection.id!=='string'||!selection.id.trim()||selection.id.length>200||typeof selection.email!=='string'
+      ||selection.email.length>100||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(selection.email)) throw new ApiError(400,'Select an email from directory results');
+    if(!this.integrationService) throw new ApiError(503,'Directory lookup is unavailable');
+    let result;
+    try {result=await this.integrationService.directory(selection.email);} catch {throw new ApiError(503,'Directory lookup is unavailable');}
+    const matches=(result?.users||[]).filter(profile=>profile.id===selection.id&&typeof profile.email==='string'&&profile.email.toLowerCase()===selection.email.toLowerCase());
+    if(matches.length!==1)throw new ApiError(400,'Select an email from directory results');
+    const selected=matches[0];
+    const mailProfile={id:selected.id,email:selected.email,displayName:selected.displayName||selected.email,jobTitle:selected.jobTitle||'',department:selected.department||'',photo:selected.photo||''};
+    const mail={email:selected.email,mailDirectoryId:selected.id,mailVerifiedAt:this.now().toISOString(),mailProfile};
+    validateVerifiedMail(mail);return mail;
+  }
+  async createEmployee(body = {}, directory = this.employeeDirectory, actor='administrator',user) {
+    assertFields(body,['employeeCode','roles','department','signingStep','mailSelection']);
+    const {employeeCode,roles,department,signingStep=null}=body;
+    this.validateAssignments({roles,department,signingStep});
+    const profile=await this.resolveEmployee(employeeCode,directory);
+    const mail=await this.resolveMail(body.mailSelection);
+    validateVerifiedMail({...mail,signingStep});
+    return safeUser(await this.repository.createEmployeeUser({ employeeCode: normalizeEmployeeCode(profile.employeeCode), displayName: profile.displayName, roles: [...new Set(roles)], department,signingStep,...mail },actor,user));
+  }
+  async updateEmployee(body={},actor='administrator',user) {
+    assertFields(body,['userId','roles','department','signingStep','mailSelection','isActive','version']);
+    if(typeof body.version!=='string'||!/^[a-fA-F0-9]{16}$/.test(body.version))throw new ApiError(400,'The current account version is required');
+    if(typeof body.isActive!=='boolean'||!Object.hasOwn(body,'signingStep'))throw new ApiError(400,'Complete account assignments are required');
+    this.validateAssignments(body);
+    const prior=await this.repository.getUserById(body.userId);
+    if(!prior)throw new ApiError(404,'User not found');
+    if(body.signingStep!==null&&providerOf(prior)!=='employee-code')throw new ApiError(400,'Link an employee before assigning a signing step');
+    const mail=await this.resolveMail(body.mailSelection,prior);
+    validateVerifiedMail({...mail,signingStep:body.signingStep});
+    return safeUser(await this.repository.updateEmployeeAccount(body.userId,{roles:[...new Set(body.roles)],department:body.department,signingStep:body.signingStep,isActive:body.isActive,version:body.version,...mail},actor,user));
+  }
+  async linkEmployee(body = {}, directory = this.employeeDirectory,actor='administrator',user) {
     assertFields(body,['userId','employeeCode']);
     const {userId,employeeCode}=body;
     const prior=await this.repository.getUserById(userId);
@@ -122,7 +163,7 @@ class AuthService {
     if(!prior.isActive)throw new ApiError(400,'Only active users can be linked to an employee');
     if(this.authMode === 'password' && prior.roles.includes('admin')) throw new ApiError(409,'Switch to employee-code mode before linking an administrator');
     const profile=await this.resolveEmployee(employeeCode,directory);
-    return safeUser(await this.repository.linkEmployeeIdentity(userId,profile));
+    return safeUser(await this.repository.linkEmployeeIdentity(userId,profile,actor,user));
   }
   async session(token,{skipEmployeeLookup=false}={}) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;

@@ -9,7 +9,7 @@ const base = { id: 'PCN-2026-0001', version: '0000000000000001', status: 'gsc_re
 const configured = { schemaVersion: 2, groups: mailGroups.map(group => ({ ...group, emails: 'reviewer@example.test', recipients: [] })) };
 function transaction(settings = configured, failInsert = false) {
   const calls = [];
-  return { calls, request() {
+  return { calls, transaction() { return this; }, begin: async () => {}, commit: async () => {}, rollback: async () => {}, request() {
     const inputs = {};
     return { input(name, type, value) { inputs[name] = value; return this; }, async query(query) {
       calls.push({ query, inputs });
@@ -270,5 +270,5 @@ test('stale SQL PCN save rejects before notification preparation', async () => {
   const pool = sqlPool(false);
   const repository = new IsolatedSqlRepository(pool, { notifications: service() });
   await assert.rejects(repository.update(base.id, () => base, 'reviewer', '000000000000000f'), { statusCode: 409 });
-  assert.equal(pool.tx.calls.filter(call => typeof call === 'object').length, 0);
+  assert.equal(pool.tx.calls.filter(call => typeof call === 'object' && !call.query.includes('sp_getapplock')).length, 0);
 });

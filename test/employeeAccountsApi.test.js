@@ -4,16 +4,16 @@ const { createApp } = require('../src/httpServer');
 const { AuthService } = require('../src/authService');
 const { memoryRepository } = require('./helpers/apiHarness');
 const USER_ID = '87654321-4321-4321-4321-cba987654321';
-const profile = Object.freeze({ employeeCode: '001234', displayName: 'Employee Name', email: null,
+const profile = Object.freeze({ employeeCode: '001234', displayName: 'Employee Name', englishName: 'Employee Name', email: null,
   sourceDepartment: 'IT', jobTitle: 'Engineer', isActive: true });
 
-async function harness(t, { roles = ['admin'], directory = true } = {}) {
+async function harness(t, { roles = ['admin'], directory = true, sourceProfile = profile } = {}) {
   const calls = [];
   const state = { outage: false, sessions: [], user: { id: USER_ID, username: '001234', employeeCode: '001234',
     normalizedEmployeeCode: '001234', identityProvider: 'employee-code', displayName: 'Employee Name',
-    roles, isActive: true, securityStamp: 'stamp' } };
+    roles, department:'it',signingStep:null,version:'0011223344556677',isActive: true, securityStamp: 'stamp' } };
   const employeeDirectory = directory ? {
-    async search(query) { if (state.outage) throw new Error('private SQL'); calls.push(['search', query]); return [profile]; },
+    async search(query) { if (state.outage) throw new Error('private SQL'); calls.push(['search', query]); return [sourceProfile]; },
     async getByCode(code) { if (state.outage) throw new Error('private SQL'); return code === profile.employeeCode ? profile : null; }
   } : undefined;
   const repository = {
@@ -26,9 +26,17 @@ async function harness(t, { roles = ['admin'], directory = true } = {}) {
     },
     async listUsers() { return [{ ...state.user, passwordHash: 'private', adSid: 'private', securityStamp: 'private' }]; },
     async createEmployeeUser(account) { calls.push(['create', account]); return { ...state.user, ...account }; },
+    async updateEmployeeAccount(id,account) {
+      calls.push(['edit',id,account]);
+      if(account.version!==state.user.version){const {ApiError}=require('../src/apiError');throw new ApiError(409,'Account changed');}
+      state.user={...state.user,...account,version:'0011223344556688',securityStamp:'changed'};
+      state.sessions=state.sessions.map(session=>({...session,revokedAt:new Date()}));
+      return state.user;
+    },
     async linkEmployeeIdentity(id, person) { calls.push(['link', id, person]); return { ...state.user, ...person }; }
   };
-  const authService = new AuthService(repository, { authMode: 'employee-code', employeeDirectory });
+  const integrationService={async directory(query){calls.push(['mail',query]);return{users:state.mailUsers||[]};}};
+  const authService = new AuthService(repository, { authMode: 'employee-code', employeeDirectory,integrationService });
   const app = createApp({ repository: memoryRepository(), authService, employeeDirectory, authMode: 'employee-code',
     publicOrigin: 'http://localhost', secureCookies: false });
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
@@ -49,6 +57,29 @@ async function harness(t, { roles = ['admin'], directory = true } = {}) {
   async function login() { return request('/api/auth/login', { method: 'POST', session: false, body: { employeeCode: '001234' } }); }
   return { request, login, calls, state };
 }
+
+test('administrator assignment edit selects exactly one verified email and invalidates the previous session',async t=>{
+  const {request,login,state,calls}=await harness(t);await login();
+  state.mailUsers=[{id:'mail-id',email:'employee@example.com',displayName:'Selected Person'}];
+  const body={roles:['qa'],department:'qaTet',signingStep:'checked',mailSelection:{id:'mail-id',email:'employee@example.com'},isActive:true,version:state.user.version};
+  const response=await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body});
+  assert.equal(response.status,200);assert.equal(response.body.data.signingStep,'checked');
+  assert.equal(response.body.data.mailProfile.displayName,'Selected Person');
+  assert.equal(response.body.data.version,'0011223344556688');
+  for(const field of ['mailVerifiedAt','mailDirectoryId','securityStamp','sessionSecurityStamp'])assert.equal(response.body.data[field],undefined);
+  assert.ok(calls.some(call=>call[0]==='mail'&&call[1]==='employee@example.com'));
+  assert.equal((await request('/api/admin/users')).status,401);
+});
+
+test('account edit enforces origin, CSRF, current version, scalar step and strict fields before persistence',async t=>{
+  const {request,login,state,calls}=await harness(t);await login();
+  const body={roles:['admin'],department:'it',signingStep:null,isActive:true,version:state.user.version};
+  assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body,csrf:false})).status,403);
+  assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body,origin:'https://evil.invalid'})).status,403);
+  for(const patch of [{version:null},{signingStep:['approved']},{mailProfile:{email:'free@example.com'}},{employeeCode:'001234'},{email:'free@example.com'}])assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,...patch}})).status,400);
+  assert.equal(calls.some(call=>call[0]==='edit'),false);
+  assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,version:'8899aabbccddeeff'}})).status,409);
+});
 
 test('employee code HTTP login works without Windows headers and public config contains no secrets', async t => {
   const { request, login } = await harness(t);
@@ -76,9 +107,17 @@ test('employee search and user listing redact private fields and retain canonica
   const { request, login } = await harness(t);
   await login();
   assert.deepEqual((await request('/api/admin/employees?query=001')).body.data,
-    [{ employeeCode: '001234', displayName: 'Employee Name', email: null, sourceDepartment: 'IT', jobTitle: 'Engineer' }]);
+    [{ employeeCode: '001234', displayName: 'Employee Name', englishName: 'Employee Name', email: null, sourceDepartment: 'IT', jobTitle: 'Engineer' }]);
   const listed = await request('/api/admin/users');
   for (const name of ['passwordHash', 'adSid', 'securityStamp', 'directoryId']) assert.equal(listed.body.data[0][name], undefined);
+});
+
+test('employee lookup preserves an explicitly missing English name without inventing a mail search identity', async t => {
+  const { request, login } = await harness(t, { sourceProfile: { ...profile, displayName: 'Local-language name', englishName: '' } });
+  await login();
+  const employee = (await request('/api/admin/employees?query=001')).body.data[0];
+  assert.equal(employee.displayName, 'Local-language name');
+  assert.equal(employee.englishName, '');
 });
 
 test('employee provision and explicit link require selected code with role/department assignments and CSRF', async t => {

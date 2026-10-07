@@ -5,7 +5,7 @@ const {
   hasRole, isInternal, routeGroups, complete
 } = require('../src/workflowAccess');
 
-const user = role => ({ id: 'owner', roles: [role] });
+const user = role => ({ id: 'owner', roles: [role], ...(role === 'qa' ? { department: 'qaTet', signingStep: 'prepared' } : {}) });
 const signoff = { approved: true, checked: true, prepared: true };
 const finished = () => ({ signoff: { gscTet: { ...signoff }, prodEngTet: { ...signoff }, qaTet: { ...signoff } },
   tapbu: { need: true, gsc: { ...signoff }, qa: { ...signoff } }, qateFinal: { signoff: { ...signoff }, approve: true } });
@@ -48,15 +48,15 @@ test('department review permissions apply at individual workbook fields', () => 
 });
 
 test('signoff order and checked prerequisites block forged completion', () => {
-  assertReviewUpdate({}, finished(), user('admin'), 'RL2');
+  assertReviewUpdate(finished(), finished(), user('admin'), 'RL2');
   assert.equal(complete(finished(), 'qateFinal.signoff'), true);
   assert.equal(complete({}, 'qateFinal.signoff'), false);
-  for (const review of [
-    { signoff: { gscTet: { checked: true } } },
-    { signoff: { gscTet: { approved: true, prepared: true } } },
-    { signoff: { prodEngTet: { approved: true } } },
-    { ...finished(), tapbu: { need: false, gsc: { ...signoff }, qa: { ...signoff } } }
-  ]) assert.throws(() => assertReviewUpdate({}, review, user('admin'), 'RL2'), { statusCode: 400 });
+  for (const [before, review, actor] of [
+    [{}, { signoff: { gscTet: { checked: true } } }, { ...user('gsc'), department: 'gscTet', signingStep: 'checked' }],
+    [{ signoff: { gscTet: { approved: true } } }, { signoff: { gscTet: { approved: true, prepared: true } } }, { ...user('gsc'), department: 'gscTet', signingStep: 'prepared' }],
+    [{}, { signoff: { prodEngTet: { approved: true } } }, { ...user('productionengineering'), department: 'prodEngTet', signingStep: 'approved' }],
+    [finished(), { ...finished(), tapbu: { need: false, gsc: { ...signoff }, qa: { ...signoff } } }, user('admin')]
+  ]) assert.throws(() => assertReviewUpdate(before, review, actor, 'RL2'), { statusCode: 400 });
 });
 
 test('risk-specific routes and mutually exclusive workbook decisions are enforced', () => {
@@ -65,12 +65,12 @@ test('risk-specific routes and mutually exclusive workbook decisions are enforce
   for (const review of [
     { tapbu: { need: true, noNeed: true } }, { qateFinal: { approve: true, reject: true } },
     { decision: { rejected: true, agreed: true } }, { decision: { rejected: true, agreedAfterQualification: true } }
-  ]) assert.throws(() => assertReviewUpdate({}, review, user('admin'), 'RL2'), { statusCode: 400 });
+  ]) assert.throws(() => assertReviewUpdate({}, review, user(review.qateFinal ? 'qa' : 'admin'), 'RL2'), { statusCode: 400 });
   assert.throws(() => assertReviewUpdate({}, { tapbu: { need: true } }, user('admin'), 'RL0'), { statusCode: 400 });
   const noTapbu = finished();
   delete noTapbu.tapbu;
-  assertReviewUpdate({}, noTapbu, user('admin'), 'RL0');
-  assert.throws(() => assertReviewUpdate({}, { ...noTapbu, tapbu: { gsc: { approved: true } } }, user('admin'), 'RL0'), { statusCode: 400 });
+  assertReviewUpdate(noTapbu, noTapbu, user('admin'), 'RL0');
+  assert.throws(() => assertReviewUpdate(noTapbu, { ...noTapbu, tapbu: { gsc: { approved: true } } }, { ...user('tapbu'), department: 'gscTapbu', signingStep: 'approved' }, 'RL0'), { statusCode: 400 });
 });
 
 test('final judgments require QA privileges, complete signoffs and recorded decision', () => {

@@ -27,7 +27,7 @@ test('worker health reports empty queue and tracks only safe idle, accepted, unc
     const worker = new NotificationWorker(pool, { clock: () => new Date(lastCheckedAt),
       integrationService: { sendMail: async () => { if (outcome === 'uncertain') throw new Error('sig=private-health-test'); } } });
     if (outcome === 'error') {
-      pool.request = () => { throw new Error('DB private-health-test'); };
+      pool.transaction = () => { throw new Error('DB private-health-test'); };
       await assert.rejects(worker.runOnce(), /private-health-test/);
       pool.request = mockPool().request;
     } else await worker.runOnce();
@@ -39,11 +39,10 @@ test('worker health reports empty queue and tracks only safe idle, accepted, unc
 test('worker completion write failure remains an error instead of claiming acceptance', async () => {
   const pool = mockPool([{ recordset: [{ Id: 'private-job', PayloadJson: '{}' }] }]);
   const request = pool.request;
-  let queries = 0;
   pool.request = () => {
     const value = request();
     const query = value.query;
-    value.query = async sqlText => { if (++queries === 2) throw new Error('DB private-health-test'); return query(sqlText); };
+    value.query = async sqlText => { if (sqlText.includes('SET Status=@status')) throw new Error('DB private-health-test'); return query(sqlText); };
     return value;
   };
   const worker = new NotificationWorker(pool, { integrationService: { sendMail: async () => {} } });
@@ -51,9 +50,15 @@ test('worker completion write failure remains an error instead of claiming accep
   assert.equal((await worker.health()).worker.lastOutcome, 'error');
 });
 
-function mockPool(results = []) {
+function mockPool(results = [], settings = {}) {
   const calls = [];
-  return { calls, request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; }, async query(sql) { calls.push({ sql, inputs }); return results.shift() || { recordset: [] }; } }; } };
+  const pool = { calls, request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; }, async query(sql) {
+    calls.push({ sql, inputs });
+    if (sql.includes('sp_getapplock') || sql.includes("Status=N'sending',Attempts")) return { recordset: [] };
+    if (sql.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
+    return results.shift() || { recordset: [] }; } }; } };
+  pool.transaction = () => ({ begin: async () => {}, commit: async () => {}, rollback: async () => {}, request: () => pool.request() });
+  return pool;
 }
 const complete = { approved: true, checked: true, prepared: true };
 const record = { id: 'PCN-2026-0001', version: '0000000000000001', internalReview: { signoff: { gscTet: complete } } };
@@ -62,7 +67,7 @@ test('workflow derives route and returns mapping-empty without queuing', async (
   const pool = mockPool();
   const service = new NotificationService(pool, { repository: { getNotificationSettings: async () => ({ groups: [] }) } });
   assert.deepEqual(await service.workflow(record, { completedGroupKey: 'signoff.gscTet' }, { displayName: 'Reviewer' }), { queued: false, reason: 'recipient_not_configured', nextGroupKey: 'signoff.prodEngTet' });
-  assert.equal(pool.calls.length, 0);
+  assert(!pool.calls.some(call => call.sql.includes('INSERT pcn.NotificationJobs')));
 });
 
 test('workflow requires checked completed group and disallows supplied recipient or link', async () => {
@@ -72,14 +77,15 @@ test('workflow requires checked completed group and disallows supplied recipient
 });
 
 test('workflow queues unique version key with parameters and server-owned link', async () => {
-  const pool = mockPool([{ recordset: [{ Id: 'job-id', Status: 'pending' }] }]);
+  const pool = mockPool([{ recordset: [{ Id: 'job-id', Status: 'pending' }] }], { groups: [{ key: 'signoff.prodEngTet', emails: 'qa@example.com' }] });
   const service = new NotificationService(pool, { mailUrl: 'https://mail.example/send', publicOrigin: 'https://pcn.example', repository: { getNotificationSettings: async () => ({ groups: [{ key: 'signoff.prodEngTet', emails: 'qa@example.com' }] }) } });
   const result = await service.workflow(record, { completedGroupKey: 'signoff.gscTet' }, { displayName: 'QA' });
   assert.equal(result.jobId, 'job-id');
-  assert.match(pool.calls[0].sql, /UPDLOCK, HOLDLOCK/);
-  assert.equal(pool.calls[0].inputs.eventKey, 'PCN-2026-0001:0000000000000001:signoff.gscTet:completed');
-  assert.match(pool.calls[0].inputs.payload, /https:\/\/pcn.example\/form.html\?id=PCN-2026-0001/);
-  const payload = JSON.parse(pool.calls[0].inputs.payload);
+  const write = pool.calls.find(call => call.inputs.eventKey);
+  assert.match(write.sql, /UPDLOCK, HOLDLOCK/);
+  assert.equal(write.inputs.eventKey, 'PCN-2026-0001:0000000000000001:signoff.gscTet:completed');
+  assert.match(write.inputs.payload, /https:\/\/pcn.example\/form.html\?id=PCN-2026-0001/);
+  const payload = JSON.parse(write.inputs.payload);
   assert.deepEqual(Object.keys(payload).sort(), ['message', 'senderName', 'subject', 'to']);
   assert.equal(payload.to, 'qa@example.com');
   assert.equal(payload.senderName, 'QA');
@@ -93,9 +99,9 @@ test('worker marks ambiguous send failure uncertain and never retries automatica
   const pool = mockPool([{ recordset: [{ Id: 'job', PayloadJson: JSON.stringify({ to: 'qa@example.com' }) }] }]);
   const service = new NotificationWorker(pool, { integrationService: { sendMail: async () => { throw new Error('network timeout'); } } });
   assert.equal((await service.runOnce()).status, 'uncertain');
-  assert.match(pool.calls[0].sql, /Status=N'pending'/);
-  assert.equal(pool.calls[1].inputs.status, 'uncertain');
-  assert.equal(pool.calls[1].inputs.error, 'Mail delivery outcome is unknown; operator review required');
+  assert.match(pool.calls.find(call => call.sql.includes('SELECT TOP(1)')).sql, /Status=N'pending'/);
+  assert.equal(pool.calls.at(-1).inputs.status, 'uncertain');
+  assert.equal(pool.calls.at(-1).inputs.error, 'Mail delivery outcome is unknown; operator review required');
 });
 
 
@@ -106,8 +112,8 @@ test('worker idle does not call external mail and success records sent result us
   assert.equal(calls, 0);
   const pool = mockPool([{ recordset: [{ Id: 'job', PayloadJson: '{}' }] }]);
   assert.equal((await new NotificationWorker(pool, { integrationService }).runOnce()).status, 'sent');
-  assert.equal(pool.calls[0].inputs.token, pool.calls[1].inputs.token);
-  assert.equal(pool.calls[1].inputs.error, null);
+  assert.equal(pool.calls.find(call => call.inputs.token).inputs.token, pool.calls.at(-1).inputs.token);
+  assert.equal(pool.calls.at(-1).inputs.error, null);
 });
 
 test('RL0 routing skips TaPBU and blocks client attempts to select other next groups', async () => {
@@ -119,8 +125,8 @@ test('RL0 routing skips TaPBU and blocks client attempts to select other next gr
 });
 
 test('configured recipients without a server mail endpoint never queue jobs', async () => {
-  const pool = mockPool();
+  const pool = mockPool([], { groups: [{ key: 'signoff.prodEngTet', emails: 'qa@example.com' }] });
   const service = new NotificationService(pool, { repository: { getNotificationSettings: async () => ({ groups: [{ key: 'signoff.prodEngTet', emails: 'qa@example.com' }] }) } });
   assert.equal((await service.workflow(record, { completedGroupKey: 'signoff.gscTet' })).reason, 'mail_not_configured');
-  assert.equal(pool.calls.length, 0);
+  assert(!pool.calls.some(call => call.sql.includes('INSERT pcn.NotificationJobs')));
 });

@@ -1,4 +1,5 @@
 const { ApiError } = require('./apiError');
+const crypto = require('node:crypto');
 
 function text(value, field, max, required = true) {
   if (value !== undefined && typeof value !== 'string') throw new ApiError(400, `${field} must be text`);
@@ -107,8 +108,12 @@ class IntegrationService {
       try {
         const email = emailList(entry.email || entry.mail || entry.userPrincipalName);
         if (email.includes(';')) return [];
+        // Original directory flows may omit the object ID. Bind the confirmed
+        // address to a stable identifier; account saves still re-query it.
+        const providerId = entry.id == null ? '' : text(entry.id, 'Id', 200, false);
+        const id = providerId || `directory-email:${crypto.createHash('sha256').update(email.toLowerCase()).digest('hex')}`;
         return [{
-          id: text(entry.id || '', 'Id', 200, false), displayName: text(entry.displayName || email, 'Name', 200), email,
+          id, displayName: text(entry.displayName || email, 'Name', 200), email,
           jobTitle: directoryProfileText(entry.jobTitle), department: directoryProfileText(entry.department),
           photo: directoryPhoto(entry.photo)
         }];

@@ -1,4 +1,5 @@
 const { ApiError } = require('./apiError');
+const { validateSigningAssignment } = require('./signingPermissions');
 const employeeDepartments = Object.freeze([
   { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
   { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' },
@@ -25,5 +26,22 @@ function validateEmployeeAccount(account) {
   validateEmployeeIdentity(account);
   if (!employeeDepartments.some(entry => entry.key === account.department)) throw new ApiError(400, 'Invalid department');
   if (!Array.isArray(account.roles) || !account.roles.length || account.roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
+  validateUserAssignment(account);
 }
-module.exports = { EMPLOYEE_CODE_PATTERN, employeeDepartments, employeeRoles, normalizeUserId, normalizeEmployeeCode, validateEmployeeIdentity, validateEmployeeAccount };
+function validateUserAssignment(account) {
+  validateSigningAssignment(account);
+}
+function validateVerifiedMail(account) {
+  const hasMail = account.mailDirectoryId != null || account.mailVerifiedAt != null || account.mailProfile != null;
+  if (!hasMail) {
+    if (account.signingStep != null) throw new ApiError(400,'Select a directory email for the signing step');
+    return;
+  }
+  const profile = account.mailProfile;
+  if (typeof account.mailDirectoryId !== 'string' || !account.mailDirectoryId.trim() || account.mailDirectoryId.length > 200
+    || account.mailVerifiedAt == null || !Number.isFinite(new Date(account.mailVerifiedAt).getTime()) || !profile || typeof profile !== 'object' || Array.isArray(profile)
+    || profile.id !== account.mailDirectoryId || typeof profile.email !== 'string'
+    || typeof account.email !== 'string' || profile.email.toLowerCase() !== account.email.toLowerCase()) throw new ApiError(400,'Invalid verified directory email');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email) || account.email.length > 320) throw new ApiError(400,'Invalid verified directory email');
+}
+module.exports = { EMPLOYEE_CODE_PATTERN, employeeDepartments, employeeRoles, normalizeUserId, normalizeEmployeeCode, validateEmployeeIdentity, validateEmployeeAccount, validateUserAssignment, validateVerifiedMail };

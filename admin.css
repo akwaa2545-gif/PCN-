@@ -1,0 +1,17 @@
+.employee-mail-assignment, .employee-route-preview, .employee-assignment-help { grid-column: 1 / -1; }
+.employee-mail-assignment { display: grid; gap: 10px; padding: 16px; border: 1px solid #cbd5e1; background: white; }
+.employee-mail-assignment input, .employee-mail-assignment button { min-width: 0; }
+.employee-mail-assignment p, .employee-route-preview { overflow-wrap: anywhere; }
+.employee-assignment-help { font-size: 14px; font-weight: 400; color: #465570; }
+.employee-route-preview { padding: 12px; background: #edf2fb; border-left: 4px solid #272974; }
+.employee-user-form .employee-active-label { display: flex; align-items: center; gap: 10px; }
+.employee-user-form .employee-active-label input { width: 20px; min-height: 20px; }
+.users-table td:last-child { display: flex; gap: 8px; }
+.notification-managed-recipients { padding: 12px; margin-top: 10px; border: 1px solid #cbd5e1; background: #f4f7fb; }
+.notification-managed-recipients h5 { margin: 0 0 8px; font-size: 14px; color: #272974; }
+.notification-managed-recipients .notification-person { margin: 8px 0; grid-template-columns: 34px minmax(0, 1fr); }
+.notification-person-identity { overflow-wrap: anywhere; color: #272974; font-size: 12px; font-weight: 600; }
+.notification-person-managed .notification-person-meta, .employee-user-identity .notification-person-meta { overflow-wrap: anywhere; white-space: normal; }
+.employee-user-identity { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 180px; }
+.notification-managed-recipients small { display: block; margin-top: 8px; color: #465570; }
+.employee-user-form [hidden] { display: none; }

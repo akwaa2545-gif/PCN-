@@ -1,6 +1,64 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { startApi, validPayload, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
+const { startApi, validPayload, unsignedPayload, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
+
+test('administrator, reviewer and department role alone cannot forge signatures or permission fields', async t => {
+  const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
+    { username: 'reviewer', roles: ['reviewer'], department: 'gscTet' },
+    { username: 'gsc-role-only', roles: ['gsc'], department: 'gscTet' }
+  ] }) });
+  const admin = await api.login('admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(created.status, 201);
+  const record = created.body.data;
+  for (const username of ['admin', 'reviewer', 'gsc-role-only']) {
+    const session = await api.login(username);
+    const denied = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
+      body: { version: record.version, internalReview: { signoff: { gscTet: { approved: true } } } } });
+    assert.equal(denied.status, 403, username);
+  }
+  for (const fields of [{ signingStep: 'approved' }, { department: 'gscTet' }, { signingPermissions: ['approved'] }]) {
+    assert.equal((await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin,
+      body: { version: record.version, ...fields } })).status, 400);
+  }
+  assert.equal((await api.repository.findById(record.id)).version, record.version);
+});
+
+test('exact department signer records server identity and cannot alter other signatures or metadata', async t => {
+  const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
+    { username: 'gsc-approved', displayName: 'Verified Approver', roles: ['gsc'], department: 'gscTet', signingStep: 'approved' },
+    { username: 'gsc-checked', displayName: 'Verified Checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' },
+    { username: 'qa-approved', roles: ['qa'], department: 'qaTet', signingStep: 'approved' }
+  ] }) });
+  const admin = await api.login('admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(created.status, 201);
+  let record = created.body.data;
+  const approver = await api.login('gsc-approved');
+  const checker = await api.login('gsc-checked');
+  const qa = await api.login('qa-approved');
+  const patch = (session, signoff) => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
+    body: { version: record.version, internalReview: { signoff } } });
+  assert.equal((await patch(checker, { gscTet: { checked: true } })).status, 400, 'prerequisite still required');
+  assert.equal((await patch(qa, { gscTet: { approved: true } })).status, 403, 'other department denied');
+  const signed = await patch(approver, { gscTet: { approved: true, approvedName: 'Forged Name', approvedDate: '1999-01-01' } });
+  assert.equal(signed.status, 200);
+  record = signed.body.data;
+  assert.equal(record.internalReview.signoff.gscTet.approvedName, 'Verified Approver');
+  assert.equal(record.internalReview.signoff.gscTet.approvedDate, record.updatedAt.slice(0, 10));
+  assert.equal((await patch(approver, { gscTet: { checked: true } })).status, 403, 'other step denied');
+  assert.equal((await patch(approver, { gscTet: { approvedName: 'Rewrite Name' } })).status, 400, 'signed identity immutable');
+  assert.equal((await patch(admin, { gscTet: { approved: false } })).status, 403, 'admin cannot clear signer');
+  const checked = await patch(checker, { gscTet: { checked: true } });
+  assert.equal(checked.status, 200);
+  record = checked.body.data;
+  assert.equal(record.internalReview.signoff.gscTet.checkedName, 'Verified Checker');
+  assert.equal(record.internalReview.signoff.gscTet.approvedName, 'Verified Approver');
+  const cleared = await patch(checker, { gscTet: { checked: false } });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.data.internalReview.signoff.gscTet.checkedName, '');
+  assert.equal(cleared.body.data.internalReview.signoff.gscTet.checkedDate, '');
+});
 
 test('SQL and authentication dependencies are required; no JSON fallback', () => {
   const { createApp } = require('../src/httpServer');
@@ -63,12 +121,12 @@ test('writes enforce same origin and CSRF, including login origin', async t => {
   assert.equal((await api.repository.list()).length, 0);
 });
 
-test('PCN CRUD persists workbook review, comments and approval metadata', async t => {
+test('PCN CRUD preserves historical workbook signatures, comments and approval metadata', async t => {
   const api = await startApi(t);
   const admin = await api.login('admin');
-  const create = await api.request('/api/pcns', { method: 'POST', session: admin, body: validPayload });
+  const create = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
   assert.equal(create.status, 201);
-  const record = create.body.data;
+  const record = await api.repository.seedHistoricalReview(create.body.data.id, validPayload.internalReview);
   assert.match(record.id, /^PCN-\d{4}-\d{4}$/);
   assert.match(record.version, /^[a-f0-9]{16}$/i);
   assert.equal(record.ownerUserId, 'admin-id');
@@ -99,7 +157,7 @@ test('PCN CRUD persists workbook review, comments and approval metadata', async 
 test('stale workbook update conflicts and preserves successful edit', async t => {
   const api = await startApi(t);
   const admin = await api.login('admin');
-  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: {...validPayload,status:'draft'} })).body.data;
+  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: {...unsignedPayload,status:'draft'} })).body.data;
   const first = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, reason: 'first' } });
   assert.equal(first.status, 200);
   assert.equal((await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, reason: 'stale' } })).status, 409);
@@ -132,7 +190,7 @@ test('validation rejects mismatch, null body and skipped workflow transitions', 
   for (const body of [null, [], { ...validPayload, riskLevel: 'RL0' }, { ...validPayload, changeRows: 'wrong type' }]) {
     assert.equal((await api.request('/api/pcns', { method: 'POST', session: admin, body })).status, 400);
   }
-  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: validPayload })).body.data;
+  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload })).body.data;
   assert.equal((await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, status: 'technical_review' } })).status, 400);
   assert.equal((await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { reason: 'missing version' } })).status, 400);
   const next = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, status: 'gsc_review' } });
@@ -144,7 +202,7 @@ test('edited change text retains its original master option', async t => {
   const api = await startApi(t);
   const admin = await api.login('admin');
   const text = `${validPayload.selectedChange} - additional supplier note`;
-  const create = await api.request('/api/pcns', { method: 'POST', session: admin, body: { ...validPayload,
+  const create = await api.request('/api/pcns', { method: 'POST', session: admin, body: { ...unsignedPayload,
     selectedChange: text, changeRows: validPayload.changeRows.map(row => ({ ...row, optionText: row.text, text })) } });
   assert.equal(create.status, 201);
   assert.equal(create.body.data.changeRows[0].optionText, validPayload.selectedChange);
@@ -158,7 +216,9 @@ test('notification mappings start empty, expose no secret URL and never auto sen
   assert.equal(settings.status, 200);
   assert.ok(settings.body.data.groups.every(group => !group.emails && !group.recipients.length));
   assert.equal(settings.body.data.flowUrl, undefined);
-  const record = (await api.request('/api/pcns', { method: 'POST', session: admin, body: validPayload })).body.data;
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(created.status, 201);
+  const record = await api.repository.seedHistoricalReview(created.body.data.id, validPayload.internalReview);
   const notify = await api.request(`/api/pcns/${record.id}/notifications/workflow`, { method: 'POST', session: admin,
     body: { completedGroup: 'GSC/TET', nextGroupKey: 'signoff.prodEngTet', nextGroup: 'Prod.Eng/TET' } });
   assert.equal(notify.status, 202);

@@ -3,8 +3,9 @@ const sql = require('mssql');
 const { ApiError } = require('./apiError');
 const { emailList } = require('./integrationService');
 const { buildWorkflowNotificationMessage } = require('./notificationTemplate');
-const { actions, legacyDefinitions, normalizeMailRouting, resolveNextMailTarget, settingsVersion } = require('./mailRouting');
+const { actions, legacyDefinitions, normalizeMailRouting, resolveNextMailTarget } = require('./mailRouting');
 const { routeGroups } = require('./workflowAccess');
+const { lockUserMailRouting, readUserMailAssignments, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
 
 const groups = [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'],
@@ -27,6 +28,7 @@ class NotificationService {
   }
 
   async prepare(tx, before, proposed) {
+    await lockUserMailRouting(tx);
     const rows = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (HOLDLOCK) WHERE Id=1');
     const settings = rows.recordset[0] ? JSON.parse(rows.recordset[0].SettingsJson) : {};
     const policy = before ? before.mailRoutingPolicyVersion || 1 : settings.schemaVersion === 2 ? 2 : 1;
@@ -61,19 +63,24 @@ class NotificationService {
       const record = prior && priorKey === nextKey && !changes.invalidated ? proposed : withoutState;
       return { record, plan: { queued: false, reason: 'no_transition' } };
     }
-    const group = normalizeMailRouting(settings).groups.find(entry => entry.key === target.groupKey);
+    const assignments = await readUserMailAssignments(tx);
+    const effective = normalizeMailRouting(applyUserMailRouting(settings, assignments));
+    const group = effective.groups.find(entry => entry.key === target.groupKey);
     const configured = this.mailConfigurationStatus ? this.mailConfigurationStatus() === 'configured' : Boolean(this.mailUrl);
-    const reason = target.blockedReason || (!group?.emails.trim() ? 'recipient_not_configured' : !configured ? 'mail_not_configured' : null);
+    const reason = target.blockedReason || (!group?.effectiveEmails.trim() ? 'recipient_not_configured' : !configured ? 'mail_not_configured' : null);
     const state = { activationId: crypto.randomUUID(), stageKey: target.stageKey, action: target.action,
-      groupKey: target.groupKey, routingVersion: settingsVersion(settings), status: reason ? 'blocked' : 'pending', ...(reason ? { reason } : {}) };
+      groupKey: target.groupKey, routingVersion: effective.routingVersion, status: reason ? 'blocked' : 'pending', ...(reason ? { reason } : {}) };
     const record = { ...proposed, mailRoutingState: state };
     const summary = { queued: false, ...(reason ? { reason } : {}), nextGroupKey: target.groupKey, nextLabel: target.label };
     if (reason) return { record, plan: summary };
     const completed = submitted ? 'Supplier submission' : prerequisiteResolved ? 'TaPBU approval requirement selected' : describeCompletion(changes.completed.at(-1));
     try {
-      const payload = { to: emailList(group.emails), subject: `[PCN] ${record.id} - ${target.label} action required`,
+      const payload = { to: emailList(group.effectiveEmails), subject: `[PCN] ${record.id} - ${target.label} action required`,
         message: buildWorkflowNotificationMessage(record, { completedGroup: completed, nextGroup: target.label, pcnUrl: this.pcnLink(record.id) }),
         senderName: 'Supplier PCN Workflow' };
+      if (group.automaticRecipients.length) payload.routingSnapshot = { groupKey: group.key, manualEmails: group.emails,
+        automaticRecipients: group.automaticRecipients.map(recipient => ({ userId: recipient.userId, email: recipient.email,
+          department: target.departmentKey, signingStep: target.action, directoryId: recipient.id })) };
       return { record, plan: { ...summary, queued: true, payload,
         completedStage: submitted ? 'supplier_submission' : prerequisiteResolved ? 'tapbu_requirement' : changes.completed.at(-1).stageKey } };
     } catch (error) {
@@ -119,34 +126,47 @@ class NotificationService {
     }
     const [nextGroupKey, nextLabel] = route[index + 1];
     if (input.nextGroupKey && input.nextGroupKey !== nextGroupKey) throw new ApiError(400, 'Invalid next notification group');
-    const settings = await this.repository.getNotificationSettings();
+    const tx = this.pool.transaction();
+    await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    try {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, user.id ? user : undefined);
+      const result = await this.queueLegacy(tx, record, user, { completedKey, nextGroupKey, nextLabel, completedLabel: route[index][1] });
+      await tx.commit();
+      return result;
+    } catch (error) {
+      try { await tx.rollback(); } catch { /* Preserve the original database error. */ }
+      throw error;
+    }
+  }
+
+  async queueLegacy(tx, record, user, { completedKey, nextGroupKey, nextLabel, completedLabel }) {
+    const settingsRows = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH(HOLDLOCK) WHERE Id=1');
+    const settings = settingsRows.recordset[0] ? JSON.parse(settingsRows.recordset[0].SettingsJson) : {};
     const recipients = settings.schemaVersion === 2 ? settings.legacyGroups : settings.groups;
     const configured = (recipients || []).find((group) => group.key === nextGroupKey)?.emails;
     if (!configured) return { queued: false, reason: 'recipient_not_configured', nextGroupKey };
     const to = emailList(configured);
     if (!this.mailUrl) return { queued: false, reason: 'mail_not_configured', nextGroupKey };
     if (!/^PCN-\d{4}-\d{4}$/.test(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
-    let link = '';
-    if (this.publicOrigin) {
-      const origin = new URL(this.publicOrigin);
-      if (!['https:', 'http:'].includes(origin.protocol) || origin.username || origin.password) throw new ApiError(503, 'Public PCN origin is invalid');
-      link = new URL(`/form.html?id=${encodeURIComponent(record.id)}`, origin.origin).toString();
-    }
-    const payload = { to, subject: `[PCN] ${record.id} - ${route[index][1]} completed`,
-      message: buildWorkflowNotificationMessage(record, { completedGroup: route[index][1], nextGroup: nextLabel, pcnUrl: link }),
+    const payload = { to, subject: `[PCN] ${record.id} - ${completedLabel} completed`,
+      message: buildWorkflowNotificationMessage(record, { completedGroup: completedLabel, nextGroup: nextLabel, pcnUrl: this.pcnLink(record.id) }),
       senderName: typeof user.displayName === 'string' ? user.displayName.slice(0, 120) : 'Supplier PCN Workflow' };
     const eventKey = `${record.id}:${record.version}:${completedKey}:completed`;
-    const result = await this.pool.request()
+    if (user.id) {
+      const current = await tx.request().input('code', sql.NVarChar(32), record.id)
+        .query('SELECT RowVersion FROM pcn.PcnRequests WITH(HOLDLOCK) WHERE PcnCode=@code AND DeletedAt IS NULL');
+      if (Buffer.from(current.recordset[0]?.RowVersion || []).toString('hex') !== record.version) throw new ApiError(409, 'PCN changed before notification; reload');
+    }
+    const result = await tx.request()
       .input('id', sql.UniqueIdentifier, crypto.randomUUID()).input('eventKey', sql.NVarChar(200), eventKey)
       .input('pcnId', sql.NVarChar(32), record.id).input('version', sql.NVarChar(16), record.version)
       .input('completedGroup', sql.NVarChar(50), completedKey).input('action', sql.NVarChar(30), 'completed')
       .input('to', sql.NVarChar(1000), to).input('payload', sql.NVarChar(sql.MAX), JSON.stringify(payload))
-      .query(`SET XACT_ABORT ON; BEGIN TRY BEGIN TRANSACTION;
-        IF NOT EXISTS (SELECT 1 FROM pcn.NotificationJobs WITH (UPDLOCK, HOLDLOCK) WHERE EventKey=@eventKey)
+      .query(`IF NOT EXISTS (SELECT 1 FROM pcn.NotificationJobs WITH (UPDLOCK, HOLDLOCK) WHERE EventKey=@eventKey)
           INSERT pcn.NotificationJobs(Id,EventKey,PcnId,PcnVersion,CompletedGroup,Action,Recipient,PayloadJson)
           VALUES(@id,@eventKey,@pcnId,@version,@completedGroup,@action,@to,@payload);
-        SELECT Id,Status FROM pcn.NotificationJobs WHERE EventKey=@eventKey;
-        COMMIT; END TRY BEGIN CATCH IF @@TRANCOUNT > 0 ROLLBACK; THROW; END CATCH;`);
+        SELECT Id,Status FROM pcn.NotificationJobs WHERE EventKey=@eventKey;`);
     return { queued: true, jobId: result.recordset[0].Id, status: result.recordset[0].Status, nextGroupKey };
   }
 }

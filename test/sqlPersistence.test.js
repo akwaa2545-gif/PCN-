@@ -41,7 +41,10 @@ function mockPool(results) {
   const transaction = { begin: async () => calls.push('begin'), commit: async () => calls.push('commit'), rollback: async () => calls.push('rollback'),
     request() { return request(); } };
   function request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; },
-    async query(sql) { calls.push({ sql, inputs }); const next = results.shift(); if (next instanceof Error) throw next; return next || { recordset: [], rowsAffected: [1] }; } }; }
+    async query(sql) { calls.push({ sql, inputs });
+      if (sql.includes('sp_getapplock') && inputs.resource === 'pcn:user-mail-routing') return { recordset: [{ LockResult: 0 }] };
+      if (sql.includes('u.MailProfileJson')) return { recordset: [] };
+      const next = results.shift(); if (next instanceof Error) throw next; return next || { recordset: [], rowsAffected: [1] }; } }; }
   return { calls, transaction: () => transaction, request };
 }
 
@@ -52,8 +55,8 @@ test('routing saves compare the locked current version before writing groups or 
   const stale = mockPool([{ recordset: [{ SettingsJson: JSON.stringify(previous) }] }]);
   await assert.rejects(new SqlPcnRepository(stale).saveNotificationSettings(next, 'admin', 'a'.repeat(64)), { statusCode: 409 });
   assert.equal(stale.calls.at(-1), 'rollback');
-  assert.match(stale.calls[1].sql, /UPDLOCK,HOLDLOCK/);
-  assert.equal(stale.calls.filter(call => call.sql).length, 1);
+  assert.match(stale.calls[2].sql, /UPDLOCK,HOLDLOCK/);
+  assert.equal(stale.calls.filter(call => call.sql).length, 2);
   const current = mockPool([{ recordset: [{ SettingsJson: JSON.stringify(previous) }] }]);
   assert.deepEqual(await new SqlPcnRepository(current).saveNotificationSettings(next, 'admin', settingsVersion(previous)), next);
   assert.equal(current.calls.at(-1), 'commit');
@@ -67,7 +70,7 @@ test('stale update rolls back before updater, children or audit writes', async (
   await assert.rejects(new SqlPcnRepository(pool).update('PCN-2026-0001', () => { invoked = true; }, 'actor', '0000000000000001'), { statusCode: 409 });
   assert.equal(invoked, false);
   assert.equal(pool.calls.at(-1), 'rollback');
-  assert.match(pool.calls[1].sql, /UPDLOCK, HOLDLOCK/);
+  assert.match(pool.calls[2].sql, /UPDLOCK, HOLDLOCK/);
 });
 
 test('list uses parameterized owner scope and hides deleted rows', async () => {
@@ -84,7 +87,7 @@ test('create rolls back atomic counter allocation when parent insert fails', asy
   await assert.rejects(new SqlPcnRepository(pool).create({ createdAt: '2026-10-05T00:00:00.000Z', status: 'draft' }, 'actor'), /insert failed/);
   assert.equal(pool.calls.at(-1), 'rollback');
   assert.equal(pool.calls.includes('commit'), false);
-  assert.match(pool.calls[1].sql, /UPDLOCK, HOLDLOCK/);
+  assert.match(pool.calls[2].sql, /UPDLOCK, HOLDLOCK/);
 });
 
 test('year counter refuses code overflow rather than creating an inaccessible code', async () => {
