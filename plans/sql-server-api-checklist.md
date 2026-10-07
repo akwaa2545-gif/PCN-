@@ -1,12 +1,12 @@
 ﻿# SQL Server API inventory and checklist
 
-Updated: 2026-10-06. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. The restored mail HTML, directory compatibility and compact mail-status UI are on main and deployed in signed release pcn-test-6-1. [Actions 37426439232](https://github.com/akwaa2545-gif/PCN-/actions/runs/37426439232) passed 155 tests, 16 isolated browser checks and the dependency audit gate. Host process identity, HTTPS SQL readiness and backend directory lookup passed; authenticated client UI and email delivery remain unverified.
+Updated: 2026-10-07. Sources: `src/apiRoutes.js`, `src/httpServer.js`, auth, workflow and integration modules. Main `9f23256` is deployed in signed release pcn-test-8-1. [Actions 37559651975](https://github.com/akwaa2545-gif/PCN-/actions/runs/37559651975) passed 243 tests, 59 isolated browser checks and the dependency audit gate. Twelve real Windows-client SSPI/TLS checks passed before and after the release restart; actual browser GUI sign-in and email delivery remain unverified.
 
 Setup status: SQL2014-compatible migration applied on `svr120a / Scn_DB`; master-data version 1 and forced-change `itadmin` account created. Seven routing groups were initialized empty. Real SQL smoke checks and isolated browser E2E passed. Current deployment evidence is recorded in [the Windows runbook](windows-test-deployment.md). Existing Firebase data import remains pending.
 
-Department/action routing-v2 is implemented locally, not pushed/deployed. Existing pcn-test-6-1 acceptance predates it. See [routing design](mail-routing-design.md): no new DDL or live SQL/mail action occurred for this change.
+Department/action routing-v2 is on main and deployed in pcn-test-8-1. See [routing design](mail-routing-design.md). It adds no DDL; live routing saves and notification delivery were not exercised by the Windows sign-in checks.
 
-Employee AD provisioning/Windows authentication is also implemented locally, with live AD/IIS/SQL acceptance pending. It requires migration 002 before startup/release selection and is not part of deployed pcn-test-6-1. See [employee Windows-authentication runbook](employee-windows-authentication.md); no deployment, live identity change or AD/SQL write is claimed for this feature.
+Migration 002 is applied on `svr120a / Scn_DB`. The original two users remain, and only the selected SamAccountName `2172172512501` was provisioned as Administrator / IT. Windows sign-in, own AD lookup, administrator reads, header overwrite, password denial and CSRF/logout checks passed against the deployed IIS/NetworkService backend. See the [Windows-authentication runbook](employee-windows-authentication.md) for exact evidence and rollback; no bulk employee import occurred.
 
 ## Shared contract
 
@@ -64,7 +64,7 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 
 Schema roles: `admin`, `reviewer`, `supplier`, `gsc`, `productionengineering`, `qa`, `tapbu`. Department review permissions are enforced; admin/reviewer can manage all review fields. Supplier ownership is per user, not display name/email domain.
 
-Local employee provisioning uses SamAccountName as Empcode and persists AD object GUID/SID for identity matching. Create User assigns explicit PCN roles and department; AD department does not grant signing rights. Existing signing/ownership rules remain unchanged. Stage `AUTH_MODE=password` with `AD_DOMAIN=KEMET.COM`, create a separate AD-mapped administrator, verify the NetBIOS domain and PCN-only IIS proxy/authentication settings, then enable Windows mode. The runbook separates these unverified live steps from existing deployed release and mail-routing test evidence.
+Employee provisioning uses SamAccountName as Empcode and persists AD object GUID/SID for identity matching. Create User assigns explicit PCN roles and department; AD department does not grant signing rights. Existing signing/ownership rules remain unchanged. The staged rollout is complete: `KEMET.COM` / `KEMET` are verified, a separate AD-mapped administrator exists, and PCNTest uses Windows Authentication with the protected PostAuthenticateRequest identity module. The runbook distinguishes real client HTTP checks from isolated browser and workflow tests.
 
 ## Notification health and original mail contract
 

@@ -1,6 +1,6 @@
 ﻿# Department and signoff mail routing
 
-Updated: 2026-10-06. Status: implemented locally, not pushed/deployed. Full local verification passed 184/184 tests with 95.33% lines, 88.87% branches and 95.32% functions; browser checks passed 26/26. Final code, JavaScript, security and accessibility reviews approved with no findings. No live SQL/mail/test send or deployment occurred. The deployed pcn-test-6-1 evidence predates this routing change.
+Updated: 2026-10-07. Status: on main and deployed in signed release pcn-test-8-1. [Current CI](https://github.com/akwaa2545-gif/PCN-/actions/runs/37559651975) passed 243 tests and 59 isolated browser checks. Earlier focused routing coverage and code, JavaScript, security and accessibility reviews passed. Live Windows sign-in checks exercised no routing save, notification send or delivery; routing behavior retains its isolated test evidence.
 
 ## Scope and recipient model
 
@@ -96,7 +96,8 @@ Power Automate still receives exactly to, subject, message and senderName. The e
 - [x] Local save-time transactional handoff, stable activation deduplication, policy coexistence, blocked state and pending-only cancellation.
 - [x] Full local tests/coverage after popup and directory-selection changes: 190/190, 95.49% lines / 88.99% branches / 95.32% functions; browser 42/42. Popup target labels, square styling, keyboard access, selection invalidation and unavailable-lookup rejection verified. Accessibility approved; local served admin.js returned 200 with separated cards, step keys and versioned Save Mail.
 - [x] Final code/JavaScript edge-fix review, independent handoff checks, security and accessibility reviews approved with no findings.
-- [ ] Publish/CI/deploy this routing implementation and verify its target environment separately; current deployed release predates it.
+- [x] Publish through main and signed CI/deployment; current pcn-test-8-1 includes this routing implementation.
+- [ ] Observe a controlled live routing save and handoff/delivery separately from SSO acceptance.
 - [ ] Explicit blocked-handoff retry with current-state/version revalidation and activation reuse.
 - [ ] Explicit legacy-PCN opt-in and controlled legacy-contact maintenance; neither proposed endpoint exists today.
 - [ ] Optional immutable routing event/snapshot history and operational reporting if required; no schema is promised by this release.

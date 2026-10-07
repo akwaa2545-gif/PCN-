@@ -1,6 +1,6 @@
 # Employee provisioning and Windows authentication
 
-Updated: 2026-10-06. Sources: `src/authConfiguration.js`, `src/windowsIdentity.js`, `src/windowsDirectoryService.js`, `src/authService.js`, `src/apiRoutes.js`, `scripts/ad-directory.ps1` and migration 002. This is the local implementation and rollout runbook. Live AD, IIS Windows authentication and migration 002 have not been tested/applied by this work; no deployment or push is claimed. Existing pcn-test-6-1 acceptance predates this feature.
+Updated: 2026-10-07. Sources: `src/authConfiguration.js`, `src/windowsIdentity.js`, `src/windowsDirectoryService.js`, `src/authService.js`, `src/apiRoutes.js`, `scripts/ad-directory.ps1`, `scripts/iis-windows-auth/PcnWindowsIdentityModule.cs`, migration 002 and the live pilot checks below. Windows sign-in is enabled on PCNTest and verified from a real domain client. Only selected employees are provisioned; this rollout did not import all AD users.
 
 ## Identity and permissions
 
@@ -16,13 +16,15 @@ The rollout administrator must use a different AD identity from any existing acc
 
 Apply [002_employee_identity.sql](../sql/migrations/002_employee_identity.sql) using the reviewed migration runner (`npm run db:migrate`) before starting this source version locally or selecting a release containing it. First check the intended database privately with `npm run db:check`; after migration, check readiness again. Migration 002 adds nullable identity/profile columns and filtered unique employee-code/GUID/SID indexes to `pcn.Users`, and permits a null PasswordHash for AD accounts. It does not backfill mappings or change existing user IDs/roles. Startup checks schema readiness and runs no DDL. Production runtime ZIPs do not contain migrations, so the DBA must apply the versioned migration from reviewed source before release cutover.
 
-Before publishing/selecting this feature release, install the reviewed updated `scripts/deploy-pcn-release.ps1` consumer through the existing protected maintenance procedure. Its archive allowlist now admits `scripts/ad-directory.ps1` and `admin-users.js`; an older installed consumer may reject the new archive. Updating repository source alone does not update the protected installed consumer. The local signed-ZIP round-trip check passed; no live consumer update has been performed.
+Migration 002 was applied to `Scn_DB` at `2026-10-07T01:31:43.572Z`; readiness verified both migrations. The original two SQL users were preserved. The SQL login lacked `BACKUP DATABASE` permission. Before applying the additive migration, an encrypted DPAPI logical export of 22 PCN tables / 108 rows was created and its decryption verified. This is not a native SQL backup, and a full database restore was not tested.
+
+Before publishing/selecting this feature release, install the reviewed updated `scripts/deploy-pcn-release.ps1` consumer through the existing protected maintenance procedure. Its archive allowlist admits `scripts/ad-directory.ps1` and `admin-users.js`; an older installed consumer may reject the new archive. Updating repository source alone does not update the protected installed consumer. The protected live consumer was updated for this rollout and now verifies the exact NetworkService process identity.
 
 The Windows-only helper performs bounded, read-only LDAP searches using .NET DirectoryServices under the **Node service's identity**. It accepts no AD password and writes nothing to AD. AD employee search is separate from the Power Automate directory endpoint used for mail recipients. Confirm DNS/domain-controller reachability and that the chosen service identity can read the required enabled-user attributes.
 
-The current deployed service uses LocalService, which presents anonymous credentials on the network; its successful SQL connection does not establish AD access. An approved domain service identity with appropriate read access may be required. Preserve the unique service-SID ACLs when changing the service logon identity; do not grant all LocalService/domain users access or change unrelated services. This identity change has not been performed. [Microsoft LocalService documentation](https://learn.microsoft.com/en-us/windows/win32/services/localservice-account).
+The pilot service now runs as `NT AUTHORITY\NetworkService`, using the domain-joined host's machine credentials for read-only AD access. Its exact Node process owner and successful AD lookup under that identity were verified. The unique `NT SERVICE\SupplierPCNTest` ACLs were retained; the shared NetworkService account has no read grant on the SQL/environment file. The former LocalService deployment is historical evidence only; its SQL connectivity did not establish AD access.
 
-`AD_DOMAIN=KEMET.COM` is the DNS directory domain. Verify the actual NetBIOS name rather than assuming it is KEMET. From an authorized Windows administration session with the AD PowerShell module, use this read-only check:
+`AD_DOMAIN=KEMET.COM` is the verified DNS directory domain and `WINDOWS_AUTH_DOMAIN=KEMET` is its verified NetBIOS name. For another environment, verify these values rather than assuming them. From an authorized Windows administration session with the AD PowerShell module, use this read-only check:
 
 ```powershell
 Get-ADDomain -Identity 'KEMET.COM' | Select-Object DNSRoot, NetBIOSName
@@ -46,14 +48,14 @@ PUBLIC_ORIGIN=https://172.30.77.137:8443
 
 1. Apply migration 002 and verify the service identity's AD reads. Keep password mode while the existing administrator selects AD employees and creates the separate AD-mapped administrator with role/department. No PCN password is entered for those accounts; they cannot sign in until Windows mode is enabled.
 2. Preserve a private backup of the PCN site's IIS settings and service configuration. Install the IIS Windows Authentication feature if needed, then configure **PCNTest only** with Windows Authentication enabled, Anonymous Authentication disabled and SSL required. Leave other sites unchanged. [Microsoft IIS Windows Authentication documentation](https://learn.microsoft.com/en-us/iis/configuration/system.webServer/security/authentication/windowsAuthentication/).
-3. Keep the backend bound exclusively to loopback. Configure the PCN reverse-proxy rule to overwrite the three headers below on every request, including caller-supplied/duplicate values. Confirm authenticated `LOGON_USER` is populated at the proxy rule; an empty value must fail Windows sign-in. Permit the required request-header server variables through the administrator-controlled IIS configuration. [Microsoft URL Rewrite header/server-variable documentation](https://learn.microsoft.com/en-us/iis/extensions/url-rewrite-module/setting-http-request-headers-and-iis-server-variables).
-4. Generate a private, cryptographically random proxy key containing 32–256 printable non-whitespace ASCII characters. Store the same value in protected backend `WINDOWS_AUTH_PROXY_KEY` and the private PCN IIS proxy configuration. Never put it in source, a release, browser code, logs or this document. IIS needs access only to its proxy-key configuration, **not** to the backend SQL/environment file.
+3. Keep the backend bound exclusively to loopback. Install the reviewed `PcnWindowsIdentityModule` only on PCNTest, with its application pool using CLR v4 and Integrated pipeline mode. URL Rewrite runs before Windows authentication, so it cannot establish the authenticated identity. The module clears caller-supplied identity headers at BeginRequest, then replaces the three headers below at PostAuthenticateRequest. It requires TLS, IIS's native authenticated Windows logon token, matching `LOGON_USER`, the configured domain and a valid server-observed client IP. Empty or invalid identity fails closed. The module also removes the incoming Windows Authorization token before ARR forwards to Node.
+4. Generate 32 random bytes on the server and encode them as a 44-character base64 proxy key. Store the same value in protected backend `WINDOWS_AUTH_PROXY_KEY` and the separate IIS module key file. Never put it in source, a release, browser code, logs or this document. Grant the PCN application pool read access only to its key file; it receives **no** access to the backend SQL/environment file. Preserve administrator/SYSTEM maintenance access and the backend service-specific ACLs.
 5. Set `AUTH_MODE=windows` and `WINDOWS_AUTH_DOMAIN` to the verified NetBIOS name in the external backend configuration. Restart only the PCN service after its IIS/AD/schema prerequisites are ready, then verify sign-in using the separate provisioned AD administrator.
 
 | IIS request header / server variable | Server-owned value |
 |---|---|
 | X-PCN-Client-IP / HTTP_X_PCN_CLIENT_IP | `{REMOTE_ADDR}` |
-| X-PCN-Windows-User / HTTP_X_PCN_WINDOWS_USER | `{LOGON_USER}` |
+| X-PCN-Windows-User / HTTP_X_PCN_WINDOWS_USER | Native Windows logon identity, verified against `LOGON_USER` after authentication |
 | X-PCN-Windows-Auth-Key / HTTP_X_PCN_WINDOWS_AUTH_KEY | Private proxy key; no literal value in committed templates |
 
 The backend accepts Windows identity only from a loopback socket with exactly one user/key header, the matching key and configured domain. Cookies/CSRF/origin checks remain required. Protected data and session requests revalidate AD identity and SQL session/stamp mapping; a cookie alone is insufficient. Logout revokes the SQL session and clears its cookie without requiring AD availability, while enforcing same-origin and the SQL session's CSRF token. Password sign-in/change endpoints are disabled in Windows mode. Domain credentials are handled by Windows/IIS, never submitted to the PCN API.
@@ -64,7 +66,7 @@ AD outage makes session validation fail closed with 503. An invalid/expired sess
 
 Normal success/error envelopes and existing admin authorization/CSRF rules apply.
 
-| Endpoint | Local implemented behavior |
+| Endpoint | Implemented behavior |
 |---|---|
 | GET /api/auth/config | Public `{mode,employeeProvisioningConfigured}` only; no domains, keys or directory infrastructure |
 | GET /api/admin/employees?query=... | Admin active AD search, trimmed 2–100 characters, at most 20 profiles; data array of directoryId/employeeCode/displayName/email/adDepartment, no SID |
@@ -76,13 +78,16 @@ The login page reads auth/config and offers Windows continuation in Windows mode
 
 ## Acceptance and rollback
 
-- [ ] Apply/record migration 002 on the intended database and check schema readiness before deploying this version.
-- [ ] Verify DNS and NetBIOS names, service-identity LDAP access and enabled-user search/create/link behavior.
-- [ ] Confirm PCN-only IIS authentication/SSL settings and authenticated LOGON_USER header overwrite; reject missing, duplicate, forged and wrong-domain/key identity.
-- [ ] Confirm remote port 3000 remains unreachable, unrelated IIS sites are unchanged and secrets remain protected.
-- [ ] Verify provisioned AD administrator login, unprovisioned/disabled-user denial, session/Windows-user mismatch and password endpoint denial.
-- [ ] Verify existing signing/role/ownership restrictions and account-link ID/session behavior in the pilot.
+Live evidence recorded on 2026-10-07:
 
-These live checks remain pending. Keep prior password-mode configuration and its **unlinked** administrator for rollback. If cutover fails, restore the PCN site's prior authentication/proxy settings and `AUTH_MODE=password`, select a schema-compatible release and restart only PCN. Returning to password mode invalidates Windows-account sessions and does not automatically unlink accounts or make their retained legacy password hashes usable; linked accounts cannot use password login/change. Retain the additive migration and preserve data rather than attempting automatic schema rollback.
+- Migration 002 and SQL readiness passed; the original two users were preserved. Only SamAccountName `2172172512501` was added as a mapped PCN administrator in department `it`.
+- DNS `KEMET.COM`, NetBIOS `KEMET`, the exact NetworkService owner and read-only AD lookup under the service identity passed.
+- PCNTest has Windows Authentication enabled, Anonymous Authentication disabled and SSL required. The required IIS features were enabled without a reboot. Default Web Site's `*:80` binding remains unchanged.
+- Twelve checks from a real Windows client using curl SSPI and the pinned TLS certificate passed before and after the automatic `pcn-test-8-1` deployment: Windows configuration, the provisioned administrator login, authenticated session, master data, admin users, own AD lookup, forged identity-header replacement, password endpoint denial, missing-CSRF logout denial, valid logout and the logged-out session state.
+- The IIS module compiled and passed 18 boundary cases with C# and security review. CI for main `9f23256` passed 243 unit/API integration tests and 59 isolated browser checks. These adapters do not establish live browser GUI behavior.
+
+Actual browser GUI sign-in, pilot account linking, unprovisioned/disabled-user denial and signing/ownership behavior remain to be observed on the live pilot. Their isolated automated coverage is not a claim that those production data flows were exercised. No test notification email or operational PCN save was sent by the SSO acceptance checks.
+
+Keep prior password-mode configuration and its **unlinked** administrator for rollback. If cutover fails, restore the PCN site's prior authentication/proxy/module settings and `AUTH_MODE=password`, select a schema-compatible release and restart only PCN. Keep the protected deployment consumer and service-account choice consistent: the current consumer requires NetworkService, so reverting to LocalService also requires restoring its corresponding consumer. Returning to password mode invalidates Windows-account sessions and does not automatically unlink accounts or make their retained legacy password hashes usable; linked accounts cannot use password login/change. Retain the additive migration and preserve data rather than attempting automatic schema rollback.
 
 Related: [API inventory](sql-server-api-checklist.md), [table mapping](sql-server-table-mapping.md), [Windows pilot runbook](windows-test-deployment.md).
