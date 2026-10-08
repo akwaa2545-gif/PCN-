@@ -55,6 +55,19 @@ test('user list groups multiple roles without exposing password hashes', async (
   assert.equal(users[0].passwordHash, undefined);
 });
 
+test('first employee sign-in stores a roleless account without PCN grants', async () => {
+  const row = { Id: 'viewer-id', Username: '001234', EmployeeCode: '001234', NormalizedEmployeeCode: '001234',
+    IdentityProvider: 'employee-code', IsActive: true, SecurityStamp: 'stamp' };
+  const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [1] }, { recordsets: [[row], []] }]);
+  const viewer = await repo.createEmployeeViewer({ employeeCode: '001234', displayName: 'Employee Name' });
+  assert.deepEqual(viewer.roles, []);
+  assert.equal(viewer.identityProvider, 'employee-code');
+  assert.equal(state.calls[0].inputs.normalizedEmployeeCode, '001234');
+  assert.match(state.calls[0].query, /DepartmentKey.*NULL/);
+  assert.equal(state.calls.some(call => /INSERT pcn.UserRoles/i.test(call.query)), false);
+  assert.equal(state.committed, true);
+});
+
 test('create user stores hash and commits normalized identity and role together', async () => {
   const { repo, state } = fixture([{ rowsAffected: [1] }, { rowsAffected: [1] }, { recordsets: [[{ Id: 'created', Username: 'ITadmin', Email: null }], [{ Name: 'admin' }]] }]);
   const result = await repo.createUser({ username: 'ITadmin', email: null, passwordHash: 'salted-hash', roles: ['admin'], mustChangePassword: true });

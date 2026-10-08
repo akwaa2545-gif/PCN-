@@ -131,6 +131,25 @@ test('employee creation requires selecting a lookup result and editing search cl
   assert.equal(call.options.body, JSON.stringify({ employeeCode: '001234', roles: ['admin'], department: 'it', signingStep: null }));
 });
 
+test('selecting an unassigned employee opens role assignment instead of creating a duplicate', async () => {
+  const existing = { id: 'viewer-id', ...employee, username: employee.employeeCode, roles: [], department: null,
+    signingStep: null, mailProfile: null, identityProvider: 'employee-code', version: '0011223344556677' };
+  const page = await usersPage([existing]);
+  await page.select();
+  assert.equal(page.element('employeeFormTitle').textContent, 'Edit employee access');
+  assert.match(page.element('employeeSearchStatus').textContent, /already has an account/);
+  page.element('employeeRole').value = 'admin';
+  page.element('employeeRole').events.change();
+  page.element('employeeDepartment').value = 'it';
+  page.element('employeeDepartment').events.change();
+  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
+  assert.equal(page.calls.filter((call) => call.options?.method === 'POST').length, 0);
+  const write = page.calls.find((call) => call.options?.method === 'PATCH');
+  assert.equal(write.url, '/api/admin/users/viewer-id');
+  assert.deepEqual(JSON.parse(write.options.body), { roles: ['admin'], department: 'it', signingStep: null,
+    isActive: true, version: existing.version });
+});
+
 const verifiedMail = { id: 'mail-id', email: 'person@example.test', displayName: 'Employee' };
 test('four PCN roles derive department authority and require a verified recipient for signing', () => {
   const api = users();

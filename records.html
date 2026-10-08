@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PCN Records | PCN Portal System</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/records.css" />
+  </head>
+  <body class="admin-page records-page">
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="admin-header-brand">
+          <img class="admin-header-logo" src="/tokin-header-logo.png" alt="TOKIN a YAGEO company" />
+          <div>
+            <p class="eyebrow">NSN-000244</p>
+            <h1>PCN Portal System</h1>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <a class="ghost-link" id="createPcnLink" href="/create" hidden>Create PCN</a>
+          <a class="ghost-link" id="adminRecordsLink" href="/admin#records" hidden>Admin</a>
+          <div class="account-menu" id="accountMenu"></div>
+        </div>
+      </header>
+
+      <main class="access-pending" id="accessPending" aria-labelledby="accessPendingTitle" hidden>
+        <p class="section-label">ACCOUNT ACCESS</p>
+        <h2 id="accessPendingTitle">Your PCN access is pending</h2>
+        <p>Your PCN workspace will be available after an administrator assigns your role. Open your profile to see your current access.</p>
+      </main>
+
+      <main class="records-main" id="recordsWorkspace" hidden>
+        <section class="admin-panel records-panel" aria-labelledby="recordsTitle">
+          <div class="panel-header records-panel-header">
+            <div>
+              <h2 id="recordsTitle">PCN Records</h2>
+              <p id="recordsAccessMessage" class="records-intro">Loading your access...</p>
+            </div>
+            <div class="records-header-actions">
+              <span class="count-badge" id="recordsCount">0</span>
+              <button class="ghost-button records-refresh" id="recordsRefreshButton" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="records-toolbar">
+            <label for="recordsSearch">Search records</label>
+            <input id="recordsSearch" type="search" placeholder="PCN code, supplier, material or status" autocomplete="off" />
+          </div>
+          <p id="recordsMessage" class="records-message" role="status" aria-live="polite">Loading records...</p>
+          <div class="admin-table-wrap" role="region" aria-label="PCN records table" tabindex="0">
+            <table class="admin-table records-table">
+              <thead>
+                <tr><th scope="col">PCN code</th><th scope="col">Status</th><th scope="col">Risk</th><th scope="col">Supplier</th><th scope="col">Material</th><th scope="col">Updated</th></tr>
+              </thead>
+              <tbody id="recordsRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/session-client.js"></script>
+    <script src="/records.js"></script>
+  </body>
+</html>

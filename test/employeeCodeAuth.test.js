@@ -21,6 +21,17 @@ function fixture() {
   const repository = {
     async getUserByEmployeeCode(code) { return state.user?.employeeCode?.toLowerCase() === code.toLowerCase() ? state.user : null; },
     async getUserById() { return state.user; },
+    async createEmployeeViewer(profile) {
+      if (state.user?.username?.toLowerCase() === profile.employeeCode.toLowerCase()) {
+        const { ApiError } = require('../src/apiError');
+        throw new ApiError(409, 'Employee account changed. Try signing in again');
+      }
+      state.viewerCreated = profile;
+      state.user = { id: 'viewer-1', username: profile.employeeCode, employeeCode: profile.employeeCode,
+        normalizedEmployeeCode: profile.employeeCode.toLowerCase(), identityProvider: 'employee-code',
+        displayName: profile.displayName, roles: [], department: null, isActive: true, securityStamp: 'viewer-stamp' };
+      return state.user;
+    },
     async saveSession(session) { state.sessions = [...state.sessions, session]; },
     async getSession(hash) { return state.sessions.find(session => session.tokenHash === hash); },
     async revokeSession(hash) {
@@ -136,16 +147,39 @@ test('employee code sign-in preserves leading zeros and uses provisioned PCN gra
   assert.equal((await service.session(login.token)).user.id, 'user-1');
 });
 
-test('unknown, unassigned, disabled and retired identities cannot sign in or self-create', async () => {
-  const patches = [{ person: null }, { user: null }, { user: { isActive: false } },
+test('first sign-in creates a roleless viewer account for a verified employee', async () => {
+  const { state, service } = fixture();
+  state.user = null;
+  const login = await service.login({ employeeCode: '001234' });
+  assert.equal(state.viewerCreated.employeeCode, '001234');
+  assert.deepEqual(login.user.roles, []);
+  assert.equal(login.user.department, null);
+  assert.equal((await service.session(login.token)).user.id, 'viewer-1');
+});
+
+test('an administrator role assignment replaces view-only access on the next sign-in', async () => {
+  const { state, service } = fixture();
+  state.user = null;
+  const viewer = await service.login({ employeeCode: '001234' });
+  state.user = { ...state.user, roles: ['qa'], department: 'qaTet', securityStamp: 'assigned-stamp' };
+  assert.equal(await service.session(viewer.token), null);
+  const assigned = await service.login({ employeeCode: '001234' });
+  assert.deepEqual(assigned.user.roles, ['qa']);
+  assert.equal(assigned.user.department, 'qaTet');
+  assert.equal(state.viewerCreated.employeeCode, '001234');
+});
+
+test('unknown, disabled and retired identities cannot sign in or self-create', async () => {
+  const patches = [{ person: null }, { user: { isActive: false } },
     { user: { identityProvider: 'password' } }, { user: { identityProvider: 'retired-windows' } },
     { user: { employeeCode: '1234' } }, { user: { normalizedEmployeeCode: '1234' } },
     { user: { employeeCode: 'invalid\\code' } }];
   for (const patch of patches) {
     const { state, service } = fixture();
     Object.assign(state, patch.user ? { user: { ...state.user, ...patch.user } } : patch);
-    await assert.rejects(service.login({ employeeCode: '001234' }), error => [401, 403].includes(error.statusCode));
+    await assert.rejects(service.login({ employeeCode: '001234' }), error => [401, 403, 409].includes(error.statusCode));
     assert.equal(state.sessions.length, 0);
+    assert.equal(state.viewerCreated, undefined);
     assert.equal(state.created, undefined);
   }
 });

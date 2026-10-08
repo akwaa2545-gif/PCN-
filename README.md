@@ -1,10 +1,10 @@
-﻿# Supplier PCN workflow — SQL Server
+# Supplier PCN workflow — SQL Server
 
 Updated: 2026-10-07.
 
 The Node API stores PCN form data, internal review, comments, approvals, audit history, routing settings and application accounts in SQL Server. The browser calls the API; the active application does not use Firebase Authentication or Firestore. The existing target is `svr120a / Scn_DB`.
 
-Employee-code-only login is deployed, backed by read-only `[KEY_Code_DB].[dbo].[tblEmployee]` on the same `svr120a` server. Administrators select an existing employee, then grant PCN roles and a PCN department; the 1,935-row employee source is not imported or modified. Signed `pcn-test-10-1`, migration 003 and the approved separate Administrator / IT account are accepted. See [the employee-code plan](plans/employee-code-authentication.md) for the source model and complete evidence.
+Employee-code-only login is backed by read-only `[KEY_Code_DB].[dbo].[tblEmployee]` on the same `svr120a` server. An employee in that source receives a roleless PCN account on first sign-in. Until an administrator assigns a PCN role and department in Users, the employee sees an access-pending page and a no-role notice inside the profile panel, with Sign Out available. The employee source is not imported or modified. Signed `pcn-test-10-1`, migration 003 and the approved separate Administrator / IT account are accepted. See [the employee-code plan](plans/employee-code-authentication.md) for the source model and historical deployment evidence.
 
 Migrations 001/002/003 are applied on SQL Server 2014 (compatibility 120), with 21 application tables plus `SchemaMigrations` and master-data version 1. Migration 003 retired former AD mappings without automatically granting employee access. The separate verified employee `2205529` / WATCHARAPHONG BANYEN has Administrator / IT access; the prior three accounts were preserved. The first `itadmin` account and empty initial mail mapping are historical setup details. Existing Firebase records have not been imported.
 
@@ -59,9 +59,9 @@ finally {
 }
 ```
 
-`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Maintenance bootstrap creates the password administrator only if that username is absent. Passwords are stored as Argon2id hashes; first password login requires changing the password, and changes revoke sessions. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Normal employee-code accounts have no PCN password and must be explicitly provisioned from the source lookup.
+`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Maintenance bootstrap creates the password administrator only if that username is absent. Passwords are stored as Argon2id hashes; first password login requires changing the password, and changes revoke sessions. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Employee-code accounts have no PCN password. First sign-in creates a roleless account; PCN access requires administrator role assignment.
 
-`AUTH_MODE=employee-code` is the normal default; `AUTH_MODE=password` is an explicit maintenance choice for eligible unlinked legacy accounts. Employee codes remain text, including leading zeros. The source provides English/Thai names, job title and department hints but no email or active flag. Current source presence, active PCN account/provider and assigned PCN roles determine access; source outages fail closed with 503. Create User lets administrators select an employee lookup result and assign the roles/department manually. AD, Windows SSO, its proof headers/module/helper and its sign-in route are removed from the replacement runtime. Existing PCN signing/ownership rules and mail-directory lookup are preserved.
+`AUTH_MODE=employee-code` is the normal default; `AUTH_MODE=password` is an explicit maintenance choice for eligible unlinked legacy accounts. Employee codes remain text, including leading zeros. The source provides English/Thai names, job title and department hints but no email or active flag. Current source presence allows sign-in; administrator-assigned roles are required to access PCN records. Source outages fail closed with 503. First sign-in creates an account with no role or department, visible in Admin → Users for assignment. AD, Windows SSO, its proof headers/module/helper and its sign-in route are removed from the replacement runtime. Existing PCN signing/ownership rules and mail-directory lookup are preserved.
 
 Mail routing starts empty. Leave `POWER_AUTOMATE_MAIL_URL`, `POWER_AUTOMATE_DIRECTORY_URL` and `INTEGRATION_ALLOWED_HOSTS` empty until configured. No default recipient is used.
 

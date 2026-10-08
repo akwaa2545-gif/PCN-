@@ -1,0 +1,92 @@
+.records-page [hidden] { display: none !important; }
+.records-main { max-width: 1280px; margin: 28px auto; }
+.records-panel { overflow: hidden; }
+.records-panel-header { align-items: center; margin: 0; }
+.records-panel-header .section-label { margin: 0 0 6px; }
+.records-panel-header h2 { margin: 0; }
+.records-intro { margin: 9px 0 0; color: #667085; font-size: 14px; }
+.records-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+body.records-page .records-refresh {
+  min-height: 38px;
+  padding: 0 16px;
+  border-color: var(--mes-gold);
+  background: var(--mes-gold);
+  color: #241a00;
+  font-weight: 700;
+}
+body.records-page .records-refresh:hover { border-color: var(--mes-gold-dark); background: var(--mes-gold-dark); color: #241a00; }
+body.records-page .records-refresh:focus-visible { outline: 3px solid var(--mes-blue-dark); outline-offset: 2px; }
+.records-toolbar { display: grid; gap: 7px; max-width: 480px; padding: 18px 20px 0; }
+.records-toolbar label { color: #475467; font-size: 13px; font-weight: 700; }
+.records-toolbar input { width: 100%; min-height: 42px; padding: 0 12px; border: 1px solid #c7d2e0; border-radius: 6px; background: #fff; font: inherit; }
+.records-message { margin: 0; padding: 12px 20px; color: #667085; font-size: 13px; }
+.records-table a { color: #242b78; font-weight: 700; }
+.records-empty { padding: 26px 20px; color: #667085; text-align: center; }
+.access-pending {
+  max-width: 480px;
+  margin: clamp(56px, 12vh, 120px) auto 30px;
+  padding: 52px 44px;
+  border: 1px solid #dce4f0;
+  border-top: 4px solid #efbf4d;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 20px 55px rgba(15, 35, 78, 0.08);
+  text-align: center;
+}
+.access-pending .section-label { margin: 0 0 10px; color: #8b6418; font-size: 11px; font-weight: 800; letter-spacing: 0.16em; }
+.access-pending h2 { margin: 0 0 12px; color: #182e57; font-size: clamp(24px, 3vw, 30px); }
+.access-pending > p:last-child { max-width: 500px; margin: 0 auto; color: #53647d; line-height: 1.6; }
+@media (max-width: 720px) {
+  .records-main { margin: 16px auto; }
+  .records-header-actions { width: 100%; justify-content: space-between; margin-left: 0; }
+  .records-table { min-width: 700px; }
+  .access-pending { margin: 32px 16px; padding: 40px 24px; }
+}
+
+body.records-page .records-main { max-width: 1480px; margin: 0 auto; padding: 24px 0 36px; }
+body.records-page .records-panel-header { padding: 24px 28px; }
+body.records-page .records-panel-header .section-label { color: #60738d; }
+body.records-page .records-intro { color: #60738d; }
+body.records-page .records-toolbar { max-width: 560px; padding: 22px 28px 0; }
+body.records-page .records-toolbar label { color: #405674; }
+body.records-page .records-toolbar input {
+  min-height: 46px;
+  border-color: #cbd8e5;
+  border-radius: 8px;
+  background: #fff;
+}
+body.records-page .records-message { padding: 14px 28px; color: #60738d; }
+body.records-page .records-refresh {
+  border-color: var(--portal-action-yellow);
+  background: var(--portal-action-yellow);
+  color: #192c46;
+  box-shadow: none;
+}
+body.records-page .records-refresh:hover {
+  border-color: var(--portal-action-yellow-hover);
+  background: var(--portal-action-yellow-hover);
+  color: #192c46;
+}
+body.records-page .records-refresh:disabled {
+  border-color: #dfe5ed;
+  background: #dfe5ed;
+  color: #68788b;
+  box-shadow: none;
+}
+body.records-page .records-table a { color: #1d4d80; }
+body.records-page .access-pending {
+  border-color: #dbe5ee;
+  border-top: 4px solid #63c8d6;
+  box-shadow: 0 20px 48px rgba(22, 52, 91, 0.1);
+}
+body.records-page .access-pending .section-label { color: #1d7090; }
+
+@media (max-width: 1520px) {
+  body.records-page .records-main { margin-inline: 24px; }
+}
+@media (max-width: 720px) {
+  body.records-page .records-main { margin-inline: 12px; padding-top: 12px; }
+  body.records-page .records-panel-header { padding: 18px 16px; }
+  body.records-page .records-toolbar { padding: 18px 16px 0; }
+  body.records-page .records-message { padding-inline: 16px; }
+}

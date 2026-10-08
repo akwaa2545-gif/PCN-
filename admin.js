@@ -1624,7 +1624,7 @@
     window.setTimeout(() => {
       toast.classList.add("is-hiding");
       window.setTimeout(() => toast.remove(), 220);
-    }, type === "error" ? 5200 : 3200);
+    }, type === "error" ? 9000 : type === "warning" ? 7000 : 3200);
   }
 
   function renderProgress() {

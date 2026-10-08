@@ -2,6 +2,8 @@
 
 Updated: 2026-10-07. Signed `pcn-test-10-1` uses employee-code authentication with read-only `KEY_Code_DB.dbo.tblEmployee` lookup. Migration 003, the separate verified `2205529` Administrator / IT account and PCN-only IIS cutover are complete. Real local and certificate-validated HTTPS API acceptance each passed 26 checks; local SQL-backed headless browser login/Users/lookup/controls/logout passed. See [the acceptance record](employee-code-authentication.md#acceptance--2026-10-07); the user's own Edge GUI and email delivery remain unobserved.
 
+Current workspace change: first sign-in from a source employee creates a roleless PCN account. The employee sees an access-pending page and a no-role notice inside the profile panel, with Sign Out available until an administrator assigns a PCN role. Record API access requires a role. The route table below documents the signed baseline.
+
 PCN records, workbook data, users, roles, departments, sessions and routing remain in `Scn_DB`. Existing Firebase data import remains pending. Migrations 001/002 were unchanged; 003 was applied at `2026-10-07T03:35:30.942Z`, retiring former AD mappings without importing the 1,935 source employees. The prior three PCN accounts were preserved and one separately approved employee administrator was added.
 ## Shared contract
 

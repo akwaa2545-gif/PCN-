@@ -8,7 +8,7 @@ const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 
-const assets = new Set(['admin.html','form.html','index.html','login.html','app.js','admin.js','admin-users.js','login.js','session-client.js','auth.css','admin.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
+const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
 
 function createRequestHandler(options = {}) {
@@ -51,6 +51,7 @@ async function serveStatic(req, res, url, rootDir) {
   let file = route.replace(/^\/+/, '');
   if (['/','/admin'].includes(route)) file = 'admin.html';
   if (route === '/login') file = 'login.html';
+  if (route === '/records') file = 'records.html';
   if (route === '/create' || /^\/P(?:CN|NC)-\d{4}-\d{3,4}$/i.test(route)) file = 'form.html';
   if (!assets.has(file)) throw new ApiError(404, 'File not found');
   let content;

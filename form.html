@@ -17,18 +17,20 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <a class="ghost-link" href="/admin">Admin</a>
+          <a class="ghost-link" href="/records">Records</a>
+          <a class="ghost-link" href="/admin" id="formAdminLink">Admin</a>
           <button class="ghost-button" id="loadDemoButton" type="button">Load Demo</button>
-          <button class="primary-button" id="submitButton" type="button">Submit PCN</button>
           <div class="account-menu" id="accountMenu"></div>
         </div>
       </header>
 
-      <div class="app-notice" id="appNotice" hidden>
-        <strong id="appNoticeTitle"></strong>
-        <span id="appNoticeMessage"></span>
+      <div class="app-feedback-area">
+        <div class="app-toast-stack" id="appToastStack" aria-live="polite" aria-atomic="true"></div>
+        <div class="app-notice" id="appNotice" role="status" aria-live="polite" aria-atomic="true" hidden>
+          <strong id="appNoticeTitle"></strong>
+          <span id="appNoticeMessage"></span>
+        </div>
       </div>
-      <div class="app-toast-stack" id="appToastStack" aria-live="polite" aria-atomic="true"></div>
       <div class="pcn-save-overlay" id="pcnSaveOverlay" aria-live="polite" aria-label="Saving PCN" hidden>
         <div class="pcn-progress-circle" aria-hidden="true">
           <span></span>
@@ -445,6 +447,13 @@
           </div>
         </aside>
       </main>
+      <div class="form-action-dock" role="region" aria-label="PCN save action">
+        <div class="form-action-copy">
+          <strong>PCN submission</strong>
+          <span>Save your work when the change notice is ready.</span>
+        </div>
+        <button class="primary-button" id="submitButton" type="button">Submit PCN</button>
+      </div>
     </div>
 
     <script src="/session-client.js"></script>

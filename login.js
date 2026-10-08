@@ -6,7 +6,7 @@
   }
   function employeeLoginBody(code) {
     const employeeCode = typeof code === 'string' ? code.trim() : '';
-    if (!/^[0-9]{7}$/.test(employeeCode)) throw new Error('Enter your 7 digit Employee ID.');
+    if (!/^[0-9]{7}$/.test(employeeCode)) throw new Error('Enter your 7-digit Employee ID.');
     return { employeeCode };
   }
   async function init() {
@@ -14,16 +14,34 @@
     const changeForm = document.getElementById('passwordChangeForm');
     const message = document.getElementById('authMessage');
     const employeeForm = document.getElementById('employeeLoginForm');
+    const employeeMessage = document.getElementById('employeeAuthMessage');
+    const authIntro = document.getElementById('authIntro');
     const retryButton = document.getElementById('authRetryButton');
     const employeeCodeInput = document.getElementById('employeeCode');
+    const employeeDigits = Array.from({ length: 7 }, (_, index) => document.getElementById(`employeeDigit${index + 1}`));
+    let employeeCodeFocused = false;
     let mode = null;
     const returnTo = window.PCN_SESSION.safeReturnTo(new URLSearchParams(window.location.search).get('returnTo'));
-    const showMessage = (text) => { message.textContent = text; };
-    employeeCodeInput.addEventListener('input', () => {
-      employeeCodeInput.value = employeeCodeInput.value.replace(/[^0-9]/g, '').slice(0, 7);
-      showMessage('');
-    });
+    const destinationFor = (user) => Array.isArray(user?.roles) && user.roles.length ? returnTo : '/records';
+    const showMessage = (text) => {
+      const inEmployeeForm = mode === 'employee-code' && !employeeForm.hidden;
+      message.textContent = inEmployeeForm ? '' : text;
+      employeeMessage.textContent = inEmployeeForm ? text : '';
+    };
+    function renderEmployeeCode() {
+      const digits = employeeCodeInput.value.replace(/[^0-9]/g, '').slice(0, 7);
+      employeeCodeInput.value = digits;
+      employeeDigits.forEach((slot, index) => {
+        slot.textContent = digits[index] || '';
+        slot.classList.toggle('is-active', employeeCodeFocused && index === digits.length && digits.length < 7);
+      });
+    }
+    employeeCodeInput.addEventListener('input', () => { renderEmployeeCode(); showMessage(''); });
+    employeeCodeInput.addEventListener('change', () => { renderEmployeeCode(); showMessage(''); });
+    employeeCodeInput.addEventListener('focus', () => { employeeCodeFocused = true; renderEmployeeCode(); });
+    employeeCodeInput.addEventListener('blur', () => { employeeCodeFocused = false; renderEmployeeCode(); });
     function showChangePassword() {
+      authIntro.hidden = false;
       loginForm.hidden = true;
       employeeForm.hidden = true;
       changeForm.hidden = false;
@@ -57,7 +75,7 @@
         const body = employeeLoginBody(employeeCodeInput.value);
         const session = await window.PCN_SESSION.fetch('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
         if (!session.authenticated) throw new Error('Employee sign-in did not complete. Please try again.');
-        window.location.assign(returnTo);
+        window.location.assign(destinationFor(session.user));
       });
     });
     changeForm.addEventListener('submit', (event) => {
@@ -83,6 +101,7 @@
       loginForm.hidden = true;
       employeeForm.hidden = true;
       changeForm.hidden = true;
+      authIntro.hidden = true;
       retryButton.hidden = true;
       showMessage('Loading sign-in options...');
       try {
@@ -90,16 +109,17 @@
         const session = await window.PCN_SESSION.load();
         showMessage('');
         if (session.authenticated && session.user?.mustChangePassword && mode === 'password') showChangePassword();
-        else if (session.authenticated) window.location.assign(returnTo);
+        else if (session.authenticated) window.location.assign(destinationFor(session.user));
         else {
           loginForm.hidden = mode !== 'password';
           employeeForm.hidden = mode !== 'employee-code';
-          document.getElementById('authDescription').textContent = mode === 'employee-code'
-            ? 'Enter your 7 digit Employee ID to continue to the PCN portal.'
-            : 'Enter your credentials to continue to the PCN portal.';
-          document.getElementById(mode === 'employee-code' ? 'employeeCode' : 'username').focus();
+          authIntro.hidden = mode !== 'password';
+          document.getElementById('authDescription').textContent = 'Enter your credentials to continue to the PCN portal.';
+          if (mode === 'employee-code') {
+            renderEmployeeCode();
+          } else document.getElementById('username').focus();
         }
-      } catch (error) { mode = null; showMessage(error.message); retryButton.hidden = false; retryButton.focus(); }
+      } catch (error) { mode = null; authIntro.hidden = false; showMessage(error.message); retryButton.hidden = false; retryButton.focus(); }
     }
     retryButton.addEventListener('click', () => configure());
     await configure();

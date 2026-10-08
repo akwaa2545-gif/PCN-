@@ -5,9 +5,12 @@ const writable = new Set(['status','changeForm','riskLevel','selectedChange','su
 const rolesOf = user => (user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
 const hasRole = (user, ...roles) => roles.some(role => rolesOf(user).includes(role.replace(/[^a-z]/gi, '').toLowerCase()));
 const isInternal = user => hasRole(user, 'admin', 'reviewer', 'gsc', 'productionengineering', 'qa', 'tapbu');
+const isEmployeeViewer = user => user?.identityProvider === 'employee-code' && Boolean(user.employeeCode) && rolesOf(user).length === 0;
+const canViewAllRecords = user => isInternal(user);
 
 function assertRecordAccess(record, user) {
-  if (!record || (!isInternal(user) && (!record.ownerUserId || String(record.ownerUserId) !== String(user?.id)))) {
+  if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to view records');
+  if (!record || (!canViewAllRecords(user) && (!record.ownerUserId || String(record.ownerUserId) !== String(user?.id)))) {
     throw new ApiError(404, 'PCN not found');
   }
 }
@@ -124,4 +127,4 @@ function applySignatureIdentity(before, after, user, now) {
   return review;
 }
 
-module.exports = { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, hasRole, isInternal, routeGroups, complete };
+module.exports = { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, hasRole, isInternal, isEmployeeViewer, canViewAllRecords, routeGroups, complete };

@@ -89,13 +89,22 @@
     if (!container || !user) return;
     const username = String(user.displayName || user.fullName || user.username || 'User').trim();
     const fullName = String(user.displayName || user.fullName || '').trim();
+    const email = String(user.email || user.mailProfile?.email || '').trim();
     const roleNames = {
       admin: 'Admin', reviewer: 'Reviewer', supplier: 'Supplier',
       gsc: 'GSC/TET', productionengineering: 'Prod. Eng./TET',
       qa: 'QA/TET', tapbu: 'TaPBU'
     };
+    const departmentNames = {
+      gscTet: 'GSC/TET', prodEngTet: 'Prod. Eng./TET', qaTet: 'QA/TET',
+      gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', it: 'IT', other: 'Other'
+    };
     const roles = (Array.isArray(user.roles) ? user.roles : []).map(role => roleNames[String(role).toLowerCase()] || String(role));
-    const roleText = roles.join(', ') || 'No role assigned';
+    const noPcnRole = user.identityProvider === 'employee-code' && roles.length === 0;
+    const roleText = roles.join(', ') || 'Not assigned';
+    const signingSteps = { approved: 'Approved', checked: 'Checked', prepared: 'Prepared' };
+    const pcnStepText = signingSteps[user.signingStep] || 'No signing assignment';
+    const departmentText = departmentNames[user.department] || 'Not assigned';
     const nameParts = (fullName || username).split(/[\s._-]+/).filter(Boolean);
     const initials = (nameParts.length > 1 ? nameParts[0][0] + nameParts[nameParts.length - 1][0] : (nameParts[0] || 'U').slice(0, 2)).toUpperCase();
     const element = (tag, className, value) => {
@@ -112,23 +121,49 @@
 
     const trigger = element('button', 'account-trigger');
     trigger.type = 'button';
-    trigger.setAttribute('aria-label', `Open profile for ${username}`);
+    trigger.setAttribute('aria-label', noPcnRole ? `Open profile for ${username}; PCN role not assigned` : `Open profile for ${username}`);
     trigger.setAttribute('aria-expanded', 'false');
     trigger.setAttribute('aria-controls', 'accountProfilePanel');
+    if (noPcnRole) trigger.classList.add('account-trigger-pending');
     trigger.append(avatar('account-avatar'));
 
     const panel = element('div', 'account-panel');
     panel.id = 'accountProfilePanel';
     panel.hidden = true;
+    if (noPcnRole) panel.classList.add('account-panel-pending');
     panel.setAttribute('role', 'group');
     panel.setAttribute('aria-label', 'User profile');
     const heading = element('div', 'account-panel-heading');
     const headingText = element('div', 'account-panel-heading-copy');
-    headingText.append(element('strong', 'account-panel-username', username), element('span', 'account-panel-caption', roleText));
+    headingText.append(element('strong', 'account-panel-username', username));
+    headingText.append(element('span', 'account-panel-email', email || 'No email on file'));
     const signOut = element('button', 'account-sign-out', 'Sign Out');
     signOut.type = 'button';
     heading.append(avatar('account-avatar account-avatar-large'), headingText, signOut);
-    panel.append(heading);
+    if (noPcnRole) {
+      const warning = element('div', 'account-access-warning');
+      warning.id = 'accountAccessWarning';
+      warning.setAttribute('role', 'alert');
+      const icon = element('span', 'account-access-warning-icon', '!');
+      icon.setAttribute('aria-hidden', 'true');
+      const copy = element('div', 'account-access-warning-copy');
+      copy.append(element('strong', '', 'No PCN role assigned'),
+        element('p', '', 'Contact an administrator to assign your PCN role.'));
+      warning.append(icon, copy);
+      panel.append(warning);
+    }
+    const details = element('dl', 'account-profile-details');
+    const addDetail = (label, value) => {
+      const row = element('div', 'account-profile-detail');
+      row.append(element('dt', 'account-profile-label', label), element('dd', 'account-profile-value', value));
+      details.append(row);
+    };
+    addDetail('Employee ID', user.employeeCode || 'Not linked');
+    addDetail('Role', roleText);
+    addDetail('PCN step', pcnStepText);
+    addDetail('Department', departmentText);
+    panel.prepend(heading);
+    panel.append(details);
     container.replaceChildren(trigger, panel);
 
     const close = (returnFocus = false) => {

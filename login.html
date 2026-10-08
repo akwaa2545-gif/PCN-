@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/auth.css" />
 </head>
 <body class="auth-page">
-  <main class="auth-card" aria-labelledby="authTitle">
+  <main class="auth-card" aria-label="PCN portal sign in">
     <section class="auth-brand" aria-label="PCN portal">
       <div class="auth-brand-top">
         <img src="/tokin-header-logo.png" alt="TOKIN a YAGEO company" />
@@ -23,17 +23,39 @@
     </section>
     <div class="auth-content">
       <div class="auth-content-top"><span>Account access</span><span>PCN SYSTEM</span></div>
-      <h1 id="authTitle">Welcome</h1>
-      <p id="authDescription">Enter your 7 digit Employee ID to continue to the PCN portal.</p>
+      <div id="authIntro" hidden>
+        <h1 id="authTitle">Welcome</h1>
+        <p id="authDescription">Enter your credentials to continue to the PCN portal.</p>
+      </div>
       <p id="authMessage" role="status" aria-live="polite"></p>
       <button class="ghost-button" id="authRetryButton" type="button" hidden>Retry sign-in setup</button>
       <form id="employeeLoginForm" hidden>
-        <div class="auth-field auth-field--icon">
-          <svg class="auth-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M4 9h16M3 15h16M10 4 8 20M16 4l-2 16" />
+        <div class="employee-entry">
+          <svg class="employee-lock-icon" viewBox="0 0 128 128" aria-hidden="true" focusable="false">
+            <circle cx="64" cy="64" r="56" fill="#edf4fa" />
+            <circle cx="64" cy="64" r="55" fill="none" stroke="#dbe8f3" stroke-width="2" />
+            <path d="M44 58V47a20 20 0 0 1 40 0v11" fill="none" stroke="#173967" stroke-width="8" stroke-linecap="round" />
+            <rect x="33" y="56" width="62" height="50" rx="11" fill="#173967" />
+            <path d="M44 65h40" fill="none" stroke="#7bcddc" stroke-width="3" stroke-linecap="round" />
+            <circle cx="64" cy="79" r="5" fill="#fff" />
+            <path d="M62 82h4l-1 12h-2z" fill="#fff" />
           </svg>
-          <label for="employeeCode">Employee ID</label>
-          <input id="employeeCode" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" placeholder=" " title="Enter your 7 digit Employee ID" required />
+          <h1 class="employee-entry-title">Enter your Employee ID</h1>
+          <p class="employee-entry-help">Enter your Employee ID to continue to the PCN portal.</p>
+          <label class="visually-hidden" for="employeeCode">Employee ID</label>
+          <div class="employee-pin-entry">
+            <div class="employee-pin-slots" aria-hidden="true">
+              <span class="employee-pin-slot" id="employeeDigit1"></span>
+              <span class="employee-pin-slot" id="employeeDigit2"></span>
+              <span class="employee-pin-slot" id="employeeDigit3"></span>
+              <span class="employee-pin-slot" id="employeeDigit4"></span>
+              <span class="employee-pin-slot" id="employeeDigit5"></span>
+              <span class="employee-pin-slot" id="employeeDigit6"></span>
+              <span class="employee-pin-slot" id="employeeDigit7"></span>
+            </div>
+            <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeAuthMessage" required />
+          </div>
+          <p id="employeeAuthMessage" role="alert"></p>
         </div>
         <button class="primary-button auth-submit" type="submit">
           <span>Sign in</span>

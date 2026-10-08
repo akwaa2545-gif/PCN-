@@ -208,6 +208,19 @@ body.auth-page {
   line-height: 1.4;
 }
 
+#employeeAuthMessage:empty {
+  display: none;
+}
+
+#employeeAuthMessage:not(:empty) {
+  width: 100%;
+  margin: 14px 0 0;
+  color: #a52c35;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .auth-content form {
   display: grid;
   gap: 18px;
@@ -215,6 +228,125 @@ body.auth-page {
 
 .auth-content form[hidden] {
   display: none;
+}
+
+.employee-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.employee-lock-icon {
+  display: block;
+  width: 124px;
+  height: 120px;
+  margin-bottom: 14px;
+}
+
+.auth-content .employee-entry-title {
+  margin: 0 0 7px;
+  color: #263343;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.035em;
+  text-align: center;
+}
+
+.employee-entry-help {
+  margin: 0 0 28px;
+  color: #748195;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.employee-pin-entry {
+  position: relative;
+  width: 100%;
+}
+
+.employee-pin-slots {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: clamp(5px, 1vw, 8px);
+}
+
+.employee-pin-slot {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  height: 60px;
+  place-items: center;
+  border: 1px solid #d9dfe5;
+  border-radius: 12px;
+  background: #eef0f2;
+  color: #142747;
+  font-size: clamp(18px, 2vw, 24px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.employee-pin-slot:not(:empty) {
+  border-color: #aabed5;
+  background: #fff;
+}
+
+.employee-pin-entry:hover .employee-pin-slot {
+  border-color: #b8c6d1;
+}
+
+.employee-pin-entry:focus-within .employee-pin-slot.is-active {
+  border-color: #1b4e86;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(27, 78, 134, 0.12);
+  animation: employee-slot-pulse 1.8s ease-in-out infinite;
+}
+
+.employee-pin-entry:focus-within .employee-pin-slot.is-active:empty::after {
+  width: 2px;
+  height: 25px;
+  border-radius: 2px;
+  background: #1b4e86;
+  content: '';
+  animation: employee-caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes employee-slot-pulse {
+  50% { box-shadow: 0 0 0 4px rgba(27, 78, 134, 0.08); }
+}
+
+@keyframes employee-caret-blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .employee-pin-entry:focus-within .employee-pin-slot.is-active,
+  .employee-pin-entry:focus-within .employee-pin-slot.is-active:empty::after {
+    animation: none;
+  }
+}
+
+.employee-pin-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: text;
 }
 
 .auth-field {
@@ -423,6 +555,26 @@ body.auth-page {
   cursor: wait;
 }
 
+.auth-content #employeeLoginForm .auth-submit {
+  width: 100%;
+  min-height: 54px;
+  margin-top: 16px;
+  border-color: #142f65;
+  border-radius: 12px;
+  background: linear-gradient(110deg, #173967, #142f65);
+  box-shadow: 0 8px 18px rgba(20, 47, 101, 0.18);
+}
+
+.auth-content #employeeLoginForm .auth-submit:hover:not(:disabled) {
+  border-color: #0e2554;
+  background: linear-gradient(110deg, #12315b, #0e2554);
+  box-shadow: 0 10px 20px rgba(20, 47, 101, 0.24);
+}
+
+.auth-content #employeeLoginForm .auth-submit:active:not(:disabled) {
+  box-shadow: 0 4px 9px rgba(20, 47, 101, 0.2);
+}
+
 .auth-actions {
   display: grid;
   gap: 10px;
@@ -513,5 +665,13 @@ body.auth-page {
 
   .auth-content h1 {
     font-size: 29px;
+  }
+
+  .employee-pin-slots {
+    gap: 5px;
+  }
+
+  .employee-pin-slot {
+    height: 54px;
   }
 }

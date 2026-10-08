@@ -7,9 +7,9 @@ const USER_ID = '87654321-4321-4321-4321-cba987654321';
 const profile = Object.freeze({ employeeCode: '001234', displayName: 'Employee Name', englishName: 'Employee Name', email: null,
   sourceDepartment: 'IT', jobTitle: 'Engineer', isActive: true });
 
-async function harness(t, { roles = ['admin'], directory = true, sourceProfile = profile } = {}) {
+async function harness(t, { roles = ['admin'], directory = true, sourceProfile = profile, unassigned = false } = {}) {
   const calls = [];
-  const state = { outage: false, sessions: [], user: { id: USER_ID, username: '001234', employeeCode: '001234',
+  const state = { outage: false, sessions: [], user: unassigned ? null : { id: USER_ID, username: '001234', employeeCode: '001234',
     normalizedEmployeeCode: '001234', identityProvider: 'employee-code', displayName: 'Employee Name',
     roles, department:'it',signingStep:null,version:'0011223344556677',isActive: true, securityStamp: 'stamp' } };
   const employeeDirectory = directory ? {
@@ -19,6 +19,14 @@ async function harness(t, { roles = ['admin'], directory = true, sourceProfile =
   const repository = {
     async getUserByEmployeeCode(code) { return code === '001234' ? state.user : null; },
     async getUserById(id) { return id === USER_ID ? state.user : null; },
+    async createEmployeeViewer(person) {
+      calls.push(['viewer', person.employeeCode]);
+      state.user = { id: USER_ID, username: person.employeeCode, employeeCode: person.employeeCode,
+        normalizedEmployeeCode: person.employeeCode.toLowerCase(), displayName: person.displayName,
+        identityProvider: 'employee-code', roles: [], department: null, signingStep: null,
+        isActive: true, securityStamp: 'viewer-stamp' };
+      return state.user;
+    },
     async saveSession(value) { state.sessions = [...state.sessions, value]; },
     async getSession(hash) { return state.sessions.find(session => session.tokenHash === hash); },
     async revokeSession(hash) {
@@ -37,7 +45,8 @@ async function harness(t, { roles = ['admin'], directory = true, sourceProfile =
   };
   const integrationService={async directory(query){calls.push(['mail',query]);return{users:state.mailUsers||[]};}};
   const authService = new AuthService(repository, { authMode: 'employee-code', employeeDirectory,integrationService });
-  const app = createApp({ repository: memoryRepository(), authService, employeeDirectory, authMode: 'employee-code',
+  const pcnRepository = memoryRepository();
+  const app = createApp({ repository: pcnRepository, authService, employeeDirectory, authMode: 'employee-code',
     publicOrigin: 'http://localhost', secureCookies: false });
   await new Promise(resolve => app.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => { app.close(resolve); app.closeAllConnections(); }));
@@ -55,8 +64,27 @@ async function harness(t, { roles = ['admin'], directory = true, sourceProfile =
     return { status: response.status, headers: response.headers, body: payload, text };
   }
   async function login() { return request('/api/auth/login', { method: 'POST', session: false, body: { employeeCode: '001234' } }); }
-  return { request, login, calls, state };
+  return { request, login, calls, state, pcnRepository };
 }
+
+test('unassigned employees can sign in and sign out but cannot access the PCN workspace', async t => {
+  const { request, login, calls, pcnRepository } = await harness(t, { unassigned: true });
+  const record = await pcnRepository.create({ createdAt: '2026-10-07T00:00:00.000Z', ownerUserId: 'another-user',
+    status: 'submitted', riskLevel: 'RL2', supplierName: 'Example supplier', materialName: 'Example material', internalReview: {} });
+  const signedIn = await login();
+  assert.equal(signedIn.status, 200);
+  assert.deepEqual(signedIn.body.data.user.roles, []);
+  assert.deepEqual(calls.filter(call => call[0] === 'viewer'), [['viewer', '001234']]);
+  assert.equal((await request('/api/session')).body.data.authenticated, true);
+  assert.equal((await request('/api/pcns')).status, 403);
+  assert.equal((await request(`/api/pcns/${record.id}`)).status, 403);
+  assert.equal((await request('/api/master-data')).status, 403);
+  assert.equal((await request('/records')).status, 200);
+  assert.equal((await request('/api/pcns', { method: 'POST', body: {} })).status, 403);
+  assert.equal((await request(`/api/pcns/${record.id}`, { method: 'PATCH', body: { version: record.version } })).status, 403);
+  assert.equal((await request('/api/admin/users')).status, 403);
+  assert.equal((await request('/api/auth/logout', { method: 'POST', body: {} })).status, 200);
+});
 
 test('administrator assignment edit selects exactly one verified email and invalidates the previous session',async t=>{
   const {request,login,state,calls}=await harness(t);await login();

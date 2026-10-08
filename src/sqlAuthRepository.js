@@ -44,6 +44,29 @@ class SqlAuthRepository {
     return this.userQuery(this.pool.request().input('employeeCode', sql.NVarChar(100), code), "u.NormalizedEmployeeCode=@employeeCode AND u.IdentityProvider='employee-code'");
   }
 
+  async createEmployeeViewer(profile) {
+    validateEmployeeIdentity(profile);
+    const employeeCode = normalizeEmployeeCode(profile.employeeCode);
+    const id = crypto.randomUUID();
+    const transaction = this.pool.transaction();
+    await transaction.begin();
+    try {
+      await transaction.request().input('id', sql.UniqueIdentifier, id)
+        .input('employeeCode', sql.NVarChar(100), employeeCode)
+        .input('normalizedEmployeeCode', sql.NVarChar(100), employeeCode.toLowerCase())
+        .input('displayName', sql.NVarChar(200), profile.displayName || employeeCode)
+        .input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
+        .query("INSERT pcn.Users (Id,Username,NormalizedUsername,EmployeeCode,NormalizedEmployeeCode,DepartmentKey,IdentityProvider,DisplayName,Email,NormalizedEmail,SigningStep,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@employeeCode,@normalizedEmployeeCode,@employeeCode,@normalizedEmployeeCode,NULL,'employee-code',@displayName,NULL,NULL,NULL,NULL,1,0,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())");
+      await this.auditAccount(transaction, id, 'viewer-created', `employee:${employeeCode}`, { employeeCode, roles: [] });
+      await transaction.commit();
+    } catch (error) {
+      try { await transaction.rollback(); } catch { /* Preserve the original SQL error. */ }
+      if ([2601, 2627].includes(error.number)) throw new ApiError(409, 'Employee code belongs to another PCN account. Ask an administrator to link it');
+      throw error;
+    }
+    return this.getUserById(id);
+  }
+
   async auditAccount(transaction,id,action,actor,account) {
     const metadata={userId:id,...(account.employeeCode?{employeeCode:account.employeeCode}:{}),
       ...(account.roles?{roles:[...account.roles],department:account.department,signingStep:account.signingStep??null,isActive:account.isActive??true}:{}),

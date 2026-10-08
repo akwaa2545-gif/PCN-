@@ -155,6 +155,13 @@
     function selectEmployee(employee) {
       if (!state.configured || state.busy) return;
       try { directoryBody(employee); } catch (error) { els.employeeSearchStatus.textContent = error.message; return; }
+      const existingUser = !state.linkUser && state.users.find((user) =>
+        String(user.employeeCode || '').toLowerCase() === employee.employeeCode.toLowerCase());
+      if (existingUser) {
+        beginEdit(existingUser);
+        els.employeeSearchStatus.textContent = `${employee.employeeCode} already has an account. Edit its PCN access below.`;
+        return;
+      }
       cancelLookup();
       state = { ...state, selected: { ...employee } };
       els.employeeSearch.value = employee.displayName || employee.employeeCode;
@@ -279,7 +286,7 @@
         const signIn = user.identityProvider === 'employee-code' ? 'Employee code'
           : user.identityProvider === 'retired-windows' ? 'Employee link required' : 'Password maintenance';
         const values = [user.employeeCode || user.username, [user.displayName, user.email].filter(Boolean).join(' · '),
-          pcnRole(user) ? optionLabel(els.employeeRole, pcnRole(user)) : 'No signing assignment',
+          pcnRole(user) ? optionLabel(els.employeeRole, pcnRole(user)) : user.roles.length ? 'No signing assignment' : 'Not assigned',
           optionLabel(els.employeeDepartment, user.department), user.mailProfile?.email || 'No verified email', user.isActive ? 'Active' : 'Inactive', signIn];
         values.forEach((value, index) => {
           const cell = document.createElement('td');
@@ -310,7 +317,7 @@
         const [config, users] = await Promise.all([window.PCN_SESSION.fetch('/api/auth/config'), window.PCN_SESSION.fetch('/api/admin/users')]);
         if (!Array.isArray(users)) throw new Error('The user list returned an invalid response.');
         state = { ...state, configured: config.employeeProvisioningConfigured === true, users, loaded: true };
-        message(state.configured ? `${users.length} assigned users. Select an employee to create or link access.` : 'The employee directory is not configured on the server. Existing users are shown below.');
+        message(state.configured ? `${users.length} user account${users.length === 1 ? '' : 's'}. Edit an unassigned account to assign its PCN role.` : 'The employee directory is not configured on the server. Existing users are shown below.');
       } catch (error) { message(error.message); }
       finally { state = { ...state, busy: false }; updateControls(); renderUsers(); }
     }

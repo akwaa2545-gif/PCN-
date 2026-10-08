@@ -22,7 +22,6 @@
           <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button">Mail Routing</button>
           <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button">Users</button>
           <a class="ghost-link" href="/create">Create PCN</a>
-          <button class="primary-button" id="adminRefreshButton" type="button">Refresh</button>
           <div class="account-menu" id="accountMenu"></div>
         </div>
       </header>
@@ -79,7 +78,10 @@
                   <h2>PCN Records</h2>
                   <p class="admin-message" id="adminMessage">Loading records...</p>
                 </div>
-                <span class="count-badge" id="adminCount">0</span>
+                <div class="admin-records-header-actions">
+                  <span class="count-badge" id="adminCount">0</span>
+                  <button class="ghost-button admin-records-refresh" id="adminRefreshButton" type="button">Refresh</button>
+                </div>
               </div>
 
               <div class="admin-table-toolbar" aria-label="PCN table controls">
@@ -213,13 +215,18 @@
         </section>
         <section class="admin-view" id="adminUsersView" aria-labelledby="adminUsersTitle">
           <section class="admin-panel users-panel">
-            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Create employee access, then assign a PCN role and department.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
+            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Manage employee access and signing assignments.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
             <p id="usersMessage" class="admin-message" role="status" aria-live="polite" aria-atomic="true">Open Users to load employee access.</p>
             <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
-              <h3 id="employeeFormTitle">Create employee user</h3>
-              <p id="employeeProvisioningHelp">Select an employee from the employee directory. Assign a PCN role and department to allow sign-in using their employee code.</p>
-              <label for="employeeSearch">Search employee name or code</label>
-              <input id="employeeSearch" type="search" autocomplete="off" maxlength="100" aria-describedby="employeeProvisioningHelp employeeSearchStatus" aria-controls="employeeResults" disabled />
+              <div class="employee-form-intro">
+                <h3 id="employeeFormTitle">Create employee user</h3>
+                <p id="employeeProvisioningHelp">Select an employee, then set their PCN access.</p>
+              </div>
+              <label for="employeeSearch">Employee name or ID</label>
+              <div class="employee-search-control">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg>
+                <input id="employeeSearch" type="search" autocomplete="off" maxlength="100" placeholder="Search the employee directory" aria-describedby="employeeProvisioningHelp employeeSearchStatus" aria-controls="employeeResults" disabled />
+              </div>
               <p id="employeeSearchStatus" class="admin-message" role="status" aria-live="polite" aria-atomic="true"></p>
               <div id="employeeResults" class="employee-results" role="group" aria-label="Employee search results" hidden></div>
               <div class="employee-selected" id="employeeSelected" hidden>
@@ -227,15 +234,16 @@
                 <p id="employeeProfile"></p>
               </div>
               <div id="employeeAssignments" class="employee-assignments">
+                <h4 class="employee-assignments-title">Access settings</h4>
                 <label for="employeeRole">PCN role<select id="employeeRole" required aria-describedby="employeeRoleHelp employeeRoutePreview"><option value="">Select role</option><option value="admin">Administrator</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option></select></label>
                 <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
 
                 <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
                 <p id="employeeRoleHelp" class="employee-assignment-help"></p>
                 <div class="employee-mail-assignment">
-                  <label for="employeeMailSearch">Confirm mail recipient</label>
-                  <p class="employee-assignment-help">The selected employee's English name is searched automatically. Confirm the correct person; an email cannot be saved as typed text.</p>
-                  <input id="employeeMailSearch" type="search" autocomplete="off" maxlength="100" aria-describedby="employeeMailStatus" aria-controls="employeeMailResults" disabled />
+                  <label for="employeeMailSearch">Verified work email</label>
+                  <p class="employee-assignment-help">Choose the matching directory result. Typed addresses are not saved.</p>
+                  <input id="employeeMailSearch" type="search" autocomplete="off" maxlength="100" placeholder="Search the mail directory" aria-describedby="employeeMailStatus" aria-controls="employeeMailResults" disabled />
                   <p id="employeeMailStatus" role="status" aria-live="polite"></p>
                   <div id="employeeMailResults" class="employee-results" role="group" aria-label="Mail recipient search results" hidden></div>
                   <p id="employeeMailSelected" role="status" aria-live="polite"></p>
@@ -245,7 +253,7 @@
               <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. The employee code becomes their sign-in code and existing sessions will be signed out.</p>
               <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Clear selection</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
             </form>
-            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee code</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
+            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
           </section>
         </section>
       </main>

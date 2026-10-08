@@ -84,8 +84,17 @@ class AuthService {
     let code;
     try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Employee access could not be verified'); }
     const profile = await this.lookupEmployee(code);
-    const user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
-    if (!profile || !this.matchesEmployee(user, profile)) throw new ApiError(401, 'Employee access could not be verified');
+    if (!profile) throw new ApiError(401, 'Employee access could not be verified');
+    let user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
+    if (!user) {
+      try { user = await this.repository.createEmployeeViewer(profile); }
+      catch (error) {
+        if (error.statusCode !== 409) throw error;
+        user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
+        if (!user) throw error;
+      }
+    }
+    if (!this.matchesEmployee(user, profile)) throw new ApiError(401, 'Employee access could not be verified');
     return this.issueSession(user, body.remember === true);
   }
   matchesEmployee(user, profile) {

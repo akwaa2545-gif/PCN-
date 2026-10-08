@@ -51,13 +51,13 @@ test('unsafe IDs, versions, counters, commits and archive names fail even when s
 test('only tracked runtime allowlist paths are packaged', () => {
   const selected = selectRuntimeFiles([
     'server.js', 'package.json', 'package-lock.json', 'src/authService.js', 'src/clientAddress.js',
-    'login.html', 'auth.css', 'admin-users.js', 'tokin-header-logo.png', 'thailand-login.jpg', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1', 'scripts/ad-directory.ps1',
+    'login.html', 'records.html', 'records.js', 'records.css', 'auth.css', 'admin-users.js', 'tokin-header-logo.png', 'thailand-login.jpg', 'CairoliClassic-Bold.otf', 'scripts/read-sql-credential.ps1', 'scripts/ad-directory.ps1',
     '.env', '.env.production', '.github/workflows/deploy.yml', 'test/foo.js', 'plans/foo.md',
     'sql/migrations/001_core.sql', 'scripts/db-migrate.js', 'data/pcn.json', 'firebase-client.js',
     'src/.env', 'src/key.pem', 'src/nested/file.js', 'src/not-supported.js', 'workbook.xlsx', 'node_modules/evil.js',
   ]);
   assert.deepEqual(selected, [
-    'CairoliClassic-Bold.otf', 'admin-users.js', 'auth.css', 'login.html', 'package-lock.json', 'package.json',
+    'CairoliClassic-Bold.otf', 'admin-users.js', 'auth.css', 'login.html', 'package-lock.json', 'package.json', 'records.css', 'records.html', 'records.js',
     'scripts/read-sql-credential.ps1', 'server.js', 'src/authService.js', 'src/clientAddress.js', 'thailand-login.jpg', 'tokin-header-logo.png',
   ]);
   for (const unsafe of ['src/../.env', 'src\\evil.js', '/src/evil.js', 'src//evil.js']) {

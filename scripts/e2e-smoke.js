@@ -16,17 +16,17 @@ async function verifyPcnEmailLinks(browser, errors) {
   const repository=memoryRepository();
   repository.getMasterData=async()=>({...masterData,versionId:1});
   const service=new PcnService(repository,()=>new Date('2026-10-07T00:00:00.000Z'));
-  const record=await service.create({...unsignedPayload,supplierName:'Direct link private fixture'},'isolated-fixture',{id:'000001-id',roles:['supplier']});
+  const record=await service.create({...unsignedPayload,supplierName:'Direct link private fixture'},'isolated-fixture',{id:'0000001-id',roles:['supplier']});
   assert.equal(record.id,'PCN-2026-0001');
   const passwordAuth=fakeAuthService({additionalUsers:[
-    {username:'000001',employeeCode:'000001',roles:['supplier'],identityProvider:'employee-code'},
-    {username:'000002',employeeCode:'000002',roles:['supplier'],identityProvider:'employee-code'}
+    {username:'0000001',employeeCode:'0000001',roles:['supplier'],identityProvider:'employee-code'},
+    {username:'0000002',employeeCode:'0000002',roles:['supplier'],identityProvider:'employee-code'}
   ]});
   const logins=[];
   // Only the isolated fixture translates employee codes into the existing fake session adapter.
   const authService={...passwordAuth,authMode:'employee-code',async login(body) {
-    assert.deepEqual(Object.keys(body).sort(),['employeeCode','remember']);
-    assert.match(body.employeeCode,/^00000[12]$/);
+    assert.deepEqual(Object.keys(body).sort(),['employeeCode']);
+    assert.match(body.employeeCode,/^000000[12]$/);
     logins.push(structuredClone(body));
     return passwordAuth.login({username:body.employeeCode,password:TEST_PASSWORD});
   }};
@@ -69,28 +69,31 @@ async function verifyPcnEmailLinks(browser, errors) {
       assert.equal(await page.locator('#supplierName').inputValue(),record.supplierName);
       assert.equal(await page.locator('#submitButton').isDisabled(),false);
     };
+    const signOut=async()=>{
+      await page.locator('.account-trigger').click();
+      await page.locator('.account-sign-out').click();
+      await page.waitForURL(`${origin}/login`);
+    };
     await page.goto(`${origin}/login?returnTo=${encodeURIComponent('/form.html?id=PCN-2026-0001')}`);
-    await login('000001');
+    await login('0000001');
     await loaded();
     await page.goto(links[1]);
     await loaded();
     assert.equal(logins.length,1,'Authorized direct opening requires no second sign-in');
-    await page.locator('#signOutButton').click();
-    await page.waitForURL(`${origin}/login`);
+    await signOut();
     const signedOut=await page.request.get(`${origin}/api/pcns/${record.id}`);
     assert.equal(signedOut.status(),401,'Sign out removes access to the protected PCN API');
     await page.goto(links[0]);
     await page.waitForURL(`${origin}/login?returnTo=${encodeURIComponent('/form.html?id=PCN-2026-0001')}`);
     assert.equal(new URL(page.url()).searchParams.get('returnTo'),'/form.html?id=PCN-2026-0001');
-    await login('000001');
+    await login('0000001');
     await loaded();
-    assert.deepEqual(logins[1],{employeeCode:'000001',remember:false});
+    assert.deepEqual(logins[1],{employeeCode:'0000001'});
     await page.screenshot({path:path.resolve('test-results/pcn-email-link-loaded.png'),fullPage:true});
-    await page.locator('#signOutButton').click();
-    await page.waitForURL(`${origin}/login`);
+    await signOut();
     await page.goto(links[1]);
     const deniedResponse=page.waitForResponse(response=>response.url()===`${origin}/api/pcns/${record.id}`);
-    await login('000002');
+    await login('0000002');
     const denied=await deniedResponse;
     assert.equal(denied.status(),404,'Normal ownership checks conceal another supplier PCN');
     assert.deepEqual((await denied.json()).error,'PCN not found');
@@ -159,6 +162,17 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
     });
     await page.goto('http://127.0.0.1:3099/create');
     await page.locator('#submitButton:not([disabled])').waitFor();
+    const formViewport = page.viewportSize();
+    await page.setViewportSize({width:320,height:700});
+    const submitVisibleAtEnd = await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      const button = document.getElementById('submitButton');
+      const rect = button.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight &&
+        document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === button;
+    });
+    assert.equal(submitVisibleAtEnd,true,'Submit PCN stays visible and clickable at the end of the form on mobile');
+    await page.setViewportSize(formViewport);
     await page.locator('#supplierName').fill('Split notification browser fixture');
     await page.locator('#materialName').fill('Isolated notification material');
     const notice=page.locator('#appNoticeMessage');
@@ -669,7 +683,7 @@ async function main() {
       return route.fulfill({status:isLink?200:201,json:{success:true,data:user}});
     });
     await page.locator('#adminUsersButton').click();
-    await page.locator('#usersMessage').filter({hasText:'1 assigned users'}).waitFor();
+    await page.locator('#usersMessage').filter({hasText:'1 user account'}).waitFor();
     assert.equal(await page.locator('#adminUsersRows .employee-user-identity .notification-person-avatar').textContent(),'L','Users without a verified photo display an initial');
     assert.equal(await page.locator('#adminUsersRows .employee-user-identity img').count(),0,'Fallback avatars load no external images');
     assert.equal(await page.getByRole('button',{name:'Link employee to Local Administrator',exact:true}).isDisabled(),false,'A configured employee source permits explicit maintenance-account linking');
@@ -767,7 +781,7 @@ async function main() {
     assert.equal(assignedUsers.find(user=>user.id==='created-employee').signingStep,'prepared');
     provisioningAuthMode='employee-code';
     await page.locator('#usersRefreshButton').click();
-    await page.locator('#usersMessage').filter({hasText:'2 assigned users'}).waitFor();
+    await page.locator('#usersMessage').filter({hasText:'2 user accounts'}).waitFor();
     await page.getByRole('button',{name:'Link employee to Local Administrator',exact:true}).click();
     assert.equal(await page.locator('#employeeAssignments').isVisible(),false);
     await employeeSearch.fill('Source Administrator');
@@ -800,7 +814,7 @@ async function main() {
       {...existingUser,id:'legacy-requester',displayName:'Legacy Requester',roles:['supplier'],department:'qaTet',identityProvider:'employee-code'}
     ];
     await page.locator('#usersRefreshButton').click();
-    await page.locator('#usersMessage').filter({hasText:'4 assigned users'}).waitFor();
+    await page.locator('#usersMessage').filter({hasText:'4 user accounts'}).waitFor();
     await page.getByRole('button',{name:'Edit user Combined Administrator',exact:true}).click();
     assert.equal(await page.locator('#employeeRole').inputValue(),'admin');
     assert.match(await page.locator('#employeeRoleHelp').textContent(),/preserved.*QA\/TET.*Approved/);
@@ -872,6 +886,36 @@ async function main() {
     await employeeContext.close();
     await verifySplitNotificationFeedback(browser,await page.context().storageState(),errors);
     await verifyPcnEmailLinks(browser,errors);
+    const viewerPage = await browser.newPage({viewport:{width:1365,height:900}});
+    viewerPage.on('pageerror',error=>errors.push(error.message));
+    const viewerRecord = (await repository.list())[0];
+    assert(viewerRecord, 'Browser fixture has a PCN for the viewer');
+    await viewerPage.route('**/api/session',route=>route.fulfill({json:{success:true,data:{authenticated:true,user:{username:'0000001',employeeCode:'0000001',displayName:'View Only Employee',roles:[],identityProvider:'employee-code',department:null},csrfToken:'viewer-csrf'}}}));
+    let viewerRecordRequests = 0;
+    await viewerPage.route('**/api/pcns*',route=>{viewerRecordRequests++;return route.fulfill({status:403,json:{success:false,error:{message:'A PCN role is required'}}});});
+    await viewerPage.goto('http://127.0.0.1:3099/records');
+    await viewerPage.locator('#accessPending').waitFor({state:'visible'});
+    assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning opens from the profile button');
+    assert.equal(await viewerPage.locator('.account-trigger').getAttribute('aria-label'), 'Open profile for View Only Employee; PCN role not assigned');
+    await viewerPage.locator('.account-trigger').click();
+    assert.match(await viewerPage.locator('#accountAccessWarning').textContent(),/Contact an administrator to assign your PCN role/);
+    assert.equal(await viewerPage.locator('#accessPending').isVisible(),true,'Viewer sees the pending-access page');
+    assert.equal(await viewerPage.locator('#recordsWorkspace').isVisible(),false,'Viewer has no record list or record controls');
+    assert.equal(viewerRecordRequests,0,'No record request is made without a role');
+    assert.equal(await viewerPage.locator('#createPcnLink').isVisible(),false,'Viewer cannot navigate to PCN creation');
+    await viewerPage.screenshot({path:path.resolve('test-results/pcn-viewer-profile-smoke.png'),fullPage:true});
+    await viewerPage.locator('.account-trigger').click();
+    assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning can be dismissed with the profile button');
+    await viewerPage.locator('.account-trigger').click();
+    assert.match(await viewerPage.locator('#accountProfilePanel').textContent(),/Not assigned/);
+    assert.equal(await viewerPage.locator('.account-sign-out').isVisible(),true,'Sign Out remains available');
+    await viewerPage.screenshot({path:path.resolve('test-results/pcn-viewer-browser-smoke.png'),fullPage:true});
+    await viewerPage.goto(`http://127.0.0.1:3099/${viewerRecord.id}`);
+    await viewerPage.waitForURL('**/records');
+    await viewerPage.locator('#accessPending').waitFor({state:'visible'});
+    assert.equal(await viewerPage.locator('#recordsWorkspace').isVisible(),false,'Direct record URL returns viewer to the no-role screen');
+    assert.equal(viewerRecordRequests,0,'Direct record URL does not load record data');
+    await viewerPage.close();
     assert.deepEqual(outbound,[],'The complete browser suite performs no outbound email');
     assert.deepEqual(errors,[],'All browser journeys complete without page errors');
     await supplier.screenshot({path:path.resolve('test-results/pcn-browser-smoke.png'),fullPage:true});

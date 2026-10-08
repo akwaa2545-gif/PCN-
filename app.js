@@ -71,6 +71,7 @@
     pcns: [],
     activeRequest: { ...demoRequest },
     pendingWorkflowNotifications: new Set(),
+    viewOnly: false,
     apiReady: false,
     message: "Connecting to backend..."
   };
@@ -86,6 +87,11 @@
       const session = await window.PCN_SESSION.require();
       if (!session) return;
       state.user = session.user;
+      state.viewOnly = session.user?.identityProvider === 'employee-code' && !session.user?.roles?.length;
+      if (state.viewOnly) {
+        window.location.assign('/records');
+        return;
+      }
       window.PCN_SESSION.mountProfile(session.user, (error) => showNotice("error", "Sign out failed", error.message));
       await loadFromApi();
       renderAll();
@@ -256,7 +262,7 @@
       const routePcnId = getPcnIdFromPath();
       if (routePcnId) {
         state.activeRequest = await apiFetch(`/api/pcns/${encodeURIComponent(routePcnId)}`);
-        state.message = `Loaded ${routePcnId}. Changes will update this PCN.`;
+        state.message = state.viewOnly ? `Viewing ${routePcnId}. This account has read-only access.` : `Loaded ${routePcnId}. Changes will update this PCN.`;
         showNotice("success", "PCN loaded", state.message);
       } else {
         state.activeRequest = createNewRequest();
@@ -298,6 +304,9 @@
   }
 
   async function apiFetch(path, options = {}) {
+    if (state.viewOnly && !['GET', 'HEAD'].includes(String(options.method || 'GET').toUpperCase())) {
+      throw new Error('A PCN role is required to change records.');
+    }
     return window.PCN_SESSION.fetch(path, options);
   }
 
@@ -498,6 +507,16 @@
       renderAdmin();
     }
     updateApprovalCheckLocks();
+    if (state.viewOnly) applyViewOnly();
+  }
+
+  function applyViewOnly() {
+    document.body.classList.add('is-view-only');
+    els.loadDemoButton.hidden = true;
+    els.submitButton.hidden = true;
+    const adminLink = document.getElementById('formAdminLink');
+    if (adminLink) adminLink.hidden = true;
+    document.querySelectorAll('main input, main select, main textarea').forEach((control) => { control.disabled = true; });
   }
 
   function getActiveDefinition() {
@@ -902,7 +921,7 @@
           state.activeRequest = await apiFetch(`/api/pcns/${record.id}`);
           state.message = `Loaded ${record.id} from database.`;
           loadRequestToForm(state.activeRequest);
-          showNotice("success", "PCN loaded", `${record.id} is ready for editing.`);
+          showNotice("success", "PCN loaded", state.viewOnly ? `${record.id} is available to view.` : `${record.id} is ready for editing.`);
         } catch (error) {
           state.message = error.message;
           showNotice("error", "Load failed", error.message);
@@ -1507,7 +1526,14 @@
     els.appNotice.className = `app-notice app-notice-${type}`;
     els.appNoticeTitle.textContent = title;
     els.appNoticeMessage.textContent = message;
-    showToast(type, title, message);
+    els.appNotice.setAttribute("role", type === "error" ? "alert" : "status");
+    if (typeof els.appNotice.animate === "function" && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      els.appNotice.getAnimations?.().forEach((animation) => animation.cancel());
+      els.appNotice.animate([
+        { opacity: 0, transform: "translateY(10px)" },
+        { opacity: 1, transform: "translateY(0)" }
+      ], { duration: 250, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
+    }
   }
 
   function showToast(type, title, message) {
@@ -1526,7 +1552,7 @@
     window.setTimeout(() => {
       toast.classList.add("is-hiding");
       window.setTimeout(() => toast.remove(), 220);
-    }, type === "error" ? 5200 : 3200);
+    }, type === "error" ? 9000 : type === "warning" ? 7000 : 3200);
   }
 
   function syncSupplierDetailControls(request) {

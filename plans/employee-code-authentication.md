@@ -2,6 +2,8 @@
 
 Updated: 2026-10-07. Employee-code-only login is deployed as signed `pcn-test-10-1` from main `c827d9c1c23c27631604936807dbbc352101c11e`, replacing the retired [AD / Windows authentication pilot](employee-windows-authentication.md). Migration 003, the separate verified Administrator / IT account and PCN-only IIS cutover are complete. Real local and HTTPS API checks passed; the user's own Edge GUI has not been observed.
 
+Current workspace change: a source employee can sign in before a PCN role is assigned. First sign-in creates a roleless account in `pcn.Users`; the employee sees an access-pending page and a no-role notice inside the profile panel, with Sign Out available and no PCN record access. Administrators assign roles and departments in Users. The signed release evidence below describes the earlier, explicitly provisioned baseline.
+
 ## Identity source and access
 
 The employee source is on the existing SQL server `svr120a`, at `[KEY_Code_DB].[dbo].[tblEmployee]`. The supplied server shorthand `sv120a` is not a configuration change. The inspected table contained 1,935 rows, with a unique, non-null `EmpCode` column of type `nvarchar(10)`. No employee bulk import or source synchronization is planned. Every source operation is read-only and uses parameterized queries.
@@ -14,7 +16,7 @@ The employee source is on the existing SQL server `svr120a`, at `[KEY_Code_DB].[
 | `PostNameEng` | Job-title hint in lookup results |
 | `OrgID` | Source department hint; no automatic PCN permission grant |
 
-The source has no email address or enabled/disabled flag. An employee must have a current source record **and** an explicitly provisioned, active PCN SQL account with provider `employee-code`. Administrators select a lookup result, assign PCN roles and choose the PCN department manually. Source department/job fields do not assign roles. Merely appearing among the 1,935 source employees grants no PCN access. Email recipient lookup remains the separate Power Automate integration.
+The source has no email address or enabled/disabled flag. A current source record permits sign-in; first sign-in creates an active, roleless PCN SQL account with provider `employee-code`. PCN records remain inaccessible until an administrator assigns a PCN role and department. Source department/job fields do not assign roles or access. Email recipient lookup remains the separate Power Automate integration.
 
 Employee-code-only login deliberately allows anyone who knows an enabled employee's code to sign in as that employee. This is the user's chosen access model; it does not prove identity through a password, AD or Windows SSO.
 
@@ -24,7 +26,7 @@ Existing roles remain `admin`, `reviewer`, `supplier`, `gsc`, `productionenginee
 
 `AUTH_MODE=employee-code` is the normal default. `AUTH_MODE=password` is an explicit maintenance option for unlinked legacy password accounts. Windows mode, Windows proof headers, the AD helper, the IIS identity module and Windows login routes are removed from the replacement runtime.
 
-The normal login page accepts one employee code without a password. Code validation accepts 1–10 letters, digits, dots, underscores or hyphens; codes stay strings. The backend verifies current source presence and the active PCN mapping before issuing its normal session. Protected requests revalidate the source and PCN account/session state. Source unavailability fails closed with 503; it does not fall back to AD or password mode.
+The normal login page accepts one employee code without a password. Codes stay strings, preserving leading zeros. The backend verifies current source presence, creates a roleless PCN account if needed, and issues its normal session. Protected requests revalidate the source and PCN account/session state. Source unavailability fails closed with 503; it does not fall back to AD or password mode.
 
 | Endpoint | Replacement contract |
 |---|---|
@@ -74,7 +76,7 @@ The user's actual Edge session, operational PCN save/signing/linking flows and e
 
 ## Recovery and further checks
 
-Verify leading-zero codes, source-missing/unprovisioned/disabled-account denial, source-outage 503, prior AD session revocation, explicit-link ownership preservation, selected employee creation and real administrator login. Verify password maintenance mode separately, and ensure employee-provider sessions do not become valid through a mode switch. Check CSRF/origin, supplier/reviewer restrictions and mail-routing separation.
+Verify leading-zero codes, source-missing/disabled-account denial, first-sign-in assignment notice with no record access, source-outage 503, prior AD session revocation, explicit-link ownership preservation, selected employee creation and real administrator login. Verify password maintenance mode separately, and ensure employee-provider sessions do not become valid through a mode switch. Check CSRF/origin, supplier/reviewer restrictions and mail-routing separation.
 
 If cutover fails, keep the polling task paused and restore a reviewed, schema-compatible application/configuration state. Migration 003 retires old Windows mappings and revokes sessions, so restarting the old release alone does not restore its former login access. Restore or re-provision only the approved account mapping through a reviewed recovery procedure; do not automatically undo schema/data or reactivate every former AD user.
 

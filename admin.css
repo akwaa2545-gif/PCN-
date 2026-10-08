@@ -1,12 +1,86 @@
-.employee-mail-assignment, .employee-route-preview, .employee-assignment-help { grid-column: 1 / -1; }
-.employee-mail-assignment { display: grid; gap: 10px; padding: 16px; border: 1px solid #cbd5e1; background: white; }
-.employee-mail-assignment input, .employee-mail-assignment button { min-width: 0; }
+/* Keep the records action beside the list it updates. */
+.admin-records-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+body.admin-page .admin-records-refresh {
+  min-height: 38px;
+  padding: 0 16px;
+  border-color: var(--mes-gold);
+  background: var(--mes-gold);
+  color: #241a00;
+  font-weight: 700;
+  white-space: nowrap;
+}
+body.admin-page .admin-records-refresh:hover {
+  border-color: var(--mes-gold-dark);
+  background: var(--mes-gold-dark);
+  color: #241a00;
+}
+body.admin-page .admin-records-refresh:focus-visible {
+  outline: 3px solid var(--mes-blue-dark);
+  outline-offset: 2px;
+}
+body.admin-page .admin-records-refresh:disabled {
+  border-color: #e5e7eb;
+  background: #e5e7eb;
+  color: #667085;
+}
+
+@media (max-width: 720px) {
+  .admin-records-header-actions { width: 100%; justify-content: space-between; margin-left: 0; }
+}
+
+body.admin-page .users-panel { padding-bottom: 28px; background: #fff; }
+body.admin-page .users-panel > .panel-header { align-items: center; margin: 0 0 18px; padding: 24px 28px 20px; border-bottom: 1px solid #e6ebf2; }
+.users-panel > .panel-header p { margin: 8px 0 0; color: #64748b; font-size: 14px; }
+body.admin-page .users-panel > .admin-message { margin: 0 28px 18px; padding: 11px 14px; border: 1px solid #e1e8f0; border-radius: 8px; background: #f6f8fb; color: #435570; font-size: 13px; }
+
+body.admin-page .employee-user-form { display: grid; gap: 16px; margin: 0 28px 26px; padding: 24px; border: 1px solid #dce4ee; border-radius: 14px; background: #fff; box-shadow: 0 6px 18px rgba(30, 47, 84, 0.05); }
+.employee-form-intro h3 { margin: 0; color: #1d3151; font-size: 20px; line-height: 1.3; }
+.employee-form-intro p { margin: 6px 0 0; color: #64748b; font-size: 14px; }
+body.admin-page .employee-user-form label { gap: 7px; color: #283b59; font-size: 13px; font-weight: 650; }
+body.admin-page .employee-user-form input,
+body.admin-page .employee-user-form select { min-height: 46px; padding: 10px 12px; border: 1px solid #c7d2e0; border-radius: 8px; background: #fff; color: #24334a; font-size: 14px; }
+body.admin-page .employee-user-form input:focus-visible,
+body.admin-page .employee-user-form select:focus-visible { border-color: #39578d; outline: 3px solid rgba(57, 87, 141, 0.14); outline-offset: 1px; }
+body.admin-page .employee-user-form input:disabled,
+body.admin-page .employee-user-form select:disabled,
+body.admin-page .employee-user-form input[readonly] { background: #f4f6f9; color: #59687d; }
+.employee-search-control { position: relative; width: 100%; max-width: 640px; }
+.employee-search-control svg { position: absolute; z-index: 1; top: 50%; left: 14px; width: 19px; height: 19px; color: #6c7d94; pointer-events: none; transform: translateY(-50%); }
+body.admin-page .employee-search-control input { padding-left: 42px; }
+#employeeSearchStatus, #employeeMailStatus, #employeeMailSelected, #employeeRoleHelp { color: #566b84; font-size: 12px; line-height: 1.45; }
+#employeeSearchStatus:empty, #employeeMailStatus:empty, #employeeMailSelected:empty, #employeeRoleHelp:empty { display: none; }
+#employeeSearchStatus, .employee-user-form > .employee-results, .employee-selected { max-width: 640px; }
+.employee-results { gap: 6px; }
+body.admin-page .users-panel .employee-result { min-height: 44px; padding: 10px 12px; border: 1px solid #d9e2ee; border-radius: 8px; background: #fff; color: #203c6a; font-size: 13px; }
+body.admin-page .users-panel .employee-result:hover,
+body.admin-page .users-panel .employee-result:focus-visible { border-color: #6c8db9; background: #f5f8fc; }
+.employee-selected { padding: 14px; border: 1px solid #dce6f1; border-radius: 9px; background: #f7faff; }
+.employee-selected p { color: #52647d; font-size: 13px; }
+
+body.admin-page .employee-assignments { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 4px; }
+.employee-assignments-title, .employee-mail-assignment, .employee-route-preview, .employee-assignment-help, .employee-user-form .employee-active-label { grid-column: 1 / -1; }
+.employee-assignments-title { margin: 0; padding-top: 16px; border-top: 1px solid #e7ecf2; color: #1d3151; font-size: 15px; }
+.employee-assignment-help { color: #64748b; font-size: 13px; font-weight: 400; line-height: 1.5; }
+.employee-mail-assignment { display: grid; gap: 8px; padding: 16px; border: 1px solid #e1e8f0; border-radius: 10px; background: #f8fafc; }
+.employee-mail-assignment input, .employee-mail-assignment .employee-results { max-width: 640px; min-width: 0; }
 .employee-mail-assignment p, .employee-route-preview { overflow-wrap: anywhere; }
-.employee-assignment-help { font-size: 14px; font-weight: 400; color: #465570; }
-.employee-route-preview { padding: 12px; background: #edf2fb; border-left: 4px solid #272974; }
+.employee-route-preview { margin: 0; padding: 11px 13px; border: 1px solid #e0e8f3; border-left: 3px solid #829cc0; border-radius: 8px; background: #f5f8fc; color: #405676; font-size: 13px; }
 .employee-user-form .employee-active-label { display: flex; align-items: center; gap: 10px; }
-.employee-user-form .employee-active-label input { width: 20px; min-height: 20px; }
-.users-table td:last-child { display: flex; gap: 8px; }
+body.admin-page .employee-user-form .employee-active-label input { width: 20px; min-height: 20px; height: 20px; }
+.employee-user-actions { padding-top: 16px; border-top: 1px solid #e7ecf2; }
+body.admin-page .users-panel button { border-radius: 8px; }
+body.admin-page .users-panel .primary-button, body.admin-page .users-panel .primary-button:hover { color: #241a00; }
+
+body.admin-page .users-table-wrap { margin: 0 28px; border: 1px solid #e1e7ef; border-radius: 12px; background: #fff; }
+.users-table { min-width: 940px; color: #25354d; font-size: 13px; }
+.users-table caption { margin: 0; padding: 16px 18px; color: #1d3151; font-size: 16px; font-weight: 700; }
+.users-table th, .users-table td { padding: 14px 12px; border-bottom-color: #e7ecf2; }
+.users-table th { background: #f5f7fa; color: #5b6980; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.users-table tbody tr:hover { background: #fafcff; }
+.users-table td:nth-child(2), .users-table td:nth-child(6) { min-width: 160px; }
+.users-table td:last-child { display: flex; align-items: flex-start; gap: 8px; }
+body.admin-page .users-table td:last-child button { min-height: 36px; margin: 0; padding: 6px 12px; font-size: 13px; }
+
 .notification-managed-recipients { padding: 12px; margin-top: 10px; border: 1px solid #cbd5e1; background: #f4f7fb; }
 .notification-managed-recipients h5 { margin: 0 0 8px; font-size: 14px; color: #272974; }
 .notification-managed-recipients .notification-person { margin: 8px 0; grid-template-columns: 34px minmax(0, 1fr); }
@@ -15,3 +89,161 @@
 .employee-user-identity { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 180px; }
 .notification-managed-recipients small { display: block; margin-top: 8px; color: #465570; }
 .employee-user-form [hidden] { display: none; }
+
+@media (max-width: 980px) {
+  body.admin-page .employee-assignments { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  body.admin-page .users-panel > .panel-header { align-items: flex-start; flex-wrap: wrap; padding: 20px 16px 16px; }
+  body.admin-page .users-panel > .admin-message { margin: 0 16px 16px; }
+  body.admin-page .employee-user-form { margin: 0 16px 22px; padding: 18px; }
+  body.admin-page .employee-assignments { grid-template-columns: minmax(0, 1fr); }
+  .employee-user-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .employee-user-actions button { min-width: 0; }
+  body.admin-page .users-table-wrap { margin: 0 16px; overflow: visible; border: 0; background: transparent; }
+  .users-table { display: block; min-width: 0; }
+  .users-table caption { display: block; padding: 0 0 12px; }
+  .users-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .users-table tbody { display: grid; gap: 12px; }
+  .users-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 12px; padding: 16px; border: 1px solid #e1e7ef; border-radius: 10px; background: #fff; }
+  .users-table td { display: grid; gap: 4px; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; }
+  .users-table td::before { color: #748198; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  .users-table td:nth-child(1)::before { content: 'Employee ID'; }
+  .users-table td:nth-child(3)::before { content: 'Role'; }
+  .users-table td:nth-child(4)::before { content: 'Department'; }
+  .users-table td:nth-child(5)::before { content: 'Verified email'; }
+  .users-table td:nth-child(6)::before { content: 'Status'; }
+  .users-table td:nth-child(7)::before { content: 'Sign-in'; }
+  .users-table td:nth-child(2) { order: -1; grid-column: 1 / -1; padding-bottom: 12px; border-bottom: 1px solid #e7ecf2; }
+  .users-table td:nth-child(2)::before, .users-table td:last-child::before { display: none; }
+  .users-table td:nth-child(5) { grid-column: 1 / -1; }
+  .users-table td:last-child { grid-column: 1 / -1; padding-top: 12px; border-top: 1px solid #e7ecf2; }
+  .employee-user-identity { min-width: 0; }
+}
+
+@media (max-width: 420px) {
+  body.admin-page .users-panel > .panel-header { padding-inline: 12px; }
+  body.admin-page .users-panel > .admin-message { margin-inline: 12px; }
+  body.admin-page .employee-user-form { margin-inline: 12px; padding: 14px; }
+  body.admin-page .users-table-wrap { margin-inline: 12px; }
+  .employee-user-actions { grid-template-columns: minmax(0, 1fr); }
+  .employee-user-actions button { width: 100%; }
+}
+
+/* Employee access and routing use the same controls as the portal workspace. */
+body.admin-page .users-panel {
+  width: auto;
+  margin: 20px clamp(16px, 2vw, 30px) 30px;
+  padding-bottom: 26px;
+}
+body.admin-page .users-panel > .panel-header {
+  margin: 0 0 20px;
+  padding: 22px 26px;
+}
+body.admin-page .users-panel > .admin-message {
+  margin: 0 26px 20px;
+  border-color: #dce8f1;
+  border-radius: 9px;
+  background: #f4f9fc;
+  color: #46607c;
+}
+body.admin-page .employee-user-form {
+  margin: 0 26px 26px;
+  padding: clamp(20px, 2.5vw, 30px);
+  border-color: #dbe5ee;
+  border-radius: 12px;
+  background: #f9fbfd;
+  box-shadow: none;
+}
+body.admin-page .employee-form-intro h3 { color: var(--portal-ink); font-size: 18px; }
+body.admin-page .employee-user-form label { color: #354c68; }
+body.admin-page .employee-user-form input,
+body.admin-page .employee-user-form select {
+  border-color: #cbd8e5;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--portal-ink);
+}
+body.admin-page .employee-user-form input:focus-visible,
+body.admin-page .employee-user-form select:focus-visible {
+  border-color: #48adc5;
+  outline: 3px solid rgba(72, 173, 197, 0.22);
+}
+body.admin-page .employee-mail-assignment,
+body.admin-page .employee-route-preview,
+body.admin-page .employee-selected { border-color: #dce8f1; background: #f2f7fb; }
+body.admin-page .employee-mail-assignment {
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid #dce8f1;
+  border-radius: 0;
+  background: transparent;
+}
+body.admin-page .employee-assignments-title { color: var(--portal-ink); }
+body.admin-page .users-table-wrap {
+  margin: 0 26px;
+  border-color: #dbe5ee;
+  border-radius: 10px;
+}
+body.admin-page .users-table caption { color: var(--portal-ink); }
+body.admin-page .users-table th {
+  background: #eef3f8;
+  color: #405674;
+  letter-spacing: 0.075em;
+}
+body.admin-page .users-table tbody tr:hover { background: #edf6fa; }
+body.admin-page .users-panel .primary-button,
+body.admin-page .users-panel .primary-button:hover { color: #192c46; }
+body.admin-page .admin-records-refresh {
+  border-color: var(--portal-action-yellow);
+  background: var(--portal-action-yellow);
+  color: #192c46;
+  box-shadow: none;
+}
+body.admin-page .admin-records-refresh:hover {
+  border-color: var(--portal-action-yellow-hover);
+  background: var(--portal-action-yellow-hover);
+  color: #192c46;
+}
+body.admin-page #usersRefreshButton {
+  border-color: var(--portal-action-yellow);
+  background: var(--portal-action-yellow);
+  color: #192c46;
+  box-shadow: none;
+}
+body.admin-page #usersRefreshButton:hover {
+  border-color: var(--portal-action-yellow-hover);
+  background: var(--portal-action-yellow-hover);
+  color: #192c46;
+}
+body.admin-page #usersRefreshButton:disabled {
+  border-color: #dfe5ed;
+  background: #dfe5ed;
+  color: #68788b;
+  box-shadow: none;
+}
+body.admin-page .mail-routing-panel { max-width: none; }
+body.admin-page .notification-groups { gap: 16px; background: #f6f9fc; }
+body.admin-page .notification-department { overflow: hidden; border-color: #dbe5ee; border-radius: 11px; box-shadow: 0 6px 18px rgba(22, 52, 91, 0.04); }
+body.admin-page .notification-department-header { background: #173a69; }
+body.admin-page .notification-department:nth-child(2n) .notification-department-header { background: #1c6174; }
+body.admin-page .notification-department:nth-child(3n) .notification-department-header { background: #245486; }
+body.admin-page .notification-department .notification-step .notification-group-header { background: #f1f6fa; }
+body.admin-page .recipient-dialog { border-color: #dbe5ee; border-radius: 14px; }
+body.admin-page .recipient-dialog-heading h2 { color: var(--portal-ink); }
+body.admin-page .recipient-dialog-actions { background: #f5f8fb; }
+body.admin-page .recipient-dialog-actions .primary-button,
+body.admin-page .recipient-dialog-actions .primary-button:hover { color: #192c46; }
+
+@media (max-width: 700px) {
+  body.admin-page .users-panel { margin: 12px; }
+  body.admin-page .users-panel > .panel-header { padding: 18px 16px; }
+  body.admin-page .users-panel > .admin-message { margin: 0 16px 16px; }
+  body.admin-page .employee-user-form { margin: 0 16px 20px; padding: 18px; }
+  body.admin-page .users-table-wrap { margin: 0 16px; border: 0; }
+}
+@media (max-width: 420px) {
+  body.admin-page .employee-user-form { margin-inline: 12px; padding: 14px; }
+  body.admin-page .users-table-wrap { margin-inline: 12px; }
+}

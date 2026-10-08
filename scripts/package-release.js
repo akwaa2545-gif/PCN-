@@ -8,8 +8,8 @@ const { windowsPowerShellEnvironment: runtimePowerShellEnvironment } = require('
 const run = promisify(execFile);
 
 const ROOT_FILES = new Set([
-  'server.js', 'package.json', 'package-lock.json', 'admin.html', 'form.html', 'index.html', 'login.html',
-  'app.js', 'admin.js', 'admin-users.js', 'login.js', 'session-client.js', 'auth.css', 'admin.css', 'styles.css',
+  'server.js', 'package.json', 'package-lock.json', 'admin.html', 'form.html', 'records.html', 'index.html', 'login.html',
+  'app.js', 'admin.js', 'admin-users.js', 'records.js', 'login.js', 'session-client.js', 'auth.css', 'admin.css', 'records.css', 'styles.css',
   'tokin-header-logo.png', 'thailand-login.jpg', 'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
   'scripts/read-sql-credential.ps1',
 ]);

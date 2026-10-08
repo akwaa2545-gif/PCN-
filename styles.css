@@ -8227,6 +8227,18 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
 .topbar-actions .account-trigger[aria-expanded="true"] {
   background: rgba(255, 255, 255, 0.19);
 }
+.topbar-actions .account-trigger-pending { position: relative; border-color: #efbf4d; }
+.topbar-actions .account-trigger-pending::after {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #252f78;
+  border-radius: 50%;
+  background: #efbf4d;
+  content: "";
+}
 
 .topbar-actions .account-trigger:focus-visible,
 .account-sign-out:focus-visible {
@@ -8265,6 +8277,33 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
 .account-panel[hidden] {
   display: none;
 }
+.account-panel-pending { width: min(420px, calc(100vw - 24px)); }
+.account-access-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 16px 18px 0;
+  padding: 13px 14px;
+  border: 1px solid #e7c66b;
+  border-left: 4px solid #bf8522;
+  border-radius: 8px;
+  background: #fff9e9;
+  color: #4d390f;
+}
+.account-access-warning-icon {
+  display: grid;
+  flex: 0 0 22px;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #bf8522;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+.account-access-warning-copy strong { display: block; font-size: 13px; }
+.account-access-warning-copy p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; }
 
 .account-panel-heading {
   display: flex;
@@ -8293,9 +8332,47 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   font-size: 18px;
 }
 
-.account-panel-caption {
-  color: #667085;
+.account-panel-email {
+  overflow-wrap: anywhere;
+  color: #475467;
   font-size: 13px;
+}
+
+.account-profile-details {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 22px 20px;
+}
+
+.account-profile-detail {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.account-profile-label {
+  color: #667085;
+}
+
+.account-profile-value {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.pcn-page.is-view-only .topbar-actions [hidden] { display: none !important; }
+.pcn-page.is-view-only main input:not([type="checkbox"]):disabled,
+.pcn-page.is-view-only main select:disabled,
+.pcn-page.is-view-only main textarea:disabled {
+  opacity: 1;
+  background: #f8fafc;
+  color: #24334a;
+  -webkit-text-fill-color: #24334a;
 }
 
 .account-sign-out {
@@ -8336,8 +8413,8 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   }
 
   .account-panel {
-    right: auto;
-    left: 0;
+    right: 0;
+    left: auto;
   }
 }
 /* Each department owns three distinct mail lists in signing order. */
@@ -8453,3 +8530,446 @@ body.admin-page .recipient-dialog-actions .primary-button:hover { color: #241a00
 .users-table th { background: #edf1f8; }
 .users-table td:last-child button { display: block; margin-top: 8px; }
 @media (max-width: 600px) { .employee-assignments { grid-template-columns: minmax(0, 1fr); } .employee-user-form, .users-table-wrap { margin: 12px; padding: 12px; } }
+
+/* Portal workspace: carry the sign-in page's navy, cyan, and quiet surfaces inside. */
+body.admin-page,
+body.pcn-page {
+  --portal-navy: #142e59;
+  --portal-blue: #1d4d80;
+  --portal-cyan: #63c8d6;
+  --portal-action-yellow: #f1c767;
+  --portal-action-yellow-hover: #e6b74b;
+  --portal-ink: #1a2e4b;
+  --portal-muted: #60738d;
+  --portal-line: #dbe4ef;
+  --portal-surface: #ffffff;
+  --portal-page: #f2f6fa;
+  background: var(--portal-page);
+  color: var(--portal-ink);
+  font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+body.admin-page .app-shell,
+body.pcn-page .app-shell {
+  background: linear-gradient(180deg, #f2f7fb 0%, #edf3f8 100%);
+}
+
+body.admin-page .topbar,
+body.pcn-page .topbar {
+  min-height: 76px;
+  padding: 12px clamp(18px, 2.5vw, 36px);
+  border-bottom: 2px solid #5aafbf;
+  background: linear-gradient(90deg, rgba(20, 46, 89, 0.97), rgba(26, 66, 108, 0.94)), url("thailand-login.jpg") center 48% / cover;
+  box-shadow: 0 3px 14px rgba(17, 40, 70, 0.14);
+}
+
+body.admin-page .admin-header-brand,
+body.pcn-page .pcn-header-brand { gap: clamp(12px, 1.8vw, 25px); }
+body.admin-page .admin-header-logo,
+body.pcn-page .pcn-header-logo { width: clamp(98px, 9vw, 128px); }
+body.admin-page .topbar .eyebrow,
+body.pcn-page .topbar .eyebrow {
+  margin-bottom: 5px;
+  color: #a9deeb;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+body.admin-page .topbar h1,
+body.pcn-page .topbar h1 {
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: clamp(18px, 1.65vw, 22px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  text-shadow: none;
+}
+body.admin-page .topbar-actions,
+body.pcn-page .topbar-actions { gap: 4px; }
+body.admin-page .topbar-actions .ghost-button,
+body.admin-page .topbar-actions .ghost-link,
+body.pcn-page .topbar-actions .ghost-button,
+body.pcn-page .topbar-actions .ghost-link {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 0 13px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+}
+body.admin-page .topbar-actions .admin-nav-button.is-active {
+  border-color: rgba(169, 222, 235, 0.28);
+  background: rgba(169, 222, 235, 0.13);
+}
+body.admin-page .topbar-actions .admin-nav-button.is-active::after { background: var(--portal-cyan); }
+body.admin-page .topbar-actions .primary-button,
+body.pcn-page .topbar-actions .primary-button {
+  min-height: 40px;
+  border: 1px solid #f1c767;
+  border-radius: 8px;
+  background: #f1c767;
+  color: #192c46;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  box-shadow: none;
+}
+body.admin-page .topbar-actions .primary-button:hover,
+body.pcn-page .topbar-actions .primary-button:hover { background: #ffda82; color: #192c46; }
+
+body.pcn-page .workspace-normal {
+  gap: 20px;
+  padding: clamp(16px, 2vw, 30px);
+}
+body.admin-page .admin-overview {
+  gap: 14px;
+  padding: 18px clamp(16px, 2vw, 30px) 0;
+}
+body.admin-page .admin-overview div {
+  padding: 18px 20px;
+  border: 1px solid var(--portal-line);
+  border-radius: 12px;
+  box-shadow: 0 5px 16px rgba(22, 52, 91, 0.06);
+}
+body.admin-page .admin-overview div::before,
+body.admin-page .mail-routing-summary div::before { display: none; }
+body.admin-page .admin-overview strong { color: var(--portal-ink); font-size: 18px; }
+body.admin-page .admin-workspace {
+  gap: 20px;
+  padding: 20px clamp(16px, 2vw, 30px) 30px;
+}
+body.admin-page .mail-routing-layout { padding: 20px clamp(16px, 2vw, 30px) 30px; }
+body.admin-page .admin-panel,
+body.admin-page .admin-detail-panel,
+body.pcn-page .form-panel,
+body.pcn-page .summary-panel {
+  border: 1px solid var(--portal-line);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(22, 52, 91, 0.08);
+}
+body.admin-page .admin-panel,
+body.admin-page .admin-detail-panel { overflow: hidden; }
+body.admin-page .panel-header,
+body.pcn-page .summary-panel .panel-header {
+  padding: 20px 22px;
+  border-bottom: 1px solid #e5ecf4;
+  background: #fff;
+}
+body.admin-page .panel-header h2,
+body.pcn-page .summary-panel h2 {
+  color: var(--portal-ink);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+body.admin-page .section-label,
+body.pcn-page .summary-list dt {
+  color: var(--portal-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+body.admin-page .primary-button,
+body.pcn-page .primary-button {
+  min-height: 40px;
+  border: 1px solid var(--portal-action-yellow);
+  border-radius: 6px;
+  background: var(--portal-action-yellow);
+  color: #192c46;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: none;
+}
+body.admin-page .primary-button:hover,
+body.pcn-page .primary-button:hover {
+  border-color: var(--portal-action-yellow-hover);
+  background: var(--portal-action-yellow-hover);
+  color: #192c46;
+}
+body.admin-page .primary-button:disabled,
+body.pcn-page .primary-button:disabled {
+  border-color: #dfe5ed;
+  background: #dfe5ed;
+  color: #68788b;
+  box-shadow: none;
+}
+body.admin-page .ghost-button,
+body.admin-page .ghost-link,
+body.pcn-page .ghost-button,
+body.pcn-page .ghost-link {
+  min-height: 40px;
+  border-radius: 6px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+}
+body.admin-page .admin-table th {
+  padding: 12px 16px;
+  border-bottom: 1px solid #dce5ef;
+  background: #eef3f8;
+  color: #405674;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+body.admin-page .admin-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #e6ecf3;
+  color: #354963;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+body.admin-page .admin-table tbody tr:nth-child(even) td { background: #f9fbfd; }
+body.admin-page .admin-table tbody tr:hover td { background: #edf6fa; }
+body.admin-page .admin-table tr.is-selected td { background: #eaf2fa; }
+body.admin-page .admin-row-link { color: var(--portal-blue); font-weight: 700; }
+
+body.pcn-page .tabs { gap: 0; padding: 0 18px; background: #fff; border-bottom: 1px solid var(--portal-line); }
+body.pcn-page .tab {
+  min-height: 54px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  color: var(--portal-muted);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+body.pcn-page .tab:hover { background: #f4f9fc; color: var(--portal-blue); }
+body.pcn-page .tab.is-active { border: 0; border-bottom: 3px solid var(--portal-cyan); background: #fff; color: var(--portal-navy); box-shadow: none; }
+body.admin-page .account-panel,
+body.pcn-page .account-panel {
+  border-color: var(--portal-line);
+  border-radius: 14px;
+  box-shadow: 0 16px 38px rgba(11, 31, 65, 0.2);
+}
+body.admin-page .account-panel-heading,
+body.pcn-page .account-panel-heading { background: #f2f7fb; }
+body.admin-page .account-avatar,
+body.pcn-page .account-avatar { background: #d9e9f4; color: var(--portal-navy); }
+body.admin-page .account-profile-label,
+body.pcn-page .account-profile-label { color: var(--portal-muted); }
+
+body.admin-page :is(button, a, input, select, textarea):focus-visible,
+body.pcn-page :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid rgba(72, 173, 197, 0.55);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  body.admin-page .topbar,
+  body.pcn-page .topbar { flex-wrap: wrap; }
+  body.admin-page .topbar-actions,
+  body.pcn-page .topbar-actions { width: 100%; justify-content: flex-start; }
+  body.admin-page .admin-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  body.admin-page .topbar,
+  body.pcn-page .topbar { gap: 12px; padding: 13px 16px; }
+  body.admin-page .topbar-actions,
+  body.pcn-page .topbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    width: 100%;
+    gap: 4px 6px;
+    padding: 0;
+  }
+  body.admin-page .admin-header-brand,
+  body.pcn-page .pcn-header-brand { gap: 12px; }
+  body.admin-page .topbar-actions .ghost-button,
+  body.admin-page .topbar-actions .ghost-link,
+  body.pcn-page .topbar-actions .ghost-button,
+  body.pcn-page .topbar-actions .ghost-link {
+    width: auto;
+    min-height: 36px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+  body.pcn-page .topbar-actions .primary-button { width: auto; }
+  body.admin-page .topbar-actions .account-menu,
+  body.pcn-page .topbar-actions .account-menu { margin-left: auto; }
+  body.admin-page .admin-overview { gap: 8px; padding: 12px; }
+  body.admin-page .admin-overview div { padding: 12px; }
+  body.admin-page .admin-overview strong { font-size: 13px; }
+  body.admin-page .admin-workspace,
+  body.admin-page .mail-routing-layout { padding: 12px; }
+  body.admin-page .panel-header { padding: 17px; }
+  body.pcn-page .workspace-normal { padding: 12px; }
+}
+
+/* Keep the only submit control in view throughout the long PCN sheet. */
+body.pcn-page .app-shell { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+body.pcn-page .form-action-dock {
+  position: fixed;
+  z-index: 18;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  min-height: 74px;
+  padding: 12px clamp(18px, 2.5vw, 36px) calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid #cbdce9;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 -8px 26px rgba(17, 47, 87, 0.11);
+  backdrop-filter: blur(10px);
+}
+body.pcn-page.is-loading .form-action-dock,
+body.pcn-page.is-view-only .form-action-dock { display: none; }
+body.pcn-page .form-action-copy { display: grid; gap: 2px; min-width: 0; }
+body.pcn-page .form-action-copy strong { color: var(--portal-ink); font-size: 14px; }
+body.pcn-page .form-action-copy span { color: var(--portal-muted); font-size: 12px; line-height: 1.4; }
+body.pcn-page .form-action-dock #submitButton {
+  flex: 0 0 auto;
+  min-width: 168px;
+  min-height: 46px;
+  padding-inline: 24px;
+  font-size: 14px;
+}
+body.pcn-page .form-action-dock #submitButton:disabled { cursor: not-allowed; opacity: 0.55; box-shadow: none; }
+body.pcn-page.is-saving #submitButton::before {
+  border-color: rgba(25, 44, 70, 0.28);
+  border-top-color: #192c46;
+}
+@media (max-width: 640px) {
+  body.pcn-page .app-shell { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+  body.pcn-page .form-action-dock { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  body.pcn-page .form-action-copy { display: none; }
+  body.pcn-page .form-action-dock #submitButton { width: 100%; min-height: 48px; }
+}
+
+/* Floating feedback shares one quiet bottom-right position across the portal. */
+body.pcn-page .app-feedback-area {
+  position: fixed;
+  z-index: 80;
+  right: clamp(12px, 2vw, 28px);
+  bottom: calc(90px + env(safe-area-inset-bottom));
+  display: grid;
+  gap: 10px;
+  width: min(420px, calc(100vw - 24px));
+  pointer-events: none;
+}
+body.pcn-page .app-feedback-area .app-toast-stack {
+  position: static;
+  display: grid;
+  align-content: end;
+  gap: 10px;
+  width: 100%;
+  max-height: 45dvh;
+  overflow-y: auto;
+}
+body.pcn-page .app-feedback-area .app-toast-stack:empty { display: none; }
+body.pcn-page .app-feedback-area .app-notice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  max-height: 35dvh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #dce5ed;
+  border-left: 3px solid #a9bac9;
+  border-radius: 8px;
+  background: #fbfcfe;
+  box-shadow: 0 4px 12px rgba(17, 47, 87, 0.1);
+  color: #1a2e4b;
+  line-height: 1.4;
+  animation: none;
+}
+body.pcn-page .app-feedback-area .app-notice[hidden] { display: none; }
+body.pcn-page .app-feedback-area .app-notice::before { display: none; }
+body.pcn-page .app-feedback-area .app-notice strong { color: #1a2e4b; font-size: 14px; }
+body.pcn-page .app-feedback-area .app-notice span { color: #52677f; font-size: 12px; }
+body.pcn-page .app-feedback-area .app-notice-success { border-left-color: #70a995; }
+body.pcn-page .app-feedback-area .app-notice-warning {
+  border-color: #e7cb8f;
+  border-left: 5px solid #b7781e;
+  background: #fff9ec;
+  box-shadow: 0 12px 28px rgba(107, 76, 20, 0.17);
+}
+body.pcn-page .app-feedback-area .app-notice-warning strong { color: #74480d; }
+body.pcn-page .app-feedback-area .app-notice-error {
+  border-color: #e7b7b5;
+  border-left: 5px solid #b94143;
+  background: #fff5f3;
+  box-shadow: 0 12px 28px rgba(107, 32, 35, 0.19);
+}
+body.pcn-page .app-feedback-area .app-notice-error strong { color: #a52d31; }
+
+body.admin-page .admin-toast-stack {
+  top: auto;
+  right: clamp(12px, 2vw, 28px);
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: auto;
+  align-content: end;
+  width: min(420px, calc(100vw - 24px));
+  max-height: 75dvh;
+  overflow-y: auto;
+}
+body.pcn-page .app-toast,
+body.admin-page .admin-toast {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid #dce5ed;
+  border-left: 3px solid #a9bac9;
+  border-radius: 8px;
+  background: #fbfcfe;
+  box-shadow: 0 4px 12px rgba(17, 47, 87, 0.1);
+  color: #1a2e4b;
+  animation: portal-feedback-in 250ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+body.pcn-page .app-toast::before,
+body.admin-page .admin-toast::before { display: none; }
+body.pcn-page .app-toast strong,
+body.admin-page .admin-toast strong { color: #1a2e4b; font-size: 14px; }
+body.pcn-page .app-toast span,
+body.admin-page .admin-toast span { color: #52677f; font-size: 12px; line-height: 1.45; }
+body.pcn-page .app-toast-success,
+body.admin-page .admin-toast-success { border-left-color: #70a995; }
+body.pcn-page .app-toast-warning,
+body.admin-page .admin-toast-warning {
+  border-color: #e7cb8f;
+  border-left: 5px solid #b7781e;
+  background: #fff9ec;
+  box-shadow: 0 12px 28px rgba(107, 76, 20, 0.17);
+}
+body.pcn-page .app-toast-warning strong,
+body.admin-page .admin-toast-warning strong { color: #74480d; }
+body.pcn-page .app-toast-error,
+body.admin-page .admin-toast-error {
+  border-color: #e7b7b5;
+  border-left: 5px solid #b94143;
+  background: #fff5f3;
+  box-shadow: 0 12px 28px rgba(107, 32, 35, 0.19);
+}
+body.pcn-page .app-toast-error strong,
+body.admin-page .admin-toast-error strong { color: #a52d31; }
+body.pcn-page .app-toast.is-hiding,
+body.admin-page .admin-toast.is-hiding {
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 200ms ease, transform 200ms ease;
+  animation: none;
+}
+@keyframes portal-feedback-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 640px) {
+  body.pcn-page .app-feedback-area { right: 12px; bottom: calc(78px + env(safe-area-inset-bottom)); }
+  body.admin-page .admin-toast-stack { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.pcn-page .app-feedback-area .app-notice,
+  body.pcn-page .app-toast,
+  body.admin-page .admin-toast { animation: none; transition: none; }
+}

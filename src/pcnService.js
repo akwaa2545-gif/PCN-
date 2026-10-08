@@ -1,5 +1,5 @@
 const { ApiError } = require("./apiError");
-const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, isInternal } = require('./workflowAccess');
+const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, isInternal, isEmployeeViewer, canViewAllRecords } = require('./workflowAccess');
 const { isDeepStrictEqual } = require('node:util');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
 const { emailList } = require('./integrationService');
@@ -33,10 +33,12 @@ class PcnService {
   }
 
   async list(filters = {}, user) {
-    return this.repository.list({ ...filters, ...(user && !isInternal(user) ? { ownerUserId: user.id } : {}) });
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to view records');
+    return this.repository.list({ ...filters, ...(user && !canViewAllRecords(user) ? { ownerUserId: user.id } : {}) });
   }
 
   async getById(id, user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to view records');
     assertValidId(id);
     const record = await this.repository.findById(id);
 
@@ -71,6 +73,7 @@ class PcnService {
   }
 
   async create(input, actor = "web", user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to create records');
     const now = this.clock().toISOString();
     assertWritablePayload(input);
     const data = this.normalizeInput(input);
@@ -105,6 +108,7 @@ class PcnService {
   }
 
   async update(id, input, actor = "web", user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to edit records');
     assertValidId(id);
     assertWritablePayload(input);
 
@@ -170,6 +174,7 @@ class PcnService {
   }
 
   async remove(id, actor = "web", version, user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to delete records');
     assertValidId(id);
     const deleted = await this.repository.delete(id, actor, version, user);
 
@@ -181,6 +186,7 @@ class PcnService {
   }
 
   async addComment(id, input, actor = "web", user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to comment on records');
     assertValidId(id);
     const comment = sanitizeString(input && input.comment, "comment", 1, 1200);
     const role = user ? user.roles.join(', ').slice(0,80) : sanitizeString(input && input.role, "role", 1, 80);

@@ -1,7 +1,7 @@
 const { ApiError } = require('./apiError');
 const { getClientAddress } = require('./clientAddress');
 const { readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal } = require('./authHttp');
-const { hasRole, isInternal, assertRecordAccess } = require('./workflowAccess');
+const { hasRole, isInternal, isEmployeeViewer, assertRecordAccess } = require('./workflowAccess');
 const { buildWorkflow } = require('./masterData');
 const { normalizeUserId } = require('./employeeAccounts');
 
@@ -44,6 +44,7 @@ async function handleApi(req, res, url, context, requestId) {
     return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
   }
   const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
+  if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to access the PCN workspace');
   if (!['GET','HEAD'].includes(method)) {
     enforceSameOrigin(req, context.publicOrigin);
     enforceCsrf(req, principal);
