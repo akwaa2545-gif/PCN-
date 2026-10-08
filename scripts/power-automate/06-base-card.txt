@@ -1,0 +1,21 @@
+setProperty(
+  json('{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.2"}'),
+  'body',
+  createArray(
+    setProperty(
+      json('{"type":"TextBlock","size":"Large","weight":"Bolder","wrap":true}'),
+      'text',
+      if(equals(outputs('Compose_PCN_Kind'), 'action_required'), 'Action required', if(equals(outputs('Compose_PCN_Kind'), 'pcn_update'), 'PCN updated', 'Supplier PCN notification'))
+    ),
+    setProperty(
+      json('{"type":"TextBlock","wrap":true}'),
+      'text',
+      if(equals(outputs('Compose_PCN_Kind'), 'action_required'), 'A PCN is awaiting its assigned reviewer. Open it to see the next action.', if(equals(outputs('Compose_PCN_Kind'), 'pcn_update'), 'A PCN has been updated. This notice is for your information.', 'A supplier PCN notification was received.'))
+    ),
+    setProperty(
+      json('{"type":"TextBlock","wrap":true}'),
+      'text',
+      if(outputs('Compose_PCN_Link_Valid'), concat('PCN: ', outputs('Compose_PCN_Candidate')), 'Refer to the notification email for details. A validated PCN link is unavailable.')
+    )
+  )
+)

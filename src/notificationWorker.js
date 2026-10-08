@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const sql = require('mssql');
-const { lockUserMailRouting, readUserMailAssignments, filterPendingRecipients } = require('./userMailRouting');
+const { lockUserMailRouting, readUserMailAssignments, readGeneralNotificationUsers, filterPendingRecipients } = require('./userMailRouting');
+const { filterPendingUpdates } = require('./notificationUpdates');
 
 class NotificationWorker {
   constructor(pool, options = {}) {
@@ -51,8 +52,17 @@ class NotificationWorker {
       const row = result.recordset[0];
       if (!row) { await tx.commit(); return null; }
       const savedPayload = JSON.parse(row.PayloadJson);
-      const payload = savedPayload.routingSnapshot ? filterPendingRecipients(savedPayload, await readUserMailAssignments(tx)) : savedPayload;
-      const cancelled = Boolean(savedPayload.routingSnapshot && !payload.to);
+      let payload;
+      if (savedPayload.notificationKind === 'pcn_update') {
+        const current = await tx.request().input('code', sql.NVarChar(32), savedPayload.updateSnapshot?.pcnId)
+          .query('SELECT PcnCode,OwnerUserId FROM pcn.PcnRequests WITH(HOLDLOCK) WHERE PcnCode=@code AND DeletedAt IS NULL');
+        const row = current.recordset[0];
+        const record = row ? { id: row.PcnCode, ownerUserId: row.OwnerUserId } : null;
+        payload = filterPendingUpdates(savedPayload, await readGeneralNotificationUsers(tx), record);
+      } else {
+        payload = savedPayload.routingSnapshot ? filterPendingRecipients(savedPayload, await readUserMailAssignments(tx)) : savedPayload;
+      }
+      const cancelled = Boolean((savedPayload.routingSnapshot || savedPayload.notificationKind === 'pcn_update') && !payload.to);
       await tx.request().input('id', sql.UniqueIdentifier, row.Id).input('token', sql.UniqueIdentifier, claimToken)
         .input('recipient', sql.NVarChar(1000), payload.to || '').input('payload', sql.NVarChar(sql.MAX), JSON.stringify(payload))
         .query(cancelled
@@ -62,7 +72,7 @@ class NotificationWorker {
             WHERE Id=@id AND Status=N'pending'`);
       await tx.commit();
       // Account changes after the committed claim do not recall an in-flight send.
-      const { routingSnapshot: omitted, ...mail } = payload;
+      const { routingSnapshot: omitted, updateSnapshot: omittedUpdate, notificationKind: omittedKind, ...mail } = payload;
       return { Id: row.Id, payload: mail, cancelled };
     } catch (error) {
       try { await tx.rollback(); } catch { /* Preserve the original database error. */ }

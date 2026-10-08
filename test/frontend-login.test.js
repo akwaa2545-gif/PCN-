@@ -41,7 +41,7 @@ test('employee form has a single employee code field and retains explicit passwo
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'auth.css'), 'utf8'), /\.auth-card \[hidden\]/);
 });
 
-async function loginPage(config = { mode: 'employee-code' }) {
+async function loginPage(config = { mode: 'employee-code' }, search = '', authenticated = false) {
   const elements = new Map();
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
@@ -55,9 +55,11 @@ async function loginPage(config = { mode: 'employee-code' }) {
   const redirects = [];
   let init;
   const window = {
-    location: { search: '', assign(url) { redirects.push(url); } },
-    PCN_SESSION: {
-      safeReturnTo() { return '/'; }, load: async () => ({ authenticated: false }),
+    location: { origin: 'https://pcn.example', pathname: '/login', search, hash: '', assign(url) { redirects.push(url); } }
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'session-client.js'), 'utf8'), { window, URL, Headers });
+  window.PCN_SESSION = {
+      ...window.PCN_SESSION, load: async () => ({ authenticated, user: { mustChangePassword: false } }),
       async fetch(url, options) {
         calls.push({ url, options });
         if (url === '/api/auth/config') {
@@ -66,7 +68,6 @@ async function loginPage(config = { mode: 'employee-code' }) {
         }
         return { authenticated: true, user: { mustChangePassword: false } };
       }
-    }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'login.js'), 'utf8'), {
     window, URLSearchParams,
@@ -90,8 +91,25 @@ test('configured employee login reveals only the employee form and submits its c
   await new Promise(setImmediate);
   const submission = page.calls.find((call) => call.url === '/api/auth/login');
   assert.equal(submission.options.body, JSON.stringify({ employeeCode: '0012345' }));
-  assert.deepEqual(page.redirects, ['/']);
+  assert.deepEqual(page.redirects, ['/create']);
   assert.equal(page.element('employeeLoginFormSubmit').disabled, false);
+});
+
+test('employee sign-in returns to the same PCN query link using the session redirect validator', async () => {
+  const page = await loginPage({ mode: 'employee-code' }, '?returnTo=%2Fform.html%3Fid%3DPCN-2026-0001');
+  page.element('employeeCode').value = '0012345';
+  page.element('employeeLoginForm').events.submit({ preventDefault() {} });
+  await new Promise(setImmediate);
+  assert.deepEqual(page.redirects, ['/form.html?id=PCN-2026-0001']);
+  assert.equal(page.calls.filter((call) => call.url === '/api/auth/login').length, 1);
+});
+
+test('existing authenticated login returns to the PCN while unsafe return destinations fall back locally', async () => {
+  const page = await loginPage({ mode: 'employee-code' }, '?returnTo=%2Fform.html%3Fid%3DPCN-2026-0001', true);
+  assert.deepEqual(page.redirects, ['/form.html?id=PCN-2026-0001']);
+  assert.equal(page.calls.some((call) => call.url === '/api/auth/login'), false);
+  const unsafe = await loginPage({ mode: 'employee-code' }, '?returnTo=https%3A%2F%2Fevil.example%2F', true);
+  assert.deepEqual(unsafe.redirects, ['/create']);
 });
 
 test('failed setup remains retryable and recovery hides retry while preventing a wrong-mode login', async () => {

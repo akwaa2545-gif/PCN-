@@ -971,8 +971,9 @@
         method: "PATCH",
         body: JSON.stringify({ status: nextStatus, version: state.activeRequest.version })
       });
+      const notificationStatus = state.activeRequest.notification ? await sendPendingWorkflowNotifications(state.activeRequest) : "";
       await refreshPcns(state.activeRequest.id);
-      showNotice("success", "Workflow updated", `Current status is ${titleCase(state.activeRequest.status)}.`);
+      showNotice("success", "Workflow updated", `Current status is ${titleCase(state.activeRequest.status)}.${notificationStatus}`);
     } catch (error) {
       showNotice("error", "Workflow update failed", error.message);
     }
@@ -1407,10 +1408,28 @@
     state.pendingWorkflowNotifications.add(control.dataset.internalField);
   }
 
+  function splitNotificationStatus(outcome) {
+    const issues = {
+      recipient_not_configured: 'next-step recipients are not configured.',
+      no_verified_recipients: 'no verified recipients have access to this PCN.',
+      mail_not_configured: 'mail service is not configured.',
+      tapbu_requirement_not_selected: 'select the required TaPBU approval choice.',
+      notification_configuration_invalid: 'notification configuration needs review.'
+    };
+    const messages = [['PCN update emails', outcome.update], ['Action-required email', outcome.actionRequired]]
+      .flatMap(([label, result]) => {
+        if (!result) return [];
+        if (result.queued) return [`${label} queued${label === 'Action-required email' ? ` for ${result.nextLabel || 'the next step'}` : ''}.`];
+        return issues[result.reason] ? [`${label} not queued: ${issues[result.reason]}`] : [];
+      });
+    return messages.length ? ` ${messages.join(' ')}` : '';
+  }
+
   async function sendPendingWorkflowNotifications(record) {
     if (record.notification) {
       state.pendingWorkflowNotifications.clear();
       const outcome = record.notification;
+      if (outcome.actionRequired || outcome.update) return splitNotificationStatus(outcome);
       if (outcome.queued) return ` Workflow email queued for ${outcome.nextLabel || "the next step"}.`;
       if (outcome.reason === "recipient_not_configured") return " Workflow email not queued: next-step recipients are not configured.";
       if (outcome.reason === "mail_not_configured") return " Workflow email not queued: mail service is not configured.";

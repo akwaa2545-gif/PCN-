@@ -1,0 +1,1 @@
+first(split(last(split(outputs('Compose_PCN_Message'), '<a href="https://172.30.77.137:8443/form.html?id=')), '"'))
