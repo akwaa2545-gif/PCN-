@@ -4,6 +4,7 @@ const { readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigi
 const { hasRole, isInternal, isEmployeeViewer, assertRecordAccess } = require('./workflowAccess');
 const { buildWorkflow } = require('./masterData');
 const { normalizeUserId } = require('./employeeAccounts');
+const { buildChecks, buildAction } = require('./documentChecks');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -121,6 +122,35 @@ async function handleApi(req, res, url, context, requestId) {
   if (!match) throw new ApiError(404,'API route not found');
   const [,code,subroute] = match;
   const record = await service.getById(code,user);
+  if (subroute === 'checks' && method === 'GET') {
+    const files = context.documents ? await context.documents.list(code) : [];
+    return send(buildChecks(record,files));
+  }
+  if (subroute === 'action' && method === 'GET') {
+    const users = isInternal(user) ? await authService.repository.listUsers() : [];
+    return send(buildAction(record,user,users));
+  }
+  if (subroute === 'revisions') {
+    if (method === 'GET') return send({items:await service.getRevisions(code,user),
+      capabilities:{canStartRevision:user.isActive !== false && hasRole(user,'admin') && !['approved','rejected','closed'].includes(record.status)}});
+    if (method === 'POST') {
+      admin();
+      const body = await readJsonBody(req);
+      assertBodyKeys(body,['version','reason']);
+      requireVersion(body);
+      return send(await service.startRevision(code,body,actor,user),201);
+    }
+  }
+  const revision = /^revisions\/([1-9]\d*)$/.exec(subroute || '');
+  if (revision && method === 'GET') {
+    const number = Number(revision[1]);
+    if (!Number.isSafeInteger(number)) throw new ApiError(400,'Invalid revision number');
+    return send(await service.getRevision(code,number,user));
+  }
+  if (subroute === 'documents' && method === 'GET') {
+    if (!context.documents) throw new ApiError(503,'Document storage is unavailable');
+    return send(await context.documents.list(code));
+  }
   if (!subroute && method === 'GET') return send(record);
   if (!subroute && ['PATCH','PUT'].includes(method)) {
     const body = await readJsonBody(req);
@@ -155,6 +185,19 @@ async function handleApi(req, res, url, context, requestId) {
     const body = await readJsonBody(req,15000000);
     requireVersion(body);
     return send(await context.documents.save(code,body,{user,actor,version:body.version}),201);
+  }
+  const preview = /^documents\/([0-9a-f-]{36})\/preview$/i.exec(subroute || '');
+  if (preview && method === 'GET') {
+    if (!context.documents) throw new ApiError(503,'Document storage is unavailable');
+    const file = await context.documents.get(code,preview[1]);
+    if (!['application/pdf','image/png','image/jpeg','image/gif','image/webp','text/plain'].includes(file.ContentType)) {
+      throw new ApiError(415,'This file type cannot be previewed; download it instead');
+    }
+    res.writeHead(200,{'content-type':file.ContentType,
+      'content-disposition':`inline; filename="${file.FileName.replace(/[^a-zA-Z0-9._-]/g,'_')}"`,
+      'content-security-policy':"default-src 'none'; sandbox; frame-ancestors 'self'",
+      'x-frame-options':'SAMEORIGIN','cache-control':'no-store'});
+    return res.end(file.Bytes);
   }
   const doc = /^documents\/([0-9a-f-]{36})$/i.exec(subroute || '');
   if (doc && ['GET','DELETE'].includes(method)) {

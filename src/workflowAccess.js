@@ -28,7 +28,7 @@ function flatten(value, prefix = '') {
 }
 const at = (value, path) => path.split('.').reduce((obj, key) => obj?.[key], value);
 const isEmpty = value => value === false || value === '' || value === null || value === undefined;
-const routeGroups = risk => ['signoff.gscTet','signoff.prodEngTet','signoff.qaTet',...(risk === 'RL0' ? [] : ['tapbu.gsc','tapbu.qa']),'qateFinal.signoff'];
+const routeGroups = (risk, review = {}) => ['signoff.gscTet','signoff.prodEngTet','signoff.qaTet',...(risk === 'RL0' || review.tapbu?.noNeed === true ? [] : ['tapbu.gsc','tapbu.qa']),'qateFinal.signoff'];
 const complete = (review, group) => ['approved','checked','prepared'].every(action => at(review, `${group}.${action}`) === true);
 
 function canEditReview(user, path) {
@@ -47,10 +47,22 @@ function canEditReview(user, path) {
 }
 
 function assertReviewUpdate(before = {}, after = {}, user, risk) {
-  for (const path of ['signoff', 'tapbu', 'qateFinal', ...Object.keys(stageDepartments)]) {
+  for (const path of ['supplierSignoff', ...actions.map(action => `supplierSignoff.${action}`), 'signoff', 'tapbu', 'qateFinal', ...Object.keys(stageDepartments)]) {
     const value = at(after, path);
     if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) {
       throw new ApiError(400, 'Signoff sections must be objects');
+    }
+  }
+  for (const action of actions) {
+    const checked = at(after, `supplierSignoff.${action}.checked`);
+    if (checked !== undefined && typeof checked !== 'boolean') throw new ApiError(400, 'Signoff checks must be boolean');
+    for (const field of ['checked', 'name', 'date']) {
+      const path = `supplierSignoff.${action}.${field}`;
+      const previous = at(before, path);
+      const value = at(after, path);
+      if (JSON.stringify(previous) !== JSON.stringify(value) && !(isEmpty(previous) && isEmpty(value)) && !canEditReview(user, path)) {
+        throw new ApiError(403, 'This review field requires an authorized department');
+      }
     }
   }
   for (const [stage, department] of Object.entries(stageDepartments)) {
@@ -76,7 +88,8 @@ function assertReviewUpdate(before = {}, after = {}, user, risk) {
   if (risk === 'RL0' && after.tapbu?.need) throw new ApiError(400, 'RL0 does not require TaPBU approval');
   if (after.qateFinal?.approve && after.qateFinal?.reject) throw new ApiError(400, 'Final judgment choices conflict');
   if (after.decision?.rejected && (after.decision?.agreed || after.decision?.agreedAfterQualification)) throw new ApiError(400, 'Review decision choices conflict');
-  const groups = routeGroups(risk);
+  const groups = routeGroups(risk, after);
+  if (after.tapbu?.noNeed === true && ['tapbu.gsc','tapbu.qa'].some(group => actions.some(action => at(after, `${group}.${action}`) === true))) throw new ApiError(400, 'No-need cannot include TaPBU signoffs');
   for (let index = 0; index < groups.length; index++) {
     const group = groups[index];
     const flags = ['approved','checked','prepared'];
@@ -107,6 +120,20 @@ function assertStatusPermission(record, nextStatus, user) {
 
 function applySignatureIdentity(before, after, user, now) {
   const review = structuredClone(after);
+  for (const action of actions) {
+    const path = `supplierSignoff.${action}`;
+    const current = at(review, path);
+    const previous = at(before, `${path}.checked`);
+    if (current?.checked !== previous && typeof current?.checked === 'boolean') {
+      current.name = current.checked ? String(user.displayName || user.username || user.employeeCode || '').slice(0, 200) : '';
+    } else {
+      const oldName = at(before, `${path}.name`);
+      const name = current?.name;
+      if ((previous === true && current?.checked !== true) || (name !== oldName && (!isEmpty(name) || !isEmpty(oldName)))) {
+        throw new ApiError(400, 'Signer identity is recorded when signing');
+      }
+    }
+  }
   for (const stage of Object.keys(stageDepartments)) {
     const current = at(review, stage);
     if (!current || typeof current !== 'object') continue;

@@ -62,7 +62,7 @@ function normalizeMailRouting(value = {}) {
 function resolveNextMailTarget(record) {
   if (!record || ['draft', 'supplier_action', 'rejected', 'closed'].includes(record.status)) return null;
   const review = record.internalReview || {};
-  for (const stageKey of routeGroups(record.riskLevel)) {
+  for (const stageKey of routeGroups(record.riskLevel, review)) {
     const step = stageKey.split('.').reduce((entry, key) => entry?.[key], review);
     const action = actions.find(key => step?.[key] !== true);
     if (!action) continue;

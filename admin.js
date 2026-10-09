@@ -726,7 +726,7 @@
       const card = document.createElement("article");
       card.className = "notification-department";
       card.dataset.department = key;
-      card.innerHTML = `<header class="notification-department-header"><h3>${escapeHtml(label)}</h3><p>${key === "qaTet" ? "Used for initial review and final judgment" : "Separate recipients for each signing step"}</p></header>`;
+      card.innerHTML = `<header class="notification-department-header"><h3>${escapeHtml(label)}</h3></header>`;
       ["approved", "checked", "prepared"].forEach((action) => {
         const group = state.notificationSettings.groups.find((entry) => entry.key === `department.${key}.${action}`);
         if (group) card.appendChild(createNotificationGroup(group, titleCase(action)));
@@ -748,13 +748,7 @@
     const list = card.querySelector(".notification-person-list");
     const recipients = getEditorGroupRecipients(group);
     recipients.forEach((recipient) => appendRecipientRow(list, recipient));
-    if (card.managedRecipients.length) {
-      const managed = document.createElement('div'); managed.className = 'notification-managed-recipients';
-      const title = document.createElement('h5'); title.textContent = 'Managed from Users'; managed.appendChild(title);
-      card.managedRecipients.forEach((recipient) => managed.appendChild(createManagedRecipient(recipient)));
-      const help = document.createElement('small'); help.textContent = 'Change the user’s department, signing step or active status in Users to update this list.'; managed.appendChild(help);
-      card.appendChild(managed);
-    }
+    card.managedRecipients.forEach((recipient) => list.appendChild(createManagedRecipient(recipient)));
     updateRecipientCount(list);
     renderRecipientValidation(list);
     card.querySelector(".notification-add-button").addEventListener("click", () => {
@@ -780,7 +774,11 @@
     const email = document.createElement('span'); email.className = 'notification-person-email'; email.textContent = recipient.email || '';
     const meta = document.createElement('div'); meta.className = 'notification-person-meta';
     meta.textContent = [recipient.jobTitle, recipient.department].filter(Boolean).join(' - '); meta.hidden = !meta.textContent;
-    body.append(name, email, meta); row.append(avatar, body);
+    const source = document.createElement('span');
+    source.className = 'notification-recipient-source';
+    source.textContent = 'From Users';
+    source.title = 'Edit this assignment in Users.';
+    body.append(name, email, meta); row.append(avatar, body, source);
     return row;
   }
 
@@ -947,6 +945,7 @@
     const list = card.querySelector(".notification-person-list");
     list.innerHTML = "";
     merged.forEach((recipient) => appendRecipientRow(list, recipient));
+    card.managedRecipients.forEach((recipient) => list.appendChild(createManagedRecipient(recipient)));
     markMailChanged();
     list.querySelector(".notification-remove-button")?.focus();
   }
@@ -1377,7 +1376,7 @@
     const boxCount = new Set([...manual, ...managed].map((email) => email.toLowerCase())).size;
 
     if (counter) {
-      counter.textContent = `${boxCount} recipient${boxCount === 1 ? "" : "s"}${managed.length ? ` · ${managed.length} managed from Users` : ''}`;
+      counter.textContent = `${boxCount} recipient${boxCount === 1 ? "" : "s"}`;
     }
   }
 

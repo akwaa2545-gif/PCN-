@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startApi, validPayload, unsignedPayload, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
 
-test('administrator, reviewer and department role alone cannot forge signatures or permission fields', async t => {
+test('reviewer and department role alone cannot sign, and administrators cannot forge permission fields', async t => {
   const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
     { username: 'reviewer', roles: ['reviewer'], department: 'gscTet' },
     { username: 'gsc-role-only', roles: ['gsc'], department: 'gscTet' }
@@ -11,7 +11,7 @@ test('administrator, reviewer and department role alone cannot forge signatures 
   const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
   assert.equal(created.status, 201);
   const record = created.body.data;
-  for (const username of ['admin', 'reviewer', 'gsc-role-only']) {
+  for (const username of ['reviewer', 'gsc-role-only']) {
     const session = await api.login(username);
     const denied = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
       body: { version: record.version, internalReview: { signoff: { gscTet: { approved: true } } } } });
@@ -28,6 +28,7 @@ test('exact department signer records server identity and cannot alter other sig
   const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
     { username: 'gsc-approved', displayName: 'Verified Approver', roles: ['gsc'], department: 'gscTet', signingStep: 'approved' },
     { username: 'gsc-checked', displayName: 'Verified Checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' },
+    { username: 'reviewer', roles: ['reviewer'] },
     { username: 'qa-approved', roles: ['qa'], department: 'qaTet', signingStep: 'approved' }
   ] }) });
   const admin = await api.login('admin');
@@ -36,6 +37,7 @@ test('exact department signer records server identity and cannot alter other sig
   let record = created.body.data;
   const approver = await api.login('gsc-approved');
   const checker = await api.login('gsc-checked');
+  const reviewer = await api.login('reviewer');
   const qa = await api.login('qa-approved');
   const patch = (session, signoff) => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
     body: { version: record.version, internalReview: { signoff } } });
@@ -48,7 +50,7 @@ test('exact department signer records server identity and cannot alter other sig
   assert.equal(record.internalReview.signoff.gscTet.approvedDate, record.updatedAt.slice(0, 10));
   assert.equal((await patch(approver, { gscTet: { checked: true } })).status, 403, 'other step denied');
   assert.equal((await patch(approver, { gscTet: { approvedName: 'Rewrite Name' } })).status, 400, 'signed identity immutable');
-  assert.equal((await patch(admin, { gscTet: { approved: false } })).status, 403, 'admin cannot clear signer');
+  assert.equal((await patch(reviewer, { gscTet: { approved: false } })).status, 403, 'reviewer cannot clear signer');
   const checked = await patch(checker, { gscTet: { checked: true } });
   assert.equal(checked.status, 200);
   record = checked.body.data;
@@ -58,6 +60,68 @@ test('exact department signer records server identity and cannot alter other sig
   assert.equal(cleared.status, 200);
   assert.equal(cleared.body.data.internalReview.signoff.gscTet.checkedName, '');
   assert.equal(cleared.body.data.internalReview.signoff.gscTet.checkedDate, '');
+});
+
+test('an unassigned administrator signs all 18 ordered steps and supplier checks with recorded identity', async t => {
+  const displayName = 'Verified Administrator';
+  const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
+    { username: 'global-admin', displayName, roles: ['admin'], department: 'it', signingStep: null },
+    { username: 'disabled-admin', displayName: 'Disabled Administrator', roles: ['admin'], isActive: false }
+  ] }) });
+  const admin = await api.login('global-admin');
+  const disabled = await api.login('disabled-admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  assert.equal(created.status, 201);
+  let record = created.body.data;
+  const patch = (internalReview, session = admin) => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
+    body: { version: record.version, internalReview } });
+  assert.equal((await patch({ signoff: { gscTet: { checked: true } } })).status, 400, 'administrator cannot skip prerequisite');
+  assert.equal((await patch({ signoff: { prodEngTet: { approved: true } } })).status, 400, 'administrator cannot skip preceding department');
+  assert.equal((await patch({ signoff: { gscTet: { approved: true } } }, disabled)).status, 403, 'disabled administrator cannot sign');
+  assert.equal((await api.repository.findById(record.id)).version, record.version);
+
+  for (const action of ['approved', 'checked', 'prepared']) {
+    const response = await patch({ supplierSignoff: { [action]: { checked: true, name: 'Forged Supplier' } } });
+    assert.equal(response.status, 200, `supplier ${action}`);
+    record = response.body.data;
+    assert.equal(record.internalReview.supplierSignoff[action].checked, true);
+    assert.equal(record.internalReview.supplierSignoff[action].name, displayName);
+  }
+  const required = await patch({ tapbu: { need: true } });
+  assert.equal(required.status, 200);
+  record = required.body.data;
+  const stages = [
+    ['signoff', 'gscTet'], ['signoff', 'prodEngTet'], ['signoff', 'qaTet'],
+    ['tapbu', 'gsc'], ['tapbu', 'qa'], ['qateFinal', 'signoff']
+  ];
+  for (const [section, group] of stages) {
+    for (const action of ['approved', 'checked', 'prepared']) {
+      const response = await patch({ [section]: { [group]: { [action]: true,
+        [`${action}Name`]: 'Forged Name', [`${action}Date`]: '1900-01-01' } } });
+      assert.equal(response.status, 200, `${section}.${group}.${action}: ${response.text}`);
+      record = response.body.data;
+      const signature = record.internalReview[section][group];
+      assert.equal(signature[action], true);
+      assert.equal(signature[`${action}Name`], displayName);
+      assert.equal(signature[`${action}Date`], record.updatedAt.slice(0, 10));
+    }
+  }
+  for (const internalReview of [
+    { signoff: { gscTet: { approvedName: 'Rewritten Name' } } },
+    { signoff: { gscTet: { approvedDate: '1900-01-01' } } },
+    { supplierSignoff: { prepared: { name: 'Rewritten Supplier' } } }
+  ]) assert.equal((await patch(internalReview)).status, 400, 'administrator cannot rewrite signed identity');
+  const judgment = await patch({ qateFinal: { approve: true } });
+  assert.equal(judgment.status, 200);
+  record = judgment.body.data;
+  assert.equal(record.internalReview.qateFinal.approve, true);
+  for (const [section, group] of stages) {
+    for (const action of ['approved', 'checked', 'prepared']) {
+      assert.equal(record.internalReview[section][group][action], true);
+      assert.equal(record.internalReview[section][group][`${action}Name`], displayName);
+    }
+  }
+  assert.equal(api.messages.length, 0);
 });
 
 test('SQL and authentication dependencies are required; no JSON fallback', () => {
@@ -142,9 +206,9 @@ test('PCN CRUD preserves historical workbook signatures, comments and approval m
     body: { version: comment.body.data.version, role: 'QA', decision: 'hold', comment: 'Need pilot lot' } });
   assert.equal(approval.status, 201);
   const update = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin,
-    body: { version: approval.body.data.version, internalReview: { materialCodeDescription: 'Updated workbook description' } } });
+    body: { version: approval.body.data.version, internalReview: { signoff: { gscTet: { comment: 'Updated review comment' } } } } });
   assert.equal(update.status, 200);
-  assert.equal(update.body.data.internalReview.materialCodeDescription, 'Updated workbook description');
+  assert.equal(update.body.data.internalReview.signoff.gscTet.comment, 'Updated review comment');
   assert.equal(update.body.data.comments[0].comment, 'Checked: lot A ✅');
   assert.equal(update.body.data.approvals[0].decision, 'hold');
   assert.deepEqual(update.body.data.internalReview.qateFinal, approval.body.data.internalReview.qateFinal);

@@ -8,7 +8,7 @@ const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 
-const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
+const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
 
 function createRequestHandler(options = {}) {
@@ -25,7 +25,7 @@ function createRequestHandler(options = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     try {
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith('/api/')) {

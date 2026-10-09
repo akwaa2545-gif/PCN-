@@ -25,6 +25,14 @@ test('verified one-step assignments add managed contacts without changing manual
   assert.equal(normalizeMailRouting(result).groups[1].automaticRecipients.length, 0);
 });
 
+test('administrator signing access does not subscribe an unassigned administrator to mail lists', () => {
+  const administrator = { ...user, roles: ['admin'], department: 'it', signingStep: null };
+  const unassigned = normalizeMailRouting(applyUserMailRouting(settings, [administrator]));
+  assert.equal(unassigned.groups.some(group => group.automaticRecipients.length), false);
+  const assigned = normalizeMailRouting(applyUserMailRouting(settings, [{ ...administrator, department: 'gscTet', signingStep: 'checked' }]));
+  assert.deepEqual(assigned.groups.filter(group => group.automaticRecipients.length).map(group => group.key), ['department.gscTet.checked']);
+});
+
 test('disabled, unverified, wrong-role and retired identities are excluded; manual duplicate survives revocation', () => {
   for (const patch of [{ isActive: false }, { mailVerifiedAt: null }, { identityProvider: 'retired-windows' }, { roles: ['supplier'] }, { department: 'it' }, { mailDirectoryId: '' }]) {
     assert.equal(normalizeMailRouting(applyUserMailRouting(settings, [{ ...user, ...patch }])).groups[0].automaticRecipients.length, 0);

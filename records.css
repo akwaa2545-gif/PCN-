@@ -90,3 +90,7 @@ body.records-page .access-pending .section-label { color: #1d7090; }
   body.records-page .records-toolbar { padding: 18px 16px 0; }
   body.records-page .records-message { padding-inline: 16px; }
 }
+
+/* MES component finish; retain the records page's existing dimensions. */
+body.records-page .records-toolbar input { border-color: #c3cdd5; background: #f3f5f6; }
+body.records-page .access-pending { border-color: var(--portal-line); border-top-color: var(--mes-gold); }

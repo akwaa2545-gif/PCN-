@@ -28,7 +28,9 @@ function validateSigningAssignment({ roles, department, signingStep }) {
 }
 
 function canSign(user, department, action) {
-  if (!user || user.isActive === false || !actions.includes(action) || user.department !== department || user.signingStep !== action) return false;
+  if (!user || user.isActive === false || !Object.hasOwn(departmentRoles, department) || !actions.includes(action)) return false;
+  if (rolesOf(user).includes('admin')) return true;
+  if (user.department !== department || user.signingStep !== action) return false;
   try { validateSigningAssignment(user); return true; } catch { return false; }
 }
 

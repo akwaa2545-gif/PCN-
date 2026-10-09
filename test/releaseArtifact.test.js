@@ -65,6 +65,11 @@ test('only tracked runtime allowlist paths are packaged', () => {
   }
 });
 
+test('document controls and recovery ship as runtime assets while migrations stay explicit', () => {
+  const files=['document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js'];
+  assert.deepEqual(selectRuntimeFiles([...files,'sql/migrations/005_document_control.sql']),[...files].sort());
+});
+
 test('signing accepts only Ed25519 keys and safe CI counters', () => {
   assert.throws(() => signManifest(Buffer.from('{}'), crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey), /Ed25519/);
   assert.throws(() => createManifest({ archive, commit: 'a'.repeat(40), runNumber: 0, runAttempt: 1 }), /manifest/i);

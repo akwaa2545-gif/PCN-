@@ -12,7 +12,7 @@ function app(controls = [], workflow) {
       renderAll = () => {};
       showNotice = (...args) => window.PCN_WORKFLOW_TEST.notices.push(args);
     }
-    window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, advanceWorkflowStep, toApiPayload, canSignStep, updateApprovalCheckLocks };})();`);
+    window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, advanceWorkflowStep, toApiPayload, canSignStep, updateApprovalCheckLocks, getHandwrittenSignature, getSignatureTooltip: typeof getSignatureTooltip === 'function' ? getSignatureTooltip : undefined };})();`);
   vm.runInNewContext(source, { window, URLSearchParams, document: { addEventListener() {},
     querySelector(selector) { const field = /data-internal-field="([^"]+)"/.exec(selector)?.[1]; return controls.find(control => control.dataset.internalField === field) || null; },
     querySelectorAll() { return controls; }
@@ -51,6 +51,19 @@ test('atomic saved handoff reports next action without a second HTTP write', asy
   assert.equal(c.app.state.pendingWorkflowNotifications.size, 0);
   assert.match(message, /queued for GSC\/TET Checked/);
   assert.doesNotMatch(message, /email sent|delivered/i);
+});
+
+test('untouched template rows cannot change sparse historical document content while signing', () => {
+  const c=app();
+  const first={risk:'RL2',optionText:'First',text:'First',currentCondition:'Old',newCondition:'New'};
+  const second={risk:'RL1',optionText:'Second',text:'Second',currentCondition:'',newCondition:''};
+  c.app.state.savedRecord={id:'PCN-2026-0007',changeForm:'rawMaterial',changeRows:[first]};
+  const request={id:'PCN-2026-0007',changeForm:'rawMaterial',selectedChange:'First',changeRows:[first,second]};
+  assert.equal(JSON.stringify(c.app.toApiPayload(request).changeRows),JSON.stringify([first]));
+  const edited={...second,newCondition:'Additional meaningful change'};
+  assert.equal(JSON.stringify(c.app.toApiPayload({...request,changeRows:[first,edited]}).changeRows),JSON.stringify([first,edited]));
+  c.app.state.savedRecord.changeRows=[second,first];
+  assert.equal(JSON.stringify(c.app.toApiPayload(request).changeRows),JSON.stringify([second,first]),'untouched persisted row order is retained');
 });
 
 test('split saved notifications report update and action queues independently without sending again', async () => {
@@ -115,9 +128,16 @@ test('blocked or unchanged saved handoff never retries through the legacy endpoi
   }
 });
 
-test('browser signing matches the single assigned department and step', () => {
+test('browser administrators can sign every department and step while other roles keep their assignments', () => {
   const c = app();
   c.app.state.user = { roles: ['admin'] };
+  for (const group of ['signoff.gscTet', 'signoff.prodEngTet', 'signoff.qaTet', 'tapbu.gsc', 'tapbu.qa', 'qateFinal.signoff']) {
+    for (const action of ['approved', 'checked', 'prepared']) assert.equal(c.app.canSignStep(group, action), true);
+  }
+  assert.equal(c.app.canSignStep('signoff.unknown', 'approved'), false);
+  for (const group of ['constructor', 'toString', '__proto__']) assert.equal(c.app.canSignStep(group, 'approved'), false);
+  assert.equal(c.app.canSignStep('signoff.gscTet', 'unknown'), false);
+  c.app.state.user = { roles: ['admin'], isActive: false };
   assert.equal(c.app.canSignStep('signoff.gscTet', 'approved'), false);
   c.app.state.user = { roles: ['qa'], department: 'qaTet', signingStep: 'prepared' };
   assert.equal(c.app.canSignStep('signoff.qaTet', 'prepared'), true);
@@ -126,12 +146,77 @@ test('browser signing matches the single assigned department and step', () => {
   assert.equal(c.app.canSignStep('tapbu.qa', 'prepared'), false);
 });
 
+test('handwritten signing names use saved identity rather than the current viewer', () => {
+  const c = app();
+  const review = { signoff: { gscTet: { approved: true, approvedName: '  Teranat Yasan  ' } }, supplierSignoff: { prepared: { checked: true, name: 'Tana Chootong' } } };
+  const viewer = { displayName: 'Different Viewer' };
+  const signed = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, review, review, viewer);
+  assert.equal(signed.firstName, 'Teranat');
+  assert.equal(signed.fullName, 'Teranat Yasan');
+  assert.equal(signed.pending, false);
+  assert.equal(c.app.getHandwrittenSignature('supplierSignoff.prepared.checked', true, review, review, viewer).firstName, 'Tana');
+  assert.equal(c.app.getHandwrittenSignature('signoff.gscTet.approved', false, review, review, viewer).firstName, '');
+  assert.equal(c.app.getHandwrittenSignature('docs.hazardousReport', true, review, review, viewer), null);
+});
+
+test('historical signatures without identity are never attributed to the viewer', () => {
+  const c = app();
+  const review = { signoff: { gscTet: { approved: true } } };
+  const historical = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, review, review, { displayName: 'Current Viewer' });
+  assert.equal(historical.firstName, '');
+  assert.equal(historical.pending, false);
+  const preview = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, {}, {}, { displayName: 'New Signer' });
+  assert.equal(preview.firstName, 'New');
+  assert.equal(preview.pending, true);
+});
+
+test('signature tooltip identifies the saved signer and saved date despite unsaved date edits', () => {
+  const c = app();
+  const saved = { signoff: { gscTet: { approved: true, approvedName: 'WATCHARAPHONG Approver', approvedDate: '2026-10-09' } } };
+  const edited = { signoff: { gscTet: { approved: true, approvedName: 'WATCHARAPHONG Approver', approvedDate: '2099-01-01' } } };
+  const signature = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, edited, saved, { displayName: 'Different Viewer' });
+  assert.equal(signature.signedDate, '2026-10-09');
+  const tooltip = c.app.getSignatureTooltip(signature);
+  assert.match(tooltip, /GSC\/TET Approved/);
+  assert.match(tooltip, /Signed by:\s*WATCHARAPHONG Approver/);
+  assert.match(tooltip, /Date:\s*2026-10-09/);
+  assert.doesNotMatch(tooltip, /Different Viewer|2099-01-01/);
+});
+
+test('supplier signature tooltip uses its saved date and honestly reports missing historical identity', () => {
+  const c = app();
+  const saved = { supplierSignoff: { approved: { checked: true, date: '2026-10-01' } } };
+  const edited = { supplierSignoff: { approved: { checked: true, date: '2099-01-01' } } };
+  const signature = c.app.getHandwrittenSignature('supplierSignoff.approved.checked', true, edited, saved, { displayName: 'Current Viewer' });
+  assert.equal(signature.signedDate, '2026-10-01');
+  const tooltip = c.app.getSignatureTooltip(signature);
+  assert.match(tooltip, /Supplier Approved/);
+  assert.match(tooltip, /Signed by:\s*Not recorded/);
+  assert.match(tooltip, /Date:\s*2026-10-01/);
+  assert.doesNotMatch(tooltip, /Current Viewer|2099-01-01/);
+  const undated = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, { signoff: { gscTet: { approved: true } } }, { signoff: { gscTet: { approved: true } } }, null);
+  assert.match(c.app.getSignatureTooltip(undated), /Date:\s*Not recorded/);
+});
+
+test('pending signature tooltip does not invent a signing date or claim it is saved', () => {
+  const c = app();
+  const edited = { signoff: { gscTet: { approved: true, approvedDate: '2099-01-01' } } };
+  const signature = c.app.getHandwrittenSignature('signoff.gscTet.approved', true, edited, {}, { displayName: 'New Signer' });
+  assert.equal(signature.signedDate, '');
+  const tooltip = c.app.getSignatureTooltip(signature);
+  assert.match(tooltip, /Selected by:\s*New Signer/);
+  assert.match(tooltip, /Not saved yet/);
+  assert.doesNotMatch(tooltip, /Signed by:|2099-01-01/);
+  assert.equal(c.app.getSignatureTooltip(null), '');
+  assert.equal(c.app.getSignatureTooltip(c.app.getHandwrittenSignature('signoff.gscTet.approved', false, edited, {}, null)), '');
+});
+
 test('unauthorized existing signatures and metadata stay disabled in the browser', () => {
   const controls = ['signoff.gscTet.approved', 'signoff.gscTet.approvedName', 'signoff.gscTet.date', 'qateFinal.approve'].map(field => ({
     dataset: { internalField: field }, checked: true, disabled: false, closest() { return null; }
   }));
   const c = app(controls);
-  c.app.state.user = { roles: ['admin'] };
+  c.app.state.user = { roles: ['reviewer'] };
   c.app.updateApprovalCheckLocks();
   assert.ok(controls.every(control => control.disabled));
   assert.ok(controls.every(control => control.checked));

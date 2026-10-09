@@ -3,6 +3,7 @@ const crypto = require('node:crypto');
 const { ApiError } = require('../../src/apiError');
 const { createApp } = require('../../src/httpServer');
 const { NotificationService } = require('../../src/notificationService');
+const { fieldChanges, snapshot } = require('../../src/documentControl');
 const TEST_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_NEW_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_ACCESS_VERSION = '0000000000000001';
@@ -28,10 +29,22 @@ const { internalReview: historicalReview, ...unsignedPayload } = validPayload;
 
 function memoryRepository() {
   let records = {};
+  let revisions = {};
   let settings = { groups: [] };
   let counter = 0;
   const version = () => (++counter).toString(16).padStart(16, '0');
+  const appendRevision = (id, before, after, actor) => {
+    const history = revisions[id] || [];
+    const entry = { revision: history.length + 1, contentRevision: after.documentControl?.contentRevision || 1,
+      actor: String(typeof actor === 'object' ? actor?.displayName || actor?.id || 'system' : actor || 'system'),
+      createdAt: after.updatedAt || after.createdAt, status: after.status || 'draft',
+      changes: fieldChanges(before ? snapshot(before) : {}, snapshot(after)), isBaseline: false,
+      snapshot: snapshot(after) };
+    revisions = { ...revisions, [id]: [...history, entry] };
+  };
   return {
+    async getRevisions(id) { return structuredClone((revisions[id] || []).toReversed().map(({ snapshot: omitted, ...entry }) => entry)); },
+    async getRevision(id, revision) { return structuredClone((revisions[id] || []).find(entry => entry.revision === revision) || null); },
     async list(filters = {}) { return structuredClone(Object.values(records).filter(row => (!filters.status || row.status === filters.status) && (!filters.ownerUserId || row.ownerUserId === filters.ownerUserId))); },
     async findById(id) { return structuredClone(records[id] || null); },
     // Simulate a historical SQL record without creating privileged signatures through HTTP.
@@ -41,9 +54,10 @@ function memoryRepository() {
       records = { ...records, [id]: seeded };
       return structuredClone(seeded);
     },
-    async create(record) {
+    async create(record, actor) {
       const id = `PCN-${record.createdAt.slice(0, 4)}-${String(Object.keys(records).length + 1).padStart(4, '0')}`;
       const created = { ...structuredClone(record), id, version: version(), internalReview: { ...record.internalReview, pcnCode: id } };
+      appendRevision(id, null, created, actor);
       records = { ...records, [id]: created }; return structuredClone(created);
     },
     async update(id, updater, actor, expectedVersion) {
@@ -51,6 +65,7 @@ function memoryRepository() {
       if (!records[id]) return null;
       if (expectedVersion !== records[id].version) throw new ApiError(409, 'PCN has been changed by another user');
       const updated = { ...await updater(structuredClone(records[id])), version: version() };
+      appendRevision(id, records[id], updated, actor);
       records = { ...records, [id]: updated }; return structuredClone(updated);
     },
     async delete(id, actor, expectedVersion) {

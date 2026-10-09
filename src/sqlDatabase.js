@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const sql = require('mssql');
 const { getSqlConfig } = require('./sqlConfig');
 
-const migrationManifest = ['001_core.sql', '002_employee_identity.sql', '003_employee_code_auth.sql', '004_user_signing_permissions.sql'];
+const migrationManifest = ['001_core.sql', '002_employee_identity.sql', '003_employee_code_auth.sql', '004_user_signing_permissions.sql', '005_document_control.sql'];
 const migrationLock = "DECLARE @result int; EXEC @result = sys.sp_getapplock @Resource=N'pcn:schema-migrations', @LockMode=N'Exclusive', @LockOwner=N'Transaction', @LockTimeout=15000; IF @result < 0 THROW 51000, 'Could not acquire migration lock', 1;";
 async function connectSql(env = process.env) { return new sql.ConnectionPool(getSqlConfig(env)).connect(); }
 

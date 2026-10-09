@@ -61,7 +61,7 @@ test('routing count unions manual and managed addresses without counting case du
   const card = { managedRecipients: [{ email: 'person@example.test' }, { email: 'managed@example.test' }], querySelector: () => counter };
   const list = { closest: () => card, querySelectorAll: () => [{ value: 'PERSON@example.test' }, { value: 'manual@example.test' }] };
   api.updateRecipientCount(list);
-  assert.equal(counter.textContent, '3 recipients · 2 managed from Users');
+  assert.equal(counter.textContent, '3 recipients');
 });
 
 test('explicit legacy copy merges case-insensitively without editing its source', () => {

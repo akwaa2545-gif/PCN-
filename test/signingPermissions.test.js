@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validateSigningAssignment, canSign, signaturePath } = require('../src/signingPermissions');
+const { actions, departments, validateSigningAssignment, canSign, signaturePath } = require('../src/signingPermissions');
 
 test('one signing step requires a matching department and role', () => {
   assert.doesNotThrow(() => validateSigningAssignment({ roles: ['qa'], department: 'qaTet', signingStep: 'checked' }));
@@ -13,13 +13,29 @@ test('one signing step requires a matching department and role', () => {
   ]) assert.throws(() => validateSigningAssignment(assignment), { statusCode: 400 });
 });
 
-test('administrator management does not imply a signing assignment', () => {
-  assert.equal(canSign({ roles: ['admin'] }, 'gscTet', 'approved'), false);
-  const user = { roles: ['admin'], department: 'gscTet', signingStep: 'approved' };
-  assert.equal(canSign(user, 'gscTet', 'approved'), true);
-  assert.equal(canSign(user, 'gscTet', 'checked'), false);
+test('active administrators can sign every known department and action without an assignment', () => {
+  for (const user of [{ roles: ['admin'] }, { roles: ['Admin'], department: 'it', signingStep: null },
+    { roles: ['admin'], department: 'gscTet', signingStep: 'approved' }]) {
+    for (const { key } of departments) {
+      for (const action of actions) assert.equal(canSign(user, key, action), true, `${key}.${action}`);
+    }
+    assert.equal(canSign({ ...user, isActive: false }, 'gscTet', 'approved'), false);
+    assert.equal(canSign(user, 'unknown', 'approved'), false);
+    assert.equal(canSign(user, 'qaTet', 'unknown'), false);
+  }
+  assert.equal(canSign(null, 'qaTet', 'approved'), false);
+});
+
+test('non-administrators retain exact role, department and signing step requirements', () => {
+  const user = { roles: ['qa'], department: 'qaTet', signingStep: 'checked' };
+  assert.equal(canSign(user, 'qaTet', 'checked'), true);
   assert.equal(canSign(user, 'qaTet', 'approved'), false);
-  assert.equal(canSign({ ...user, isActive: false }, 'gscTet', 'approved'), false);
+  assert.equal(canSign(user, 'qaTapbu', 'checked'), false);
+  assert.equal(canSign({ ...user, isActive: false }, 'qaTet', 'checked'), false);
+  for (const roles of [['reviewer'], ['qa'], ['supplier'], ['administrator']]) {
+    assert.equal(canSign({ roles }, 'qaTet', 'checked'), false);
+  }
+  assert.equal(canSign({ ...user, roles: ['supplier'] }, 'qaTet', 'checked'), false);
 });
 
 test('signature flags and metadata share the exact permission, including QA final', () => {

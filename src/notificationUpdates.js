@@ -3,7 +3,7 @@ const { isInternal } = require('./workflowAccess');
 const { emailList } = require('./integrationService');
 
 const metadata = new Set(['id', 'version', 'createdAt', 'updatedAt', 'submittedAt', 'ownerUserId', 'masterDataVersionId',
-  'mailRoutingState', 'mailRoutingPolicyVersion', 'notification', 'workflow', 'workflowProgress']);
+  'mailRoutingState', 'mailRoutingPolicyVersion', 'notification', 'workflow', 'workflowProgress', 'documentControl']);
 const labels = { status: 'Status', riskLevel: 'Risk level', changeForm: 'Change form', internalReview: 'Internal review',
   comments: 'Comments', approvals: 'Approvals', supplierName: 'Supplier', manufacturerName: 'Manufacturer',
   materialName: 'Material', changeRows: 'Change details', documents: 'Documents', route: 'Workflow route' };

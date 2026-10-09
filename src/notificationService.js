@@ -69,9 +69,9 @@ class NotificationService {
     const changes = signoffChanges(before, proposed);
     const terminalCompletion = ['closed', 'rejected'].includes(proposed.status)
       && changes.completed.some(field => field.stageKey === 'qateFinal.signoff')
-      && routeGroups(proposed.riskLevel).every(stage => complete(proposed.internalReview, stage));
+      && routeGroups(proposed.riskLevel, proposed.internalReview).every(stage => complete(proposed.internalReview, stage));
     const preserveFinalNotice = ['closed', 'rejected'].includes(proposed.status)
-      && prior?.groupKey === 'supplierNotification' && routeGroups(proposed.riskLevel).every(stage => complete(proposed.internalReview, stage));
+      && prior?.groupKey === 'supplierNotification' && routeGroups(proposed.riskLevel, proposed.internalReview).every(stage => complete(proposed.internalReview, stage));
     const target = resolveNextMailTarget(terminalCompletion || preserveFinalNotice ? { ...proposed, status: 'approved' } : proposed);
     const nextKey = target ? `${target.stageKey}:${target.action || 'notification'}` : '';
     const priorKey = prior ? `${prior.stageKey}:${prior.action || 'notification'}` : '';
@@ -184,7 +184,8 @@ class NotificationService {
     // A stale browser must not duplicate a handoff already recorded by the save transaction.
     if (record.mailRoutingPolicyVersion === 2) return { queued: false, reason: 'handled_on_save' };
     const completedKey = input.completedGroupKey || groups.find(([key, label]) => input.completedGroup === key || input.completedGroup === label)?.[0];
-    const route = groups.filter(([key]) => record.riskLevel !== 'RL0' || !key.startsWith('tapbu.'));
+    const effectiveGroups = [...routeGroups(record.riskLevel, record.internalReview), 'supplierNotification'];
+    const route = groups.filter(([key]) => effectiveGroups.includes(key));
     const index = route.findIndex(([key]) => key === completedKey);
     if (index < 0 || index >= route.length - 1) throw new ApiError(400, 'Invalid completed notification group');
     if (!route.slice(0, index + 1).every(([key]) => complete(record.internalReview, key))) {
@@ -239,7 +240,7 @@ class NotificationService {
 
 function signoffChanges(before, after) {
   const at = (record, stage, action) => stage.split('.').reduce((value, key) => value?.[key], record?.internalReview)?.[action] === true;
-  const fields = routeGroups(after.riskLevel).flatMap(stageKey => actions.map(action => ({ stageKey, action })));
+  const fields = routeGroups(after.riskLevel, after.internalReview).flatMap(stageKey => actions.map(action => ({ stageKey, action })));
   return {
     completed: fields.filter(field => !at(before, field.stageKey, field.action) && at(after, field.stageKey, field.action)),
     invalidated: fields.some(field => at(before, field.stageKey, field.action) && !at(after, field.stageKey, field.action))

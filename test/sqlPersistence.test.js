@@ -99,7 +99,7 @@ test('year counter refuses code overflow rather than creating an inaccessible co
 test('readiness rejects unapplied migration and missing seeded master data', async () => {
   const pool = mockPool([{ recordsets: [[], [], []] }]);
   await assert.rejects(new SqlPcnRepository(pool).readiness(), { statusCode: 503 });
-  const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 21 }]] }]);
+  const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 22 }]] }]);
   assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: migrationManifest.length });
 });
 

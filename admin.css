@@ -81,13 +81,9 @@ body.admin-page .users-table-wrap { margin: 0 28px; border: 1px solid #e1e7ef; b
 .users-table td:last-child { display: flex; align-items: flex-start; gap: 8px; }
 body.admin-page .users-table td:last-child button { min-height: 36px; margin: 0; padding: 6px 12px; font-size: 13px; }
 
-.notification-managed-recipients { padding: 12px; margin-top: 10px; border: 1px solid #cbd5e1; background: #f4f7fb; }
-.notification-managed-recipients h5 { margin: 0 0 8px; font-size: 14px; color: #272974; }
-.notification-managed-recipients .notification-person { margin: 8px 0; grid-template-columns: 34px minmax(0, 1fr); }
 .notification-person-identity { overflow-wrap: anywhere; color: #272974; font-size: 12px; font-weight: 600; }
 .notification-person-managed .notification-person-meta, .employee-user-identity .notification-person-meta { overflow-wrap: anywhere; white-space: normal; }
 .employee-user-identity { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 10px; align-items: center; min-width: 180px; }
-.notification-managed-recipients small { display: block; margin-top: 8px; color: #465570; }
 .employee-user-form [hidden] { display: none; }
 
 @media (max-width: 980px) {
@@ -246,4 +242,45 @@ body.admin-page .recipient-dialog-actions .primary-button:hover { color: #192c46
 @media (max-width: 420px) {
   body.admin-page .employee-user-form { margin-inline: 12px; padding: 14px; }
   body.admin-page .users-table-wrap { margin-inline: 12px; }
+}
+
+/* Flat MES surfaces; page layout and responsive rules remain above. */
+body.admin-page .employee-user-form { background: #fff; }
+body.admin-page .employee-selected,
+body.admin-page .employee-route-preview,
+body.admin-page .users-panel > .admin-message { background: #f3f5f6; border-color: var(--portal-line); }
+body.admin-page .notification-groups { background: #fff; }
+body.admin-page .notification-department-header,
+body.admin-page .notification-department:nth-child(2n) .notification-department-header,
+body.admin-page .notification-department:nth-child(3n) .notification-department-header { background: var(--mes-blue); }
+body.admin-page .notification-department .notification-step .notification-group-header,
+body.admin-page .recipient-dialog-actions { background: #f3f5f6; }
+body.admin-page .users-table th { background: var(--mes-blue); color: #fff; letter-spacing: 0; text-transform: none; }
+body.admin-page .users-table tbody tr:nth-child(even) { background: #f4f7f9; }
+body.admin-page .users-table tbody tr:hover { background: #e9f1f7; }
+body.admin-page .employee-user-form :is(input, select):focus-visible { outline: 2px solid #0b69b2; outline-offset: 2px; border-color: #0b69b2; }
+
+/* Signing steps contain one list of contacts; a badge identifies Users assignments. */
+body.admin-page .mail-routing-panel > .webhook-config {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+body.admin-page .notification-department-header h3 { margin: 0; }
+body.admin-page .notification-step .notification-person-managed { grid-template-columns: 34px minmax(0, 1fr) auto; }
+body.admin-page .notification-recipient-source {
+  justify-self: end;
+  padding: 5px 8px;
+  border: 1px solid #c3cdd5;
+  background: #f3f5f6;
+  color: #435b70;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  body.admin-page .notification-step .notification-person-managed { grid-template-columns: 26px minmax(0, 1fr); }
+  body.admin-page .notification-recipient-source { grid-column: 2; justify-self: start; }
 }

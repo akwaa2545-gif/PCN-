@@ -73,10 +73,21 @@
     pendingWorkflowNotifications: new Set(),
     viewOnly: false,
     apiReady: false,
+    savedSubmissionSnapshot: null,
+    skipNextUnload: false,
     message: "Connecting to backend..."
   };
 
   const els = {};
+  let signoffResizeObserver;
+  let signatureTooltipLabel;
+  let signatureTooltipHideTimer;
+  let updateSuccessTimer;
+  let discardDialogPending = false;
+  let confirmedNavigationTarget;
+  let documentUI;
+  let documentMutationBusy = false;
+  let documentLoadGeneration = 0;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -92,9 +103,18 @@
         window.location.assign('/records');
         return;
       }
-      window.PCN_SESSION.mountProfile(session.user, (error) => showNotice("error", "Sign out failed", error.message));
+      window.PCN_SESSION.mountProfile(session.user, error => {
+        state.skipNextUnload = false;
+        showNotice("error", "Sign out failed", error.message);
+      });
       await loadFromApi();
       renderAll();
+      if (window.PCN_DOCUMENT_BRIDGE) {
+        documentUI = window.PCN_DOCUMENT_BRIDGE.mount({getContext:documentContext,apiFetch,
+          notify:showNotice,prepareRestore:renderAll,finishRestore:finishDocumentRestore,onMutationBusy:setDocumentMutationBusy,
+          onSavedFile:loadDocumentMutation,onStartRevision:loadDocumentMutation,focusField:focusDocumentField});
+        documentUI.loaded();
+      }
     } catch (error) {
       showNotice("error", "Unable to load portal", error.message);
     } finally {
@@ -127,17 +147,37 @@
       "adminGrid",
       "loadDemoButton",
       "submitButton",
+      "pcnCreateIntro",
+      "summaryTitle",
+      "formActionTitle",
+      "formActionDescription",
       "appNotice",
       "appNoticeTitle",
       "appNoticeMessage",
       "appToastStack",
-      "pcnSaveOverlay"
+      "pcnSaveOverlay",
+      "pcnUpdateSuccess",
+      "pcnUpdateSuccessCode",
+      "pcnUnsavedDialog",
+      "pcnKeepEditing",
+      "pcnLeaveWithoutSaving"
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
   }
 
   function bindEvents() {
+    window.addEventListener('beforeunload', guardBeforeUnload);
+    document.addEventListener('click', guardPageNavigation, true);
+    ['input', 'change'].forEach(type => document.addEventListener(type, event => {
+      if (event.target.closest?.('#submissionView')) state.skipNextUnload = false;
+    }));
+    bindSignatureSizing();
+    window.addEventListener('scroll', hideSignatureTooltip, true);
+    window.addEventListener('resize', hideSignatureTooltip);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') hideSignatureTooltip();
+    });
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => switchView(tab.dataset.view));
     });
@@ -161,7 +201,8 @@
       });
     });
 
-    els.loadDemoButton.addEventListener("click", () => {
+    els.loadDemoButton.addEventListener("click", async () => {
+      if (!await confirmDiscardChanges()) return;
       state.activeRequest = createNewRequest();
       loadRequestToForm(state.activeRequest);
       state.message = "Demo values loaded. Submit to create a new PCN id.";
@@ -170,6 +211,7 @@
     });
 
     els.submitButton.addEventListener("click", submitActiveRequest);
+    document.getElementById('saveDraftButton')?.addEventListener('click', () => submitActiveRequest('draft'));
 
     document.querySelectorAll('input[name="sampleSubmittedChoice"]').forEach((control) => {
       control.addEventListener("change", () => {
@@ -266,8 +308,8 @@
         showNotice("success", "PCN loaded", state.message);
       } else {
         state.activeRequest = createNewRequest();
-        state.message = "Database is ready. Submit to create a new PCN.";
-        showNotice("info", "Create PCN", "Fill the form and submit to generate a PCN code.");
+        state.message = "Ready to create a new PCN.";
+        showNotice("info", "Create PCN", "Fill the form, then choose Create PCN to generate a PCN code.");
       }
       state.apiReady = true;
       loadRequestToForm(state.activeRequest);
@@ -340,6 +382,7 @@
   }
 
   function switchView(viewName) {
+    hideSignatureTooltip();
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.classList.toggle("is-active", tab.dataset.view === viewName);
     });
@@ -349,6 +392,7 @@
   }
 
   function loadRequestToForm(request) {
+    state.savedRecord = structuredCloneSafe(request);
     Object.entries(request).forEach(([key, value]) => {
       if (els[key]) {
         els[key].value = value || "";
@@ -362,6 +406,109 @@
     renderChangeOptions();
     syncSupplierDetailControls(request);
     applyInternalReviewToForm(request.internalReview || {});
+    state.pendingWorkflowNotifications = new Set();
+    markSubmissionSaved();
+    documentUI?.loaded();
+  }
+
+  function getSubmissionSnapshot() {
+    const controls = document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea');
+    return JSON.stringify(Array.from(controls, (control, index) => [
+      control.id || control.dataset?.internalField || control.name || index,
+      control.type || control.tagName,
+      ['checkbox', 'radio'].includes(control.type) ? Boolean(control.checked) : String(control.value ?? '')
+    ]));
+  }
+
+  function hasUnsavedChanges() {
+    return Boolean(state.apiReady && !state.viewOnly && state.savedSubmissionSnapshot !== null &&
+      state.savedSubmissionSnapshot !== getSubmissionSnapshot());
+  }
+
+  function markSubmissionSaved(snapshot = getSubmissionSnapshot()) {
+    state.savedSubmissionSnapshot = snapshot;
+    state.skipNextUnload = false;
+  }
+
+  function confirmDiscardChanges() {
+    if (!hasUnsavedChanges()) return Promise.resolve(true);
+    const dialog = els.pcnUnsavedDialog;
+    if (discardDialogPending || !dialog || dialog.open) return Promise.resolve(false);
+    hideSignatureTooltip();
+    discardDialogPending = true;
+    return new Promise(resolve => {
+      const stay = () => dialog.close('stay');
+      const leave = () => dialog.close('leave');
+      const cancel = event => { event.preventDefault(); stay(); };
+      const containClick = event => event.stopPropagation();
+      const trapFocus = event => {
+        if (event.key === 'Escape') { event.stopPropagation(); return; }
+        if (event.key !== 'Tab') return;
+        if (event.shiftKey && document.activeElement === els.pcnLeaveWithoutSaving) {
+          event.preventDefault();
+          els.pcnKeepEditing.focus();
+        } else if (!event.shiftKey && document.activeElement === els.pcnKeepEditing) {
+          event.preventDefault();
+          els.pcnLeaveWithoutSaving.focus();
+        }
+      };
+      const finish = () => {
+        els.pcnKeepEditing.removeEventListener('click', stay);
+        els.pcnLeaveWithoutSaving.removeEventListener('click', leave);
+        dialog.removeEventListener('cancel', cancel);
+        dialog.removeEventListener('click', containClick);
+        dialog.removeEventListener('keydown', trapFocus);
+        dialog.removeEventListener('close', finish);
+        discardDialogPending = false;
+        if (dialog.returnValue === 'leave') documentUI?.discard();
+        resolve(dialog.returnValue === 'leave');
+      };
+      els.pcnKeepEditing.addEventListener('click', stay);
+      els.pcnLeaveWithoutSaving.addEventListener('click', leave);
+      dialog.addEventListener('cancel', cancel);
+      dialog.addEventListener('click', containClick);
+      dialog.addEventListener('keydown', trapFocus);
+      dialog.addEventListener('close', finish);
+      dialog.returnValue = 'stay';
+      dialog.showModal();
+      els.pcnKeepEditing.focus();
+    });
+  }
+
+  function guardBeforeUnload(event) {
+    if (state.skipNextUnload) {
+      state.skipNextUnload = false;
+      return;
+    }
+    if (!hasUnsavedChanges()) return;
+    event.preventDefault();
+    event.returnValue = '';
+  }
+
+  async function guardPageNavigation(event) {
+    if (event.defaultPrevented || event.button > 0) return;
+    const signOut = event.target.closest?.('.account-sign-out');
+    const link = event.target.closest?.('a[href]');
+    const navigationTarget = signOut || link;
+    if (navigationTarget && navigationTarget === confirmedNavigationTarget) return;
+    if (!signOut) {
+      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
+      const href = link.getAttribute('href');
+      const target = new URL(href, window.location.href);
+      if (!['http:', 'https:'].includes(target.protocol)) return;
+      if (target.origin === window.location.origin && target.pathname === window.location.pathname &&
+          target.search === window.location.search && (href.startsWith('#') || target.hash)) return;
+    }
+    if (!hasUnsavedChanges()) return;
+    // Stop the original action before awaiting a decision, especially the logout POST.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (!await confirmDiscardChanges() || navigationTarget.isConnected === false) return;
+    state.skipNextUnload = true;
+    confirmedNavigationTarget = navigationTarget;
+    try { navigationTarget.click(); }
+    finally { confirmedNavigationTarget = null; }
   }
 
   function updateStateFromForm() {
@@ -382,6 +529,7 @@
       materialName: els.materialName.value.trim(),
       desiredStart: els.desiredStart.value.trim(),
       sampleSubmitted: els.sampleSubmitted.value,
+      sampleSubmittedDate: document.getElementById('sampleWhen')?.value.trim() || '',
       changeRows: getVisibleChangeRowsFromState(),
       currentCondition: selectedRow.currentCondition,
       newCondition: selectedRow.newCondition,
@@ -394,8 +542,15 @@
     };
   }
 
-  async function submitActiveRequest() {
+  async function submitActiveRequest(mode) {
+    if (documentMutationBusy || document.body.classList.contains('is-saving')) return;
+    hideUpdateSuccess();
     updateStateFromForm();
+    const savedStatus = state.activeRequest.status;
+    const draftAllowed = !state.activeRequest.id || ['draft','supplier_action'].includes(savedStatus);
+    if (mode === 'draft' && !draftAllowed) return;
+    if (mode === 'draft') state.activeRequest = {...state.activeRequest,status:savedStatus === 'supplier_action' ? savedStatus : 'draft'};
+    else if (savedStatus === 'draft') state.activeRequest = {...state.activeRequest,status:'submitted'};
 
     if (!state.apiReady) {
       state.message = "Cannot save until the PCN data has loaded from the server. Refresh the page and try again.";
@@ -413,10 +568,16 @@
       const hasDatabaseId = /^PCN-\d{4}-\d{4}$/.test(String(state.activeRequest.id || ""));
       const path = hasDatabaseId ? `/api/pcns/${state.activeRequest.id}` : "/api/pcns";
       const method = hasDatabaseId ? "PATCH" : "POST";
+      const submittedSnapshot = getSubmissionSnapshot();
+      const recoverySnapshot = documentUI?.submitted();
       const saved = await apiFetch(path, {
         method,
         body: JSON.stringify(toApiPayload(state.activeRequest))
       });
+      markSubmissionSaved(submittedSnapshot);
+      state.savedRecord = structuredCloneSafe(saved);
+      if (!hasDatabaseId && window.history?.replaceState) window.history.replaceState(null,'',`/form.html?id=${encodeURIComponent(saved.id)}`);
+      documentUI?.saved(recoverySnapshot);
 
       let mailMessage = "";
       let mailWarning = "";
@@ -427,14 +588,19 @@
         mailWarning = getWorkflowNotificationWarning(mailError);
       }
 
-      await refreshPcns(saved.id);
+      if (hasUnsavedChanges()) {
+        state.pcns = await apiFetch('/api/pcns');
+        syncSavedRecordKeepingEdits(saved);
+      } else await refreshPcns(saved.id, {preserveEditsSince:submittedSnapshot});
       state.message = `${hasDatabaseId ? `Updated ${saved.id}.` : `Auto-generated PCN code ${saved.id}.`}${mailMessage}`;
       showNotice("success", hasDatabaseId ? "PCN updated" : "PCN created", state.message);
+      if (hasDatabaseId) showUpdateSuccess(saved.id);
 
       if (mailWarning) {
         showToast("warning", "Workflow email not sent", mailWarning);
       }
     } catch (error) {
+      state.activeRequest = {...state.activeRequest,status:state.savedRecord?.status || savedStatus};
       state.message = error.message;
       showNotice("error", "Save failed", error.message);
     } finally {
@@ -452,6 +618,22 @@
     }
 
     els.pcnSaveOverlay.hidden = !isVisible;
+  }
+
+  function showUpdateSuccess(pcnId) {
+    if (!els.pcnUpdateSuccess || !els.pcnUpdateSuccessCode) return;
+    hideUpdateSuccess();
+    els.pcnUpdateSuccessCode.textContent = pcnId;
+    // Flush the hidden state so a repeated update restarts the check animation.
+    void els.pcnUpdateSuccess.offsetWidth;
+    els.pcnUpdateSuccess.hidden = false;
+    updateSuccessTimer = window.setTimeout(hideUpdateSuccess, 2200);
+  }
+
+  function hideUpdateSuccess() {
+    if (updateSuccessTimer) window.clearTimeout(updateSuccessTimer);
+    updateSuccessTimer = null;
+    if (els.pcnUpdateSuccess) els.pcnUpdateSuccess.hidden = true;
   }
 
   function getWorkflowNotificationWarning(error) {
@@ -477,9 +659,10 @@
       materialName: request.materialName,
       desiredStart: request.desiredStart,
       sampleSubmitted: request.sampleSubmitted,
+      sampleSubmittedDate: request.sampleSubmittedDate || '',
       currentCondition: request.currentCondition,
       newCondition: request.newCondition,
-      changeRows: request.changeRows || [],
+      changeRows: serializeChangeRows(request),
       reason: request.reason,
       identification: request.identification,
       sampleLocation: request.sampleLocation,
@@ -488,10 +671,49 @@
     };
   }
 
-  async function refreshPcns(activeId) {
+  function serializeChangeRows(request) {
+    const rows = request.changeRows || [];
+    const saved = state.savedRecord;
+    const previous = saved && saved.id === request.id && saved.changeForm === request.changeForm ? saved.changeRows || [] : [];
+    const key = row => getChangeRowOptionText(row);
+    const retained = previous.map(row => rows.find(candidate => key(candidate) === key(row)) || row);
+    const added = rows.filter(row => !previous.some(existing => key(existing) === key(row)) &&
+      (row.text === request.selectedChange || row.text !== key(row) || row.currentCondition || row.newCondition));
+    return [...retained, ...added];
+  }
+
+  async function refreshPcns(activeId, options = {}) {
     state.pcns = await apiFetch("/api/pcns");
-    state.activeRequest = state.pcns.find((record) => record.id === activeId) || state.pcns[0] || { ...demoRequest };
+    const saved=state.pcns.find((record) => record.id === activeId) || state.pcns[0] || { ...demoRequest };
+    if(options.preserveEditsSince && getSubmissionSnapshot() !== options.preserveEditsSince) {
+      syncSavedRecordKeepingEdits(saved);
+      showNotice('warning','Saved — newer edits remain','The submitted changes are saved. Save your newer edits when ready.');
+      return;
+    }
+    state.activeRequest = saved;
     loadRequestToForm(state.activeRequest);
+  }
+
+  function syncSavedRecordKeepingEdits(saved) {
+    const review = structuredCloneSafe(state.activeRequest.internalReview || {});
+    const savedReview = saved.internalReview || {};
+    const metadata = /^(supplierSignoff\.(approved|checked|prepared)\.(name|date)|(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)(Name|Date))$/;
+    const baseline = JSON.parse(state.savedSubmissionSnapshot || '[]');
+    document.querySelectorAll('.internal-field').forEach(control => {
+      const field = control.dataset?.internalField;
+      if (field !== 'pcnCode' && !metadata.test(field || '')) return;
+      const value = field === 'pcnCode' ? saved.id : String(getByPath(savedReview, field) || '');
+      setByPath(review, field, value);
+      control.value = value;
+      const key = control.id || field;
+      const entry = baseline.find(item => item[0] === key);
+      if (entry) entry[2] = value;
+    });
+    state.savedSubmissionSnapshot = JSON.stringify(baseline);
+    state.loadedReview = structuredCloneSafe(savedReview);
+    state.savedRecord = structuredCloneSafe(saved);
+    state.activeRequest = {...state.activeRequest,id:saved.id,version:saved.version,status:saved.status,
+      documentControl:saved.documentControl,internalReview:review};
   }
 
   function renderAll() {
@@ -508,6 +730,67 @@
     }
     updateApprovalCheckLocks();
     if (state.viewOnly) applyViewOnly();
+    renderDocumentEditability();
+    documentUI?.changed();
+  }
+
+  function documentContext() {
+    return {record:state.activeRequest,savedRecord:state.savedRecord,user:state.user,dirty:hasUnsavedChanges(),ready:state.apiReady,
+      viewOnly:state.viewOnly,canStartRevision:(state.user?.roles || []).some(role => String(role).toLowerCase() === 'admin') && Boolean(state.activeRequest.id) && !['approved','rejected','closed'].includes(state.activeRequest.status),
+      exportPdf:() => documentUI?.exportPdf()};
+  }
+
+  async function loadDocumentMutation(result) {
+    const beforeId=state.activeRequest.id;
+    const beforeVersion=state.activeRequest.version;
+    const id = result.id && /^PCN-/.test(result.id) ? result.id : state.activeRequest.id;
+    const saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`);
+    if(state.activeRequest.id!==beforeId || state.activeRequest.version!==beforeVersion) return;
+    if (hasUnsavedChanges()) {
+      const controls=()=>document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea');
+      const edits=window.PCN_DOCUMENT_BRIDGE.captureControls(controls());
+      state.activeRequest=saved;loadRequestToForm(saved);renderAll();
+      window.PCN_DOCUMENT_BRIDGE.applyControls(edits,controls);
+      finishDocumentRestore();
+      showNotice('warning','Document updated','Your current edits are preserved. Review them before saving.');
+      return;
+    }
+    state.activeRequest=saved;loadRequestToForm(saved);renderAll();
+  }
+
+  function focusDocumentField(path) {
+    switchView('submission');
+    const normalized=String(path || '').replace(/^internalReview\./,'');
+    let control=document.getElementById(normalized === 'sampleSubmittedDate' ? 'sampleWhen' : normalized);
+    if(!control) control=Array.from(document.querySelectorAll('[data-internal-field]')).find(item=>item.dataset.internalField===normalized);
+    if(!control && ['currentCondition','newCondition','selectedChange'].includes(normalized)) {
+      const row=document.querySelector("input[name='changeOption']:checked")?.closest('.option-row');
+      control=row?.querySelector(normalized==='selectedChange'?'.option-change-textarea':`[data-recovery-field="${normalized}"]`);
+    }
+    if(control) {control.scrollIntoView({block:'center',behavior:'smooth'});control.focus();}
+  }
+
+  function finishDocumentRestore() {
+    const controls=document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea');
+    state.activeRequest={...state.activeRequest,changeRows:window.PCN_DOCUMENT_BRIDGE.recoveredRows(state.activeRequest.changeRows || [],getActiveDefinition()?.id,controls)};
+    updateStateFromForm();renderAll();
+  }
+
+  function setDocumentMutationBusy(value) {
+    documentMutationBusy=value;
+    const form=document.getElementById('pcnForm');
+    if(form) form.inert=value;
+    els.submitButton.disabled=value || !state.apiReady;
+    const draft=document.getElementById('saveDraftButton');
+    if(draft) draft.disabled=value || !state.apiReady;
+  }
+
+  function renderDocumentEditability() {
+    const editable=!state.viewOnly && (!state.activeRequest.id || ['draft','supplier_action'].includes(state.activeRequest.status));
+    document.querySelectorAll('#submissionView input:not([data-internal-field]), #submissionView select:not([data-internal-field]), #submissionView textarea:not([data-internal-field])')
+      .forEach(control => {control.disabled=!editable;});
+    const draft=document.getElementById('saveDraftButton');
+    if(draft) {draft.hidden=!editable;draft.disabled=!state.apiReady || document.body.classList.contains('is-saving');}
   }
 
   function applyViewOnly() {
@@ -594,6 +877,7 @@
       check.type = "checkbox";
       check.name = "changeOption";
       check.value = option.text;
+      check.dataset.recoveryKey = `${definition.id}:${option.text}:selected`;
       check.checked = hasSelectedOption && selectedOptionKey === option.text;
       check.addEventListener("change", () => {
         if (check.checked) {
@@ -608,6 +892,7 @@
       const copy = document.createElement("textarea");
       copy.className = `${getOptionCopyClass(definition, option, index)} option-change-textarea`;
       copy.value = rowState.text || option.text;
+      copy.dataset.recoveryKey = `${definition.id}:${option.text}:text`;
       copy.rows = 2;
       copy.setAttribute("aria-label", `Content of changes for ${option.risk}`);
       copy.addEventListener("input", () => {
@@ -671,6 +956,8 @@
 
     const textarea = document.createElement("textarea");
     textarea.value = value || "";
+    textarea.dataset.recoveryKey = `${getActiveDefinition()?.id}:${option.text}:${field}`;
+    textarea.dataset.recoveryField = field;
     textarea.rows = 2;
     textarea.addEventListener("input", () => {
       updateChangeRow(option, field, textarea.value);
@@ -829,9 +1116,17 @@
       ["Message", state.message]
     ];
 
-    els.submitButton.textContent = request.id ? "Update PCN" : "Submit PCN";
+    const isCreating = state.apiReady && !request.id;
+    document.body.classList.toggle("is-creating-pcn", isCreating);
+    els.pcnCreateIntro.hidden = !isCreating;
+    els.summaryTitle.textContent = isCreating ? "New PCN summary" : "Summary";
+    els.formActionTitle.textContent = isCreating ? "Create a new PCN" : "PCN submission";
+    els.formActionDescription.textContent = isCreating
+      ? "Create the record when the supplier and change details are ready."
+      : "Save your work when the change notice is ready.";
+    els.submitButton.textContent = request.id ? "Update PCN" : "Create PCN";
     els.submitButton.classList.toggle("is-important-update", Boolean(request.id));
-    els.statusBadge.textContent = titleCase(request.status || "draft");
+    els.statusBadge.textContent = isCreating ? "Not saved" : titleCase(request.status || "draft");
     els.summaryList.innerHTML = "";
 
     rows.forEach(([term, description]) => {
@@ -917,8 +1212,19 @@
         <div class="queue-meta">${escapeHtml(record.materialName || "No material entered")}</div>
       `;
       button.addEventListener("click", async () => {
+        if(documentMutationBusy || document.body.classList.contains('is-saving')) return;
+        if (!await confirmDiscardChanges()) return;
+        const generation=++documentLoadGeneration;
+        const snapshot=getSubmissionSnapshot();
+        const beforeId=state.activeRequest.id;
+        const beforeVersion=state.activeRequest.version;
         try {
-          state.activeRequest = await apiFetch(`/api/pcns/${record.id}`);
+          const loaded = await apiFetch(`/api/pcns/${record.id}`);
+          if(generation!==documentLoadGeneration || state.activeRequest.id!==beforeId || state.activeRequest.version!==beforeVersion) return;
+          if(getSubmissionSnapshot()!==snapshot) {
+            showNotice('warning','Load canceled','Your new edits were kept. Save them before loading another PCN.');return;
+          }
+          state.activeRequest = loaded;
           state.message = `Loaded ${record.id} from database.`;
           loadRequestToForm(state.activeRequest);
           showNotice("success", "PCN loaded", state.viewOnly ? `${record.id} is available to view.` : `${record.id} is ready for editing.`);
@@ -981,6 +1287,11 @@
   async function advanceWorkflowStep(nextStatus) {
     if (!state.activeRequest.id || !nextStatus) {
       showNotice("warning", "Tracking unavailable", "Save the PCN before marking workflow steps complete.");
+      return;
+    }
+
+    if (hasUnsavedChanges()) {
+      showNotice('warning', 'Unsaved PCN changes', 'Save your changes with Update PCN before updating the workflow.');
       return;
     }
 
@@ -1173,6 +1484,7 @@
   }
 
   function applyInternalReviewToForm(review) {
+    state.loadedReview = structuredCloneSafe(review);
     document.querySelectorAll(".internal-field").forEach((control) => {
       const value =
         control.dataset.internalField === "pcnCode"
@@ -1253,6 +1565,160 @@
         control.title = control.disabled ? 'Requires the QA/TET Prepared assignment.' : '';
       }
     });
+    renderHandwrittenSignatures();
+  }
+
+  function getHandwrittenSignature(field, checked, review, loadedReview, user) {
+    const internal = parseApprovalField(field);
+    const supplier = /^supplierSignoff\.(approved|checked|prepared)\.checked$/.exec(field);
+    if (!internal && !supplier) return null;
+    const identityPath = internal ? `${internal.group}.${internal.action}Name` : `supplierSignoff.${supplier[1]}.name`;
+    const datePath = internal ? `${internal.group}.${internal.action}Date` : `supplierSignoff.${supplier[1]}.date`;
+    const pending = checked && !getByPath(loadedReview || {}, field);
+    const fullName = checked ? String(pending ? user?.displayName || '' : getByPath(review || {}, identityPath) || '').trim() : '';
+    const signedDate = checked && !pending ? String(getByPath(loadedReview || {}, datePath) || '').trim() : '';
+    return { firstName: fullName.split(/\s+/)[0], fullName, pending, signed: Boolean(checked), signedDate,
+      label: internal ? formatApprovalField(field) : `Supplier ${titleCase(supplier[1])}` };
+  }
+
+  function getSignatureTooltip(signature) {
+    if (!signature?.signed) return '';
+    const person = signature.fullName || 'Not recorded';
+    return signature.pending
+      ? `${signature.label}\nSelected by: ${person}\nNot saved yet`
+      : `${signature.label}\nSigned by: ${person}\nDate: ${signature.signedDate || 'Not recorded'}`;
+  }
+
+  function renderHandwrittenSignatures() {
+    hideSignatureTooltip();
+    document.querySelectorAll('#submissionView .internal-check').forEach(control => {
+      const signature = getHandwrittenSignature(control.dataset.internalField, control.checked,
+        state.activeRequest.internalReview, state.loadedReview, state.user);
+      if (!signature) return;
+      const label = control.closest('label');
+      if (!label) return;
+      label.classList.add('handwritten-signoff');
+      let name = label.querySelector('.signoff-handwritten-name');
+      if (!name) {
+        name = document.createElement('span');
+        name.className = 'signoff-handwritten-name';
+        name.setAttribute('aria-hidden', 'true');
+        const text = document.createElement('span');
+        text.className = 'signoff-name-text';
+        name.appendChild(text);
+        label.appendChild(name);
+        signoffResizeObserver?.observe(label);
+        label.addEventListener('mouseenter', () => showSignatureTooltip(label));
+        label.addEventListener('mouseleave', queueSignatureTooltipHide);
+        label.addEventListener('focusin', () => showSignatureTooltip(label));
+        label.addEventListener('focusout', queueSignatureTooltipHide);
+      }
+      name.querySelector('.signoff-name-text').textContent = signature.firstName;
+      name.hidden = !signature.firstName;
+      label.classList.toggle('is-unsaved-signoff', signature.pending);
+      name.removeAttribute('title');
+      label.dataset.signatureTooltip = getSignatureTooltip(signature);
+      if (signature.signed) {
+        control.removeAttribute('title');
+        label.removeAttribute('title');
+      }
+      if (signature.signed && control.disabled) {
+        label.tabIndex = 0;
+        label.setAttribute('aria-label', label.dataset.signatureTooltip);
+      } else {
+        label.removeAttribute('tabindex');
+        label.removeAttribute('aria-label');
+      }
+      const attribution = signature.fullName ? `${signature.pending ? 'selected by' : 'signed by'} ${signature.fullName}` : '';
+      control.setAttribute('aria-label', [signature.label, attribution, signature.pending ? 'not saved' : ''].filter(Boolean).join(', '));
+      fitSignatureName(name);
+      if (label.contains(document.activeElement)) showSignatureTooltip(label);
+    });
+  }
+
+  function showSignatureTooltip(label) {
+    hideSignatureTooltip();
+    if (!label.dataset.signatureTooltip) return;
+    let tooltip = document.querySelector('#signatureTooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('div');
+      tooltip.id = 'signatureTooltip';
+      tooltip.className = 'signature-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+      tooltip.addEventListener('mouseenter', cancelSignatureTooltipHide);
+      tooltip.addEventListener('mouseleave', queueSignatureTooltipHide);
+      document.body.appendChild(tooltip);
+    }
+    tooltip.textContent = label.dataset.signatureTooltip;
+    tooltip.hidden = false;
+    signatureTooltipLabel = label;
+    label.setAttribute('aria-describedby', tooltip.id);
+    const control = label.querySelector('input');
+    control?.setAttribute('aria-describedby', tooltip.id);
+    const anchor = (control || label).getBoundingClientRect();
+    const width = tooltip.offsetWidth;
+    const height = tooltip.offsetHeight;
+    const left = Math.max(8, Math.min(anchor.left + anchor.width / 2 - width / 2, window.innerWidth - width - 8));
+    const top = anchor.bottom + height + 16 <= window.innerHeight ? anchor.bottom + 8 : Math.max(8, anchor.top - height - 8);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function hideSignatureTooltip() {
+    cancelSignatureTooltipHide();
+    const tooltip = document.querySelector('#signatureTooltip');
+    if (tooltip) tooltip.hidden = true;
+    signatureTooltipLabel?.removeAttribute('aria-describedby');
+    signatureTooltipLabel?.querySelector('input')?.removeAttribute('aria-describedby');
+    signatureTooltipLabel = null;
+  }
+
+  function cancelSignatureTooltipHide() {
+    if (signatureTooltipHideTimer) clearTimeout(signatureTooltipHideTimer);
+    signatureTooltipHideTimer = null;
+  }
+
+  function queueSignatureTooltipHide() {
+    cancelSignatureTooltipHide();
+    signatureTooltipHideTimer = setTimeout(() => {
+      const tooltip = document.querySelector('#signatureTooltip');
+      if (signatureTooltipLabel?.matches(':hover') || tooltip?.matches(':hover') ||
+          signatureTooltipLabel?.contains(document.activeElement)) return;
+      hideSignatureTooltip();
+    }, 150);
+  }
+
+  function fitSignatureName(name) {
+    const text = name.querySelector('.signoff-name-text');
+    if (name.hidden || !text || !name.clientWidth) return;
+    // Always measure at the CSS size so names grow back when more space is available.
+    name.style.removeProperty('font-size');
+    const baseSize = parseFloat(getComputedStyle(name).fontSize);
+    const availableWidth = Math.max(1, name.clientWidth - 2);
+    const naturalWidth = text.scrollWidth;
+    if (naturalWidth > availableWidth) {
+      const fittedSize = Math.floor(baseSize * availableWidth / naturalWidth * 100) / 100;
+      name.style.fontSize = `${fittedSize}px`;
+    }
+  }
+
+  function fitSignatureNames() {
+    document.querySelectorAll('#submissionView .signoff-handwritten-name').forEach(fitSignatureName);
+  }
+
+  function bindSignatureSizing() {
+    if (typeof ResizeObserver !== 'undefined') {
+      signoffResizeObserver = new ResizeObserver(entries => {
+        entries.forEach(entry => {
+          const name = entry.target.querySelector('.signoff-handwritten-name');
+          if (name) fitSignatureName(name);
+        });
+      });
+    }
+    window.addEventListener('resize', fitSignatureNames);
+    window.addEventListener('beforeprint', fitSignatureNames);
+    document.fonts?.ready.then(fitSignatureNames);
+    document.fonts?.addEventListener('loadingdone', fitSignatureNames);
   }
 
   function canSignStep(group, action) {
@@ -1260,9 +1726,12 @@
       'tapbu.gsc': 'gscTapbu', 'tapbu.qa': 'qaTapbu', 'qateFinal.signoff': 'qaTet' };
     const roles = (state.user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
     const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
+    if (!Object.hasOwn(departments, group)) return false;
     const department = departments[group];
-    return Boolean(department && state.user?.isActive !== false && state.user?.department === department && state.user?.signingStep === action &&
-      !roles.includes('supplier') && ['admin', 'reviewer', departmentRoles[department]].some(role => roles.includes(role)));
+    if (!department || !['approved', 'checked', 'prepared'].includes(action) || state.user?.isActive === false) return false;
+    if (roles.includes('admin')) return true;
+    return Boolean(state.user?.department === department && state.user?.signingStep === action &&
+      !roles.includes('supplier') && ['reviewer', departmentRoles[department]].some(role => roles.includes(role)));
   }
 
   function getApprovalRouteControls() {
@@ -1341,7 +1810,7 @@
   function approvalRouteGroups() {
     const groups = ["signoff.gscTet", "signoff.prodEngTet", "signoff.qaTet"];
 
-    if (isControlChecked("tapbu.need")) {
+    if (els.riskLevel.value !== 'RL0' && !isControlChecked('tapbu.noNeed')) {
       return [...groups, "tapbu.gsc", "tapbu.qa", "qateFinal.signoff"];
     }
 
@@ -1556,6 +2025,8 @@
   }
 
   function syncSupplierDetailControls(request) {
+    const sampleWhen = document.getElementById('sampleWhen');
+    if (sampleWhen) sampleWhen.value=request.sampleSubmittedDate || '';
     document.querySelectorAll('input[name="sampleSubmittedChoice"]').forEach((control) => {
       control.checked = control.value === request.sampleSubmitted;
     });

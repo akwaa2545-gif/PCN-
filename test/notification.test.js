@@ -70,6 +70,14 @@ test('workflow derives route and returns mapping-empty without queuing', async (
   assert(!pool.calls.some(call => call.sql.includes('INSERT pcn.NotificationJobs')));
 });
 
+test('legacy handoff honors explicit TaPBU no-need and targets final QA', async () => {
+  const service=new NotificationService(mockPool(),{repository:{getNotificationSettings:async()=>({groups:[]})}});
+  const review={signoff:{gscTet:complete,prodEngTet:complete,qaTet:complete},tapbu:{noNeed:true}};
+  const result=await service.workflow({...record,riskLevel:'RL1',internalReview:review},{completedGroupKey:'signoff.qaTet'});
+  assert.equal(result.nextGroupKey,'qateFinal.signoff');
+  assert.equal(result.reason,'recipient_not_configured');
+});
+
 test('workflow requires checked completed group and disallows supplied recipient or link', async () => {
   const service = new NotificationService(mockPool(), { repository: {} });
   await assert.rejects(service.workflow({ ...record, internalReview: { signoff: { gscTet: { ...complete, checked: false } } } }, { completedGroupKey: 'signoff.gscTet' }), { statusCode: 409 });

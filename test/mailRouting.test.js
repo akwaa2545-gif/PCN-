@@ -35,6 +35,14 @@ test('next target follows Approved Checked Prepared and supplier handoff after f
   assert.equal(resolveNextMailTarget(done).groupKey, 'supplierNotification');
 });
 
+test('explicit TaPBU no-need routes action mail directly to final QA signing', () => {
+  const review={signoff:Object.fromEntries(['gscTet','prodEngTet','qaTet'].map(key=>[key,{approved:true,checked:true,prepared:true}])),tapbu:{noNeed:true}};
+  const target=resolveNextMailTarget({riskLevel:'RL1',status:'submitted',internalReview:review});
+  assert.equal(target.stageKey,'qateFinal.signoff');
+  assert.equal(target.groupKey,'department.qaTet.approved');
+  assert.equal(target.blockedReason,undefined);
+});
+
 test('legacy contacts stay unassigned while supplier list is retained without modifying source', () => {
   const before = structuredClone(legacy);
   const normalized = normalizeMailRouting(legacy);

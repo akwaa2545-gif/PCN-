@@ -3,6 +3,11 @@ const sql = require('mssql');
 const { ApiError } = require('./apiError');
 const { assertRecordAccess, isInternal } = require('./workflowAccess');
 const { versionHex } = require('./sqlPcnHydration');
+const { SqlPcnRepository } = require('./sqlPcnRepository');
+const { SqlRevisions } = require('./sqlRevisions');
+const { applyDocumentControl, hasSignatures } = require('./documentControl');
+const { documentRequirements } = require('./documentRequirements');
+const { lockUserMailRouting, assertCurrentUser } = require('./userMailRouting');
 
 const maxBytes = 10 * 1024 * 1024;
 const types = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'text/plain': '.txt' };
@@ -26,29 +31,58 @@ function validateFile(input) {
 }
 
 class SqlDocuments {
-  constructor(pool) { this.pool = pool; }
+  constructor(pool, { scanner = null } = {}) {
+    if (scanner !== null && typeof scanner?.scan !== 'function') throw new Error('Invalid trusted attachment scanner');
+    this.pool = pool; this.scanner = scanner; this.repository = new SqlPcnRepository(pool); this.revisions = new SqlRevisions();
+  }
+  async list(pcnCode) {
+    assertCode(pcnCode);
+    return this.listFrom(this.pool, pcnCode);
+  }
+  async listFrom(source, pcnCode) {
+    const result = await source.request().input('pcnCode', sql.NVarChar(32), pcnCode)
+      .query(`SELECT Id,FileName,ContentType,SizeBytes,ScanStatus,UploadedBy,UploadedAt,ContentRevision,RequirementName
+        FROM pcn.PcnDocumentFiles WHERE PcnCode=@pcnCode AND DeletedAt IS NULL ORDER BY UploadedAt,Id`);
+    return result.recordset.map(documentMetadata);
+  }
   async save(pcnCode, input, context) {
     assertCode(pcnCode);
     const file = validateFile(input);
+    let scanStatus = 'pendingScan';
+    if (this.scanner) {
+      try {
+        if (await this.scanner.scan(file.bytes) !== 'clean') throw new Error('Attachment scanner did not clear the file');
+        scanStatus = 'clean';
+      } catch {
+        throw new ApiError(503, 'Attachment could not be cleared by malware scanning; upload was rejected');
+      }
+    }
     const id = crypto.randomUUID();
-    return this.mutate(pcnCode, context, async tx => {
+    return this.mutate(pcnCode, context, async (tx, current, attachments, contentRevision, now) => {
+      const requirementName = validateRequirement(input.requirementName, current);
+      const uploadedBy = String(context.user.displayName || context.user.username || context.user.employeeCode || `user:${context.user.id}`).slice(0, 256);
       const usage = (await tx.request().input('pcnCode', sql.NVarChar(32), pcnCode)
-        .query('SELECT COUNT(*) AS FileCount,COALESCE(SUM(CAST(SizeBytes AS bigint)),0) AS TotalBytes FROM pcn.PcnDocumentFiles WHERE PcnCode=@pcnCode')).recordset[0];
+        .query('SELECT COUNT(*) AS FileCount,COALESCE(SUM(CAST(SizeBytes AS bigint)),0) AS TotalBytes FROM pcn.PcnDocumentFiles WHERE PcnCode=@pcnCode AND DeletedAt IS NULL')).recordset[0];
       if (usage.FileCount >= 20 || Number(usage.TotalBytes) + file.bytes.length > 50 * 1024 * 1024) {
         throw new ApiError(413, 'PCN attachments are limited to 20 files and 50 MiB in total');
       }
       await tx.request().input('id', sql.UniqueIdentifier, id).input('pcnCode', sql.NVarChar(32), pcnCode)
         .input('name', sql.NVarChar(255), file.fileName).input('type', sql.NVarChar(100), file.contentType)
         .input('bytes', sql.VarBinary(sql.MAX), file.bytes).input('size', sql.Int, file.bytes.length)
-        .query(`INSERT pcn.PcnDocumentFiles(Id,PcnCode,FileName,ContentType,Bytes,SizeBytes,ScanStatus)
-          VALUES(@id,@pcnCode,@name,@type,@bytes,@size,N'pendingScan');`);
-      return { id, fileName: file.fileName, contentType: file.contentType, sizeBytes: file.bytes.length, scanStatus: 'pendingScan' };
+        .input('uploadedBy', sql.NVarChar(256), uploadedBy).input('uploadedAt', sql.DateTime2(3), new Date(now))
+        .input('contentRevision', sql.Int, contentRevision).input('requirementName', sql.NVarChar(sql.MAX), requirementName)
+        .input('scanStatus', sql.NVarChar(32), scanStatus)
+        .query(`INSERT pcn.PcnDocumentFiles(Id,PcnCode,FileName,ContentType,Bytes,SizeBytes,ScanStatus,UploadedBy,UploadedAt,ContentRevision,RequirementName)
+          VALUES(@id,@pcnCode,@name,@type,@bytes,@size,@scanStatus,@uploadedBy,@uploadedAt,@contentRevision,@requirementName);`);
+      const document = { id, fileName: file.fileName, contentType: file.contentType, sizeBytes: file.bytes.length,
+        scanStatus, uploadedBy, uploadedAt: now, contentRevision, requirementName };
+      return { document, attachments: [...attachments, document] };
     }, 'document_added');
   }
   async get(pcnCode, id) {
     assertCode(pcnCode); assertId(id);
     const result = await this.pool.request().input('id', sql.UniqueIdentifier, id).input('pcnCode', sql.NVarChar(32), pcnCode)
-      .query('SELECT Id,FileName,ContentType,Bytes,SizeBytes,ScanStatus FROM pcn.PcnDocumentFiles WHERE Id=@id AND PcnCode=@pcnCode');
+        .query('SELECT Id,FileName,ContentType,Bytes,SizeBytes,ScanStatus FROM pcn.PcnDocumentFiles WHERE Id=@id AND PcnCode=@pcnCode AND DeletedAt IS NULL');
     const file = result.recordset[0];
     if (!file) throw new ApiError(404, 'Document not found');
     if (file.ScanStatus !== 'clean') throw new ApiError(423, 'Document download requires a trusted malware scan');
@@ -56,11 +90,11 @@ class SqlDocuments {
   }
   async delete(pcnCode, id, context) {
     assertCode(pcnCode); assertId(id);
-    return this.mutate(pcnCode, context, async tx => {
+    return this.mutate(pcnCode, context, async (tx, current, attachments) => {
       const result = await tx.request().input('id', sql.UniqueIdentifier, id).input('pcnCode', sql.NVarChar(32), pcnCode)
-        .query('DELETE pcn.PcnDocumentFiles WHERE Id=@id AND PcnCode=@pcnCode');
+        .query('UPDATE pcn.PcnDocumentFiles SET DeletedAt=SYSUTCDATETIME() WHERE Id=@id AND PcnCode=@pcnCode AND DeletedAt IS NULL');
       if (!result.rowsAffected[0]) throw new ApiError(404, 'Document not found');
-      return { id };
+      return { document: { id }, attachment: attachments.find(file => file.id === id), attachments: attachments.filter(file => file.id !== id) };
     }, 'document_deleted');
   }
 
@@ -71,20 +105,33 @@ class SqlDocuments {
     const tx = this.pool.transaction();
     await tx.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
+      await lockUserMailRouting(tx);
+      await assertCurrentUser(tx, context.user);
       const parent = (await tx.request().input('pcnCode', sql.NVarChar(32), pcnCode)
-        .query('SELECT PcnId,OwnerUserId,Status,RowVersion FROM pcn.PcnRequests WITH (UPDLOCK, HOLDLOCK) WHERE PcnCode=@pcnCode AND DeletedAt IS NULL')).recordset[0];
+        .query('SELECT * FROM pcn.PcnRequests WITH (UPDLOCK, HOLDLOCK) WHERE PcnCode=@pcnCode AND DeletedAt IS NULL')).recordset[0];
       assertRecordAccess(parent ? { ownerUserId: parent.OwnerUserId } : null, context.user);
       if (versionHex(parent.RowVersion) !== context.version.toLowerCase()) throw new ApiError(409, 'PCN changed since it was loaded; reload before saving');
       if (['approved','rejected','closed'].includes(parent.Status) || !isInternal(context.user) && !['draft','supplier_action'].includes(parent.Status)) {
         throw new ApiError(403, 'Document edits are not allowed at this stage');
       }
-      const document = await work(tx);
-      const changed = (await tx.request().input('pcnId', sql.BigInt, parent.PcnId)
-        .query('UPDATE pcn.PcnRequests SET UpdatedAt=SYSUTCDATETIME() OUTPUT inserted.RowVersion WHERE PcnId=@pcnId')).recordset[0];
+      const aggregate = await this.repository.readAggregate(tx, parent);
+      if (hasSignatures(aggregate)) throw new ApiError(409, 'Start a new revision before changing signed document attachments');
+      const attachments = await this.listFrom(tx, pcnCode);
+      const current = { ...aggregate, documentAttachments: attachments };
+      const now = new Date().toISOString();
+      const proposed = { ...current, updatedAt: now, documentControl: { ...(current.documentControl || {}),
+        attachmentGeneration: (current.documentControl?.attachmentGeneration || 0) + 1 } };
+      const controlled = applyDocumentControl(current, proposed, context.user, now);
+      const mutation = await work(tx, current, attachments, controlled.documentControl.contentRevision, now);
+      const next = { ...controlled, documentAttachments: mutation.attachments };
+      const changed = await this.repository.writeParent(tx, next, parent.PcnId);
+      const document = mutation.document;
       await tx.request().input('auditId', sql.NVarChar(128), crypto.randomUUID()).input('pcnCode', sql.NVarChar(128), pcnCode)
         .input('action', sql.NVarChar(80), action).input('actor', sql.NVarChar(256), `user:${context.user.id}`)
-        .input('metadata', sql.NVarChar(sql.MAX), JSON.stringify({ documentId: document.id, fileName: document.fileName, sizeBytes: document.sizeBytes }))
+        .input('metadata', sql.NVarChar(sql.MAX), JSON.stringify({ ...(mutation.attachment || document), documentId: document.id,
+          contentRevision: next.documentControl.contentRevision }))
         .query('INSERT pcn.AuditLogs(Id,PcnCode,Action,Actor,MetadataJson,CreatedAt) VALUES(@auditId,@pcnCode,@action,@actor,@metadata,SYSUTCDATETIME())');
+      await this.revisions.append(tx, pcnCode, current, { ...next, version: versionHex(changed.RowVersion) }, context.user);
       await tx.commit();
       return { ...document, version: versionHex(changed.RowVersion) };
     } catch (error) {
@@ -92,6 +139,23 @@ class SqlDocuments {
       throw error;
     }
   }
+}
+
+function validateRequirement(value, record) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') throw new ApiError(400, 'Select a requested document category');
+  const requirement = documentRequirements.find(item => item.key === value || item.label === value);
+  if (!requirement || record.internalReview?.docs?.[requirement.key] !== true) {
+    throw new ApiError(400, 'This document category is not requested for the PCN');
+  }
+  return requirement.key;
+}
+
+function documentMetadata(row) {
+  return { id: row.Id, fileName: row.FileName, contentType: row.ContentType, sizeBytes: row.SizeBytes,
+    scanStatus: row.ScanStatus, uploadedBy: row.UploadedBy || null,
+    uploadedAt: row.UploadedAt instanceof Date ? row.UploadedAt.toISOString() : row.UploadedAt || null,
+    contentRevision: row.ContentRevision || 1, requirementName: row.RequirementName || null };
 }
 
 module.exports = { SqlDocuments };

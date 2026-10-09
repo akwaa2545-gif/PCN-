@@ -123,7 +123,9 @@ Directory lookup uses a distinct private `POWER_AUTOMATE_DIRECTORY_URL`, with it
 
 The admin directory API sends the same search text as both `query` and `searchTerm` and accepts an array or `users`, `value` or `results` response. It returns bounded profile fields, including job title/department, and permits inline PNG/JPEG/GIF/WebP photos whose complete data URI is at most 100 KiB; remote image URLs are dropped. Live backend lookups locally and from the host returned a matching profile with those fields. Isolated browser checks confirmed dropdown rendering, and deployed HTML contains the compact mail row. Identifying values and signed endpoint details stay private. Actual authenticated use of the deployed health/directory UI remains unverified.
 
-Attachment APIs store PDF, PNG, JPEG or UTF-8 text in SQL, capped at 10 MiB per file and 20 files / 50 MiB per PCN. Upload/delete require the PCN version and atomically recheck permissions/stage, advance the version and record an audit. Uploads are `pendingScan`; downloads return 423 until a trusted scanner marks them clean. Scanner integration and the attachment upload interface are pending. Form document checkboxes are requirement/history flags, not proof of scanned content.
+The document sidebar now includes **History**, **Attachments**, **Checks**, next-action assignments and **Print / PDF**. Draft recovery and Save draft protect unfinished work. Signatures bind to a content revision; administrators can start a reasoned revision while retaining earlier evidence. See [document control](plans/document-control.md) for behavior, APIs and rollout requirements. Migration 005 was applied to `svr120a / Scn_DB` on 2026-10-09 to resolve startup readiness; code remains local and has not been deployed.
+
+Attachments store PDF, PNG, JPEG or UTF-8 text in SQL, capped at 10 MiB per file and 20 files / 50 MiB per PCN. Upload/removal require the current PCN version, revalidate permissions/stage, and record history/audit atomically. Removal retains historical bytes. Files remain quarantined until a trusted scan passes; requirement checkboxes alone do not satisfy completion checks.
 
 ## Verification and remaining work
 
@@ -132,6 +134,7 @@ npm test
 npm run test:coverage
 npx playwright install chromium
 npm run test:e2e
+npm run test:documents
 ```
 
 Employee-code verification passed 240 unit/API tests with 95.85% line / 89.32% branch / 96.32% function coverage and 59 isolated browser checks. Real local and HTTPS API acceptance each passed 26 checks, and a real headless browser against the local SQL-backed runtime passed login, Users/lookup, role/department controls and logout. The [complete acceptance record](plans/employee-code-authentication.md#acceptance--2026-10-07) distinguishes these results from the user's unobserved Edge GUI and operational PCN saves; no email delivery is claimed.
@@ -142,4 +145,4 @@ Browser smoke checks passed for forced password change, re-login, empty routing,
 
 See [API inventory](plans/sql-server-api-checklist.md), [table mapping](plans/sql-server-table-mapping.md), and [migration plan](plans/sql-server-migration.md). The migration plan includes future acceptance criteria, not a declaration that every proposed feature exists.
 
-Create User selects SQL-source employees with explicit PCN role/department grants. Remaining work includes the user's Edge GUI observation, operational save/signing/link acceptance, role/disable management, company membership/reviewer assignments, list pagination, historical-master rendering/version API, attachment scanning/UI, mail status/retry operations and general command idempotency. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.
+Create User selects SQL-source employees with explicit PCN role/department grants. Remaining operational work includes deployed document-control migration/acceptance, scanner provisioning, file retention, the user's Edge GUI observation, company membership/reviewer assignments, list pagination, historical-master rendering, mail status/retry operations and general command idempotency. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.

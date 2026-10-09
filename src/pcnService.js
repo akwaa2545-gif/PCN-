@@ -1,5 +1,6 @@
 const { ApiError } = require("./apiError");
-const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, isInternal, isEmployeeViewer, canViewAllRecords } = require('./workflowAccess');
+const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, hasRole, isInternal, isEmployeeViewer, canViewAllRecords } = require('./workflowAccess');
+const { applyDocumentControl } = require('./documentControl');
 const { isDeepStrictEqual } = require('node:util');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
 const { emailList } = require('./integrationService');
@@ -104,7 +105,9 @@ class PcnService {
       pcnCode: ''
     };
 
-    return this.repository.create(record, actor, user);
+    if (record.status !== 'draft') require('./documentChecks').assertCompletion(record, []);
+
+    return this.repository.create(applyDocumentControl(null, record, user, now), actor, user);
   }
 
   async update(id, input, actor = "web", user) {
@@ -114,7 +117,7 @@ class PcnService {
 
     const updated = await this.repository.update(
       id,
-      (current) => {
+      async (current, context = {}) => {
         if (user) {
           assertRecordAccess(current, user);
           if (['approved','rejected','closed'].includes(current.status)) throw new ApiError(403, 'Completed PCNs cannot be edited');
@@ -144,7 +147,7 @@ class PcnService {
           throw new ApiError(400, "Workflow status cannot skip steps");
         }
 
-        return {
+        const next = applyDocumentControl(current, {
           ...current,
           ...data,
           id: current.id,
@@ -159,7 +162,13 @@ class PcnService {
             ...(user ? applySignatureIdentity(current.internalReview || {}, data.internalReview || {}, user, now) : data.internalReview || {}),
             pcnCode: current.id
           }
-        };
+        }, user, now);
+        if (nextStatus !== current.status && !['draft', 'supplier_action'].includes(nextStatus)) {
+          const { assertCompletion } = require('./documentChecks');
+          const attachments = context.listAttachments ? await context.listAttachments() : [];
+          assertCompletion(next, attachments, { requiredFilesOnly: !['draft', 'supplier_action'].includes(current.status) });
+        }
+        return next;
       },
       actor,
       input.version,
@@ -170,6 +179,35 @@ class PcnService {
       throw new ApiError(404, "PCN not found");
     }
 
+    return updated;
+  }
+
+  async getRevisions(id, user) {
+    await this.getById(id, user);
+    return this.repository.getRevisions(id);
+  }
+
+  async getRevision(id, revision, user) {
+    await this.getById(id, user);
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiError(400, 'Invalid document revision');
+    const saved = await this.repository.getRevision(id, revision);
+    if (!saved) throw new ApiError(404, 'Document revision not found');
+    return saved;
+  }
+
+  async startRevision(id, input, actor = 'web', user) {
+    assertValidId(id);
+    if (!user || user.isActive === false || !hasRole(user, 'admin')) throw new ApiError(403, 'Only an administrator may start a document revision');
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['version', 'reason'].includes(key))) throw new ApiError(400, 'Revision requires only version and reason');
+    if (!input.version) throw new ApiError(400, 'Current document version is required');
+    const reason = sanitizeString(input.reason, 'revision reason', 1, 1200);
+    const now = this.clock().toISOString();
+    const updated = await this.repository.update(id, current => {
+      assertRecordAccess(current, user);
+      if (['approved', 'rejected', 'closed'].includes(current.status)) throw new ApiError(403, 'Completed PCNs cannot be reopened');
+      return applyDocumentControl(current, { ...current, updatedAt: now, status: 'supplier_action' }, user, now, { startRevision: true, reason });
+    }, actor, input.version, user);
+    if (!updated) throw new ApiError(404, 'PCN not found');
     return updated;
   }
 
@@ -268,9 +306,11 @@ class PcnService {
   }
 
   normalizeInput(input) {
+    const status = sanitizeString(input.status || "submitted", "status", 1, 40);
+    const minimumRequired = status === 'draft' ? 0 : 1;
     const changeForm = sanitizeString(input.changeForm, "changeForm", 1, 40);
     const riskLevel = sanitizeString(input.riskLevel, "riskLevel", 1, 10);
-    const selectedChange = sanitizeString(input.selectedChange, "selectedChange", 1, 500);
+    const selectedChange = sanitizeString(input.selectedChange, "selectedChange", minimumRequired, 500);
 
     if (!formDefinitions[changeForm]) {
       throw new ApiError(400, "Invalid change form");
@@ -285,13 +325,12 @@ class PcnService {
       (row) => row.risk === riskLevel && row.text === selectedChange
     );
 
-    if (!validSelectedChange) {
+    if (!validSelectedChange && !(status === 'draft' && !selectedChange && changeRows.length === 0)) {
       throw new ApiError(400, "Selected change does not match the form and risk level");
     }
 
     const sampleSubmitted = sanitizeString(input.sampleSubmitted || "pending", "sampleSubmitted", 1, 20);
     const priceLevel = sanitizeString(input.priceLevel || "no-change", "priceLevel", 1, 20);
-    const status = sanitizeString(input.status || "submitted", "status", 1, 40);
 
     if (!allowedSampleStatuses.has(sampleSubmitted)) {
       throw new ApiError(400, "Invalid sample submission value");
@@ -309,9 +348,9 @@ class PcnService {
       changeForm,
       riskLevel,
       selectedChange,
-      supplierName: sanitizeString(input.supplierName, "supplierName", 1, 160),
+      supplierName: sanitizeString(input.supplierName, "supplierName", minimumRequired, 160),
       manufacturerName: sanitizeString(input.manufacturerName, "manufacturerName", 0, 180),
-      materialName: sanitizeString(input.materialName, "materialName", 1, 180),
+      materialName: sanitizeString(input.materialName, "materialName", minimumRequired, 180),
       desiredStart: sanitizeString(input.desiredStart, "desiredStart", 0, 120),
       sampleSubmitted,
       sampleSubmittedDate: sanitizeString(input.sampleSubmittedDate, 'sampleSubmittedDate', 0, 120),

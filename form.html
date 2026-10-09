@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Supplier Product and Process Change Notification | PCN Portal System</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="/document-workspace.css" />
   </head>
   <body class="pcn-page is-loading">
     <div class="app-shell">
@@ -37,6 +38,48 @@
         </div>
         <strong>Saving PCN</strong>
       </div>
+
+      <div class="pcn-update-success" id="pcnUpdateSuccess" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <div class="pcn-update-success-card">
+          <svg class="pcn-update-success-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+            <circle cx="32" cy="32" r="28" fill="#edf8f1" />
+            <circle class="pcn-update-success-ring" cx="32" cy="32" r="27" pathLength="1" />
+            <path class="pcn-update-success-check" d="M18 32 L27 41 L46 21" pathLength="1" />
+          </svg>
+          <strong>PCN updated</strong>
+          <span id="pcnUpdateSuccessCode"></span>
+          <span class="pcn-update-success-detail">Changes saved successfully.</span>
+        </div>
+      </div>
+
+      <dialog class="pcn-unsaved-dialog" id="pcnUnsavedDialog" role="alertdialog" aria-labelledby="pcnUnsavedTitle" aria-describedby="pcnUnsavedDescription">
+        <div class="pcn-unsaved-heading">
+          <span class="pcn-unsaved-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false"><path d="M12 3 22 21H2Z" /><path d="M12 9v5" /><circle cx="12" cy="17" r=".75" /></svg>
+          </span>
+          <div>
+            <p>PCN document</p>
+            <h2 id="pcnUnsavedTitle">Unsaved changes</h2>
+          </div>
+        </div>
+        <div class="pcn-unsaved-body" id="pcnUnsavedDescription">
+          <p>Your changes to this PCN have not been saved.</p>
+          <p>Keep editing to save your work, or leave without saving.</p>
+        </div>
+        <div class="pcn-unsaved-actions">
+          <button class="pcn-unsaved-leave" id="pcnLeaveWithoutSaving" type="button">Leave without saving</button>
+          <button class="pcn-unsaved-stay" id="pcnKeepEditing" type="button" autofocus>Keep editing</button>
+        </div>
+      </dialog>
+
+      <section class="pcn-create-intro" id="pcnCreateIntro" aria-labelledby="pcnCreateTitle" hidden>
+        <div>
+          <p class="section-label">New document</p>
+          <h2 id="pcnCreateTitle">Create PCN</h2>
+          <p>Enter the supplier and change details below. Your PCN code is assigned when you create the record.</p>
+        </div>
+        <span class="pcn-create-marker">New PCN</span>
+      </section>
 
       <main class="workspace workspace-normal">
         <section class="form-panel" aria-label="PCN submission form">
@@ -80,6 +123,8 @@
           </nav>
 
           <div class="view is-active" id="submissionView">
+            <div class="document-print-header" id="documentPrintIdentity"></div>
+            <div class="document-print-watermark" id="documentPrintWatermark" hidden></div>
             <form id="pcnForm" class="pcn-form">
               <div class="supplier-sheet">
                 <div class="supplier-left-rail" aria-hidden="true">
@@ -422,6 +467,7 @@
         </section>
 
         <aside class="summary-panel" aria-label="Submission summary">
+          <section id="documentWorkspace" aria-label="Document controls"></section>
           <div class="summary-skeleton" aria-hidden="true">
             <div class="skeleton-summary-head">
               <span></span>
@@ -433,7 +479,7 @@
             <span class="skeleton-summary-card"></span>
           </div>
           <div class="panel-header">
-            <h2>Summary</h2>
+            <h2 id="summaryTitle">Summary</h2>
             <span class="status-badge" id="statusBadge">Draft</span>
           </div>
           <dl class="summary-list" id="summaryList"></dl>
@@ -449,14 +495,25 @@
       </main>
       <div class="form-action-dock" role="region" aria-label="PCN save action">
         <div class="form-action-copy">
-          <strong>PCN submission</strong>
-          <span>Save your work when the change notice is ready.</span>
+          <strong id="formActionTitle">PCN submission</strong>
+          <span id="formActionDescription">Save your work when the change notice is ready.</span>
+          <span id="documentRecoveryStatus" role="status" aria-live="polite"></span>
         </div>
-        <button class="primary-button" id="submitButton" type="button">Submit PCN</button>
+        <button class="ghost-button" id="saveDraftButton" type="button">Save draft</button>
+        <button class="primary-button" id="submitButton" type="button">Create PCN</button>
       </div>
+      <section class="document-recovery-offer" id="documentRecoveryOffer" role="region" aria-label="Recover unfinished edits" hidden>
+        <strong>Unfinished document</strong>
+        <p id="documentRecoveryMessage"></p>
+        <button type="button" id="documentRecoveryRestore">Recover edits</button>
+        <button type="button" id="documentRecoveryDiscard">Discard recovery copy</button>
+      </section>
     </div>
 
     <script src="/session-client.js"></script>
+    <script src="/document-recovery.js"></script>
+    <script src="/document-workspace.js"></script>
+    <script src="/document-bridge.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

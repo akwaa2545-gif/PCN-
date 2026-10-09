@@ -7,6 +7,8 @@ The target is SQL Server 2014 (version 12, compatibility 120). JSON payloads are
 Employee source `KEY_Code_DB.dbo.tblEmployee` is read-only and its 1,935 records are not imported. PCN owns `pcn.Users` (employee mapping, IdentityProvider, DepartmentKey, IsActive), `pcn.Roles` and `pcn.UserRoles` in `Scn_DB`. Migration 003 was applied at `2026-10-07T03:35:30.942Z`, adding provider separation and retiring old Windows mappings/session state; 001/002 were unchanged. The prior three accounts were preserved and separate verified `2205529` Administrator / IT account added. Only explicitly provisioned active employee-code accounts can sign in; source department hints never grant permissions. See [current acceptance](employee-code-authentication.md#acceptance--2026-10-07).
 ## PCN aggregate
 
+Local document-control migration 005 adds `pcn.PcnRevisions` with immutable save number, content revision, actor, timestamp, status, field differences and complete snapshot. Server-owned `documentControl` digest/signature bindings use existing `LegacyExtrasJson`; attachment metadata adds requirement category, uploader/time, content revision and soft-removal timestamp. File removal retains bytes. Migration 005 was applied to svr120a / Scn_DB on 2026-10-09; see [document control](document-control.md).
+
 SQL normalizes parent fields and ordered child tables while retaining complete nested payloads as `nvarchar(max)`. This saves PCN data in SQL even though some evolving form fields retain JSON representation.
 
 | Source / field | Implemented destination | Preservation rule |
@@ -89,7 +91,7 @@ Legacy groups: signoff.gscTet, signoff.prodEngTet, signoff.qaTet, tapbu.gsc, tap
 
 - Create allocates the annual counter, parent, review, ordered children and audit together.
 - Updates lock/compare the parent version, validate actor/fields/state, save aggregate/audit, then return the new version. Comments/approvals use the same aggregate transaction.
-- Soft delete preserves evidence and hides ordinary reads. Attachment writes lock the parent, check ownership/stage/version, enforce quotas and update the parent version/audit atomically. File deletion removes content; a retention policy is pending.
+- Soft delete preserves evidence and hides ordinary reads. Attachment writes revalidate the actor, lock the parent, check ownership/stage/version, enforce quotas and update the parent version/audit/history atomically. Local migration 005 changes file removal to soft removal, preserving bytes; a retention policy is pending.
 - Settings save updates singleton/groups/profiles/audit transactionally. Local schema-2 PUT/PATCH require all 16 groups and a fetched hash version compared under SQL lock; server-owned legacyGroups remain in JSON.
 - Local policy 2 calls notification prepare/persist hooks inside PCN create/update transactions, stores activation state in LegacyExtrasJson and a unique EventKey in NotificationJobs. The transient response is not persisted. Existing/absent-policy PCNs retain separate legacy enqueue; no routing-event/snapshot table exists.
 - Missing recipients/configuration persist a blocked handoff, not a job. Later settings edits do not release it. Supplier action/reset cancels only pending jobs; status-only closure retains a queued final supplier notice. Sending/accepted/uncertain jobs are not recalled.

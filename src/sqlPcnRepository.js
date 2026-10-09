@@ -5,6 +5,7 @@ const { scalarFields, childTables, splitRecord, hydratePcn, versionHex } = requi
 const { migrationManifest } = require('./sqlDatabase');
 const { settingsVersion, normalizeMailRouting } = require('./mailRouting');
 const { lockUserMailRouting, readUserMailAssignments, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
+const { SqlRevisions } = require('./sqlRevisions');
 
 const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'], ['signoff.qaTet', 'QA/TET'],
@@ -13,7 +14,7 @@ const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
 ].map(([key, label]) => ({ key, label, emails: '', recipients: [] })) };
 
 class SqlPcnRepository {
-  constructor(pool, options = {}) { this.pool = pool; this.isSql = true; this.notifications = options.notifications; }
+  constructor(pool, options = {}) { this.pool = pool; this.isSql = true; this.notifications = options.notifications; this.revisions = new SqlRevisions(); }
 
   async transaction(work) {
     const tx = this.pool.transaction();
@@ -84,6 +85,7 @@ class SqlPcnRepository {
       if (record.id) await this.raiseCounter(tx, id);
       await this.audit(tx, id, 'created', actor, { status: record.status });
       const saved = await this.readAggregate(tx, parent);
+      await this.revisions.append(tx, id, null, saved, actor);
       const notification = this.notifications ? await this.notifications.persisted(tx, saved, prepared.plan) : undefined;
       return notification ? { ...saved, notification } : saved;
     });
@@ -103,7 +105,11 @@ class SqlPcnRepository {
       if (!parent) return null;
       this.checkVersion(parent, expectedVersion);
       const current = await this.readAggregate(tx, parent);
-      const proposed = await updater(current);
+      const proposed = await updater(current, { listAttachments: async () => {
+        const result = await tx.request().input('code', sql.NVarChar(32), code)
+          .query('SELECT Id,RequirementName,ScanStatus,FileName,ContentRevision FROM pcn.PcnDocumentFiles WHERE PcnCode=@code AND DeletedAt IS NULL');
+        return result.recordset.map(row => ({ id: row.Id, requirementName: row.RequirementName, scanStatus: row.ScanStatus, fileName: row.FileName, contentRevision: row.ContentRevision }));
+      } });
       const preserved = { ...proposed, id: code, ownerUserId: current.ownerUserId, createdAt: current.createdAt,
         ...('masterDataVersionId' in current ? { masterDataVersionId: current.masterDataVersionId } : {}),
         internalReview: { ...(proposed.internalReview || {}), pcnCode: code } };
@@ -113,6 +119,7 @@ class SqlPcnRepository {
       await this.writeChildren(tx, parent.PcnId, next);
       await this.audit(tx, code, 'updated', actor, { status: next.status });
       const saved = await this.readAggregate(tx, updated);
+      await this.revisions.append(tx, code, current, saved, actor);
       const notification = this.notifications ? await this.notifications.persisted(tx, saved, prepared.plan) : undefined;
       return notification ? { ...saved, notification } : saved;
     });
@@ -194,6 +201,10 @@ class SqlPcnRepository {
     });
   }
 
+  async getRevisions(code) { return this.revisions.list(this.pool, code); }
+
+  async getRevision(code, revision) { return this.revisions.get(this.pool, code, revision); }
+
   async saveNotificationSettings(settings, actor = 'system', expectedVersion, user) {
     return this.transaction(async tx => {
       await lockUserMailRouting(tx);
@@ -252,7 +263,7 @@ class SqlPcnRepository {
   }
 
   async readiness() {
-    const required = ['PcnRequests', 'PcnInternalReviews', ...Object.values(childTables), 'PcnCounters', 'AuditLogs', 'NotificationSettings', 'NotificationGroups', 'NotificationRecipients', 'MasterDataVersions', 'Users', 'Roles', 'UserRoles', 'Sessions', 'AccountTokens', 'MigrationSourceRecords', 'NotificationJobs', 'PcnDocumentFiles'];
+    const required = ['PcnRequests', 'PcnInternalReviews', ...Object.values(childTables), 'PcnCounters', 'AuditLogs', 'NotificationSettings', 'NotificationGroups', 'NotificationRecipients', 'MasterDataVersions', 'Users', 'Roles', 'UserRoles', 'Sessions', 'AccountTokens', 'MigrationSourceRecords', 'NotificationJobs', 'PcnDocumentFiles', 'PcnRevisions'];
     const result = await this.pool.request().query(`SELECT MigrationId FROM pcn.SchemaMigrations; SELECT TOP(1) Id FROM pcn.MasterDataVersions WHERE IsActive=1; SELECT TOP(1) Id FROM pcn.Users WHERE IsActive=1;
       SELECT COUNT(*) AS TableCount FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id WHERE s.name=N'pcn' AND t.name IN (${required.map(name => `N'${name}'`).join(',')})`);
     const applied = new Set(result.recordsets[0].map(row => row.MigrationId));

@@ -10,6 +10,7 @@ const { IntegrationService } = require('./src/integrationService');
 const { NotificationService } = require('./src/notificationService');
 const { NotificationWorker } = require('./src/notificationWorker');
 const { SqlDocuments } = require('./src/sqlDocuments');
+const { createAttachmentScanner } = require('./src/attachmentScanner');
 const { createApp } = require('./src/httpServer');
 const { readAuthConfiguration } = require('./src/authConfiguration');
 const { SqlEmployeeDirectory } = require('./src/sqlEmployeeDirectory');
@@ -29,6 +30,8 @@ async function main() {
   await loadRuntimeEnv();
   const {port,host,trustProxy,publicOrigin} = readServerConfig();
   const authConfiguration = readAuthConfiguration(process.env,{host,trustProxy});
+  const attachmentScanner = createAttachmentScanner();
+  if (attachmentScanner) await attachmentScanner.ready();
   const pool = await connectSql();
   const employeeDirectory = new SqlEmployeeDirectory(pool);
   let timer;
@@ -40,7 +43,7 @@ async function main() {
   await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
   const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory,integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;
