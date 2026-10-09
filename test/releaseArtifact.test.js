@@ -92,7 +92,7 @@ test('Windows PowerShell child environment drops inherited Core module paths wit
   assert.equal(parent.psmodulepath, 'other/Core7');
 });
 
-test('Windows packaging and verifier CLI round trip excludes untracked private config', { skip: process.platform !== 'win32' }, async t => {
+test('Windows packaging and deployment extraction accept every producer runtime asset and exclude private config', { skip: process.platform !== 'win32' }, async t => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'pcn-artifact-test-'));
   t.after(async () => {
     const resolved = path.resolve(temporary);
@@ -104,6 +104,12 @@ test('Windows packaging and verifier CLI round trip excludes untracked private c
   await fs.mkdir(path.join(root, 'src'), { recursive: true });
   await fs.mkdir(path.join(root, 'scripts'), { recursive: true });
   await fs.mkdir(path.join(root, 'node_modules', 'fixture'), { recursive: true });
+  const tracked = await run('git', ['ls-files', '-z'], { cwd: path.resolve(__dirname, '..'), windowsHide: true });
+  const runtimeFiles = selectRuntimeFiles(tracked.stdout.split('\0').filter(Boolean));
+  for (const file of runtimeFiles) {
+    await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await fs.writeFile(path.join(root, file), `isolated runtime asset: ${file}`);
+  }
   for (const [file, content] of Object.entries({
     'server.js': '// isolated fixture', 'package.json': '{}', 'package-lock.json': '{}',
     'src/httpServer.js': '// isolated fixture', 'src/runtimeEnv.js': '// isolated fixture',
@@ -113,11 +119,12 @@ test('Windows packaging and verifier CLI round trip excludes untracked private c
     'node_modules/fixture/index.js': 'module.exports = {};',
   })) await fs.writeFile(path.join(root, file), content);
   await run('git', ['init', '--quiet'], { cwd: root, windowsHide: true });
-  await run('git', ['add', 'server.js', 'package.json', 'package-lock.json', 'src/httpServer.js', 'src/runtimeEnv.js', 'login.html', 'admin-users.js', 'scripts/ad-directory.ps1', 'scripts/read-sql-credential.ps1'], { cwd: root, windowsHide: true });
+  await run('git', ['add', ...runtimeFiles, 'scripts/ad-directory.ps1'], { cwd: root, windowsHide: true });
   const inheritedCoreEnvironment = { ...process.env, PSModulePath: path.join(temporary, 'pcn-artifact-bad-core-modules') };
   const manifest = await packageRelease({ root, output, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1, signingKey: keys.privateKey, env: inheritedCoreEnvironment });
   assert.equal(manifest.releaseId, 'pcn-test-42-1');
-  assert.deepEqual((await fs.readdir(path.join(output, 'runtime'))).sort(), ['admin-users.js', 'login.html', 'node_modules', 'package-lock.json', 'package.json', 'scripts', 'server.js', 'src']);
+  const expectedRootEntries = [...new Set([...runtimeFiles.map(file => file.split('/')[0]), 'node_modules'])].sort();
+  assert.deepEqual((await fs.readdir(path.join(output, 'runtime'))).sort(), expectedRootEntries);
   const publicKeyPath = path.join(temporary, 'public.pem');
   await fs.writeFile(publicKeyPath, keys.publicKey.export({ type: 'spki', format: 'pem' }));
   const args = [path.resolve(__dirname, '../scripts/verify-release.js'),
@@ -140,6 +147,9 @@ Expand-VerifiedArchive $env:PCN_FIXTURE_ARCHIVE (Join-Path $script:Base 'extract
       PCN_FIXTURE_EXTRACTOR: path.resolve(__dirname, '../scripts/deploy-pcn-release.ps1'),
       PCN_FIXTURE_BASE: temporary, PCN_FIXTURE_ARCHIVE: path.join(output, 'pcn.zip'), PSExecutionPolicyPreference: 'Restricted' }),
   });
+  for (const file of runtimeFiles) {
+    assert.deepEqual(await fs.readFile(path.join(temporary, 'extracted', file)), await fs.readFile(path.join(root, file)), file);
+  }
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/src/runtimeEnv.js'), 'utf8'), '// isolated fixture');
   assert.equal(await fs.readFile(path.join(temporary, 'extracted/admin-users.js'), 'utf8'), '// employee UI fixture');
   await assert.rejects(fs.access(path.join(output, 'runtime/scripts/ad-directory.ps1')), /ENOENT/);

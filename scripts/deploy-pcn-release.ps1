@@ -12,9 +12,9 @@ $script:MaximumArchive = 200MB
 $script:MaximumExpanded = 500MB
 $script:RuntimeFiles = @(
     'server.js', 'package.json', 'package-lock.json',
-    'admin.html', 'form.html', 'index.html', 'login.html',
-    'app.js', 'admin.js', 'login.js', 'session-client.js', 'master-data.js',
-    'auth.css', 'admin.css', 'styles.css', 'tokin-header-logo.png',
+    'admin.html', 'form.html', 'records.html', 'index.html', 'login.html',
+    'app.js', 'admin.js', 'records.js', 'login.js', 'session-client.js', 'master-data.js',
+    'auth.css', 'admin.css', 'records.css', 'styles.css', 'tokin-header-logo.png', 'thailand-login.jpg',
     'document-workspace.js', 'document-workspace.css', 'document-recovery.js', 'document-bridge.js',
     'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
     'scripts/read-sql-credential.ps1', 'admin-users.js'
