@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-10-07. Signed `pcn-test-10-1` is deployed with [SQL employee-code-only authentication](employee-code-authentication.md). Migration 003, the separately approved employee Administrator / IT account and PCN-only IIS cutover are complete. The polling task was resumed after acceptance and is enabled / Ready / result 0, with a verified no-op repeat. The user's actual Edge GUI remains unobserved.
+Updated: 2026-10-09. Signed `pcn-test-12-1` is deployed with document control and [SQL employee-code-only authentication](employee-code-authentication.md). Migrations 001–005 were already applied. The protected polling consumer's public asset allowlist was independently upgraded, retaining its backup, ACL and pinned public key. The task is enabled / Ready / result 0. HTTPS SQL readiness, exact service identity and read-only trusted HTTPS browser acceptance passed.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -96,7 +96,17 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current deployment — pcn-test-10-1
+### Current deployment — pcn-test-12-1
+
+[Actions 37891473630](https://github.com/akwaa2545-gif/PCN-/actions/runs/37891473630) succeeded with 444 unit/API tests, 120 existing browser checks and the high/critical dependency audit gate. Signed [pcn-test-12-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-12-1) from main `a5777eb9b92887b29b4f85aeb68614c79fadc294` was installed at observed host time `2026-10-09T06:11:55.8831811Z`.
+
+The independently upgraded protected consumer changed only its public asset allowlist and has SHA-256 `9D245F204BFF2F533A1A14DA27146022BC0F9BFD31F2847515E9E53472A19DD2`. Its protected backup and ACL were preserved; the pinned public-key SHA-256 remained `04D893A9C5021114C816C9DA5BDD5D7A80EA6E061C6573CACB9196CC38EA3306`.
+
+Independent checks verified Node PID 14956 running the exact release beneath WinSW as `NT AUTHORITY\NETWORK SERVICE`, exclusively listening on `127.0.0.1:3000`. Public HTTPS :8443 returned SQL readiness 200 and employee-code auth mode; unrelated Default Web Site HTTP :80 still returned 200. The SYSTEM polling task is enabled / Ready / result 0. A repeat poll returned `already_current` for `pcn-test-12-1`, preserving Node PID 14956 and the pinned public key. Read-only schema inspection confirmed migrations 001–005 already applied; deployment ran no DDL, account import, business-data mutation or test email.
+
+The scanner remains disabled, so pending attachments stay quarantined. Trusted HTTPS browser acceptance passed 10 groups and 17 read-only API responses (all 200), covering existing administrator sign-in/logout, records, Users, Mail Routing and an existing PCN's document controls at desktop and 390-pixel widths. It used no TLS bypass and produced no console/page errors, business writes or external integration calls. Eleven live public assets matched the deployed commit after line-ending normalization; private source/configuration paths returned 403/404. Live upload, real scanning, saving, signing and notifications were outside acceptance. The 13 document browser groups and 91.08% line coverage remain prior local results, separate from CI.
+
+### Historical employee-code cutover — pcn-test-10-1
 
 [Actions 37567205169](https://github.com/akwaa2545-gif/PCN-/actions/runs/37567205169) succeeded with 240 tests, 59 isolated browser checks and the high/critical audit gate. It published signed [pcn-test-10-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-10-1) from main `c827d9c1c23c27631604936807dbbc352101c11e`, installed at observed host time `2026-10-07T03:42:57.7868092Z`. Real HTTPS acceptance passed 26 checks with certificate/IP verification and no Windows challenge. The exact NetworkService / WinSW / loopback identity passed, unrelated Default Web Site HTTP :80 remained available, and the enabled SYSTEM polling task is Ready / result 0 with a verified no-op repeat. The [main acceptance record](employee-code-authentication.md#acceptance--2026-10-07) records source/account/schema and local-browser evidence; actual user Edge GUI and email delivery remain unobserved.
 

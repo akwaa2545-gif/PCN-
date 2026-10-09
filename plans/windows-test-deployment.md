@@ -1,6 +1,6 @@
 # Windows HTTPS deployment and employee-code cutover
 
-Updated: 2026-10-07. [SQL employee-code-only login](employee-code-authentication.md) is deployed as signed `pcn-test-10-1` from `c827d9c1c23c27631604936807dbbc352101c11e`. Migration 003, the separate approved employee Administrator / IT account and PCN-only IIS cutover are complete. Real local and HTTPS API acceptance passed; the user's own Edge GUI remains unobserved. The former AD / Windows SSO runtime is retired.
+Updated: 2026-10-09. Document control and [SQL employee-code-only login](employee-code-authentication.md) are deployed as signed `pcn-test-12-1` from `a5777eb9b92887b29b4f85aeb68614c79fadc294`. Migrations 001–005 were already applied. Exact service identity, HTTPS SQL readiness and read-only trusted HTTPS browser acceptance passed. The former AD / Windows SSO runtime is retired.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-10-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-12-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -81,6 +81,12 @@ Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 
 The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
 ## Current acceptance and recovery
+
+[Actions 37891473630](https://github.com/akwaa2545-gif/PCN-/actions/runs/37891473630) passed 444 unit/API tests, 120 existing browser checks and the high/critical dependency audit gate. Signed `pcn-test-12-1` was installed at observed host time `2026-10-09T06:11:55.8831811Z`. The protected consumer was independently upgraded only for its public asset allowlist, with a protected backup and ACL retained. Its SHA-256 is `9D245F204BFF2F533A1A14DA27146022BC0F9BFD31F2847515E9E53472A19DD2`; pinned public-key SHA-256 stayed `04D893A9C5021114C816C9DA5BDD5D7A80EA6E061C6573CACB9196CC38EA3306`.
+
+Independent checks verified exact-release Node PID 14956, WinSW parent, `NT AUTHORITY\NETWORK SERVICE` ownership and exclusive `127.0.0.1:3000` binding. Public HTTPS :8443 returned SQL readiness 200 with employee-code authentication; Default Web Site HTTP :80 still returned 200. The SYSTEM polling task is enabled / Ready / result 0. A repeat poll returned `already_current` for `pcn-test-12-1`, preserving Node PID 14956 and the pinned public key. Read-only schema checks confirmed migrations 001–005 already applied; deployment performed no DDL, account import, business-data mutation or test email. The attachment scanner remains disabled and pending files quarantined. Trusted HTTPS browser acceptance passed 10 groups and 17 read-only API responses (all 200), covering existing administrator sign-in/logout, records, Users, Mail Routing and an existing PCN's document controls at desktop and 390-pixel widths. No TLS bypass, console/page errors, business writes or external integration calls occurred. Eleven live public assets matched the deployed commit after line-ending normalization; private source/configuration paths returned 403/404. Live upload/scanning/save/signing/notification acceptance remains separate; 13 document browser groups and 91.08% line coverage were prior local results.
+
+### Historical employee-code cutover — pcn-test-10-1
 
 [Actions 37567205169](https://github.com/akwaa2545-gif/PCN-/actions/runs/37567205169) succeeded with 240 tests, 59 isolated browser checks and the high/critical audit gate. Signed `pcn-test-10-1` was installed at observed server time `2026-10-07T03:42:57.7868092Z`. Migration 003 was applied at `2026-10-07T03:35:30.942Z`, with 001/002 unchanged. The separate verified `2205529` Administrator / IT account was added while retaining the prior three accounts.
 

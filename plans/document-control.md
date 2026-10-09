@@ -1,6 +1,6 @@
 # PCN document control
 
-Local implementation, 2026-10-09. Migration 005 was applied to `svr120a / Scn_DB` while resolving the reported startup failure, using the user's existing migration authorization. SQL readiness and local server startup passed. Code has not been pushed or deployed.
+Updated: 2026-10-09. Document control is deployed as signed `pcn-test-12-1` from main `a5777eb9b92887b29b4f85aeb68614c79fadc294`, installed at observed host time `2026-10-09T06:11:55.8831811Z`. Migration 005 was applied earlier to `svr120a / Scn_DB`; read-only deployment checks confirmed migrations 001–005 and HTTPS SQL readiness 200. Deployment performed no DDL, account import, business-data mutation or test email. Trusted HTTPS browser acceptance passed 10 groups and 17 read-only API responses (all 200), without TLS bypass, business writes or external integration calls. See [the rollout record](github-deployment.md#acceptance-evidence).
 
 ## Editing and approvals
 
@@ -51,6 +51,10 @@ All routes require the existing authenticated PCN access checks. Mutations also 
 
 `npm test` covers API/permission rules, SQL transaction fakes, revision digests, attachment security, recovery and late-edit handling. `npm run test:documents` runs the document-control journey with isolated adapters, screenshots and an actual printed PDF. `npm run test:e2e` runs the existing regression journey. These tests do not establish live SQL migration, scanner availability, email delivery or deployment acceptance.
 
-The final local coverage run passed 444 tests with 91.08% line, 89.45% branch and 93.59% function coverage. Code and security review findings were resolved; the scanner's Windows ACL PowerShell script also passed a local syntax parse without executing it. Real scanner, production database and deployed browser acceptance remain separate rollout checks.
+The final local coverage run passed 444 tests with 91.08% line, 89.45% branch and 93.59% function coverage. Code and security review findings were resolved; the scanner's Windows ACL PowerShell script also passed a local syntax parse without executing it. Release CI separately passed 444 unit/API tests, 120 existing browser checks and the high/critical dependency audit gate. The host scanner remains disabled, with pending files quarantined; real scanner and live upload/save/signing/notification acceptance remain separate checks.
 
 The document browser journey passed 13 check groups, and the existing regression journey passed 120 checks. A generated two-page PDF was rendered and inspected for the original layout, complete rows, revision/status, watermark, page numbering and handwritten signatures. The PDF attachment viewer popup and byte-exact download passed; its native plugin surface could not be visually verified in headless Chromium, so the UI retains the explicit download fallback. All browser journeys used isolated test adapters and blocked external HTTP integrations.
+
+## Deployed browser acceptance
+
+Trusted HTTPS Playwright checks covered existing administrator sign-in/logout, two existing records, navigation and Create PCN emphasis, Users, Mail Routing, and existing `PCN-2026-0002` History/Attachments/Checks, next action and Print control. Ten groups and 17 read-only API responses passed; the document fit a 390-pixel viewport. There were no console/page errors, business writes or external integration calls. Eleven live public assets matched the deployed commit after line-ending normalization; private configuration/source paths returned 403/404. Upload, real scanning, saving, signing, printing output and notifications were outside this live acceptance. The generated PDF and attachment viewer/download evidence above remains local.
