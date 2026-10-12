@@ -257,3 +257,54 @@
 
   window.PCN_SESSION = Object.freeze({ fetch: apiFetch, load, require: requireSession, safeReturnTo, logout, mountProfile });
 })();
+
+(function (root) {
+  'use strict';
+  function start({ refresh, canRefresh = () => true, onError, intervalMs = 5000 }) {
+    if (typeof refresh !== 'function' || typeof canRefresh !== 'function' || !Number.isFinite(intervalMs) || intervalMs < 1000 || intervalMs > 60000) {
+      throw new Error('Automatic updates require a refresh function and an interval between one and sixty seconds.');
+    }
+    const doc = root.document;
+    let timer = null, stopped = false, pending = false, failures = 0, generation = 0, suspended = false;
+    const visible = () => !stopped && !suspended && doc.visibilityState !== 'hidden';
+    function clear() { if (timer !== null) root.clearTimeout(timer); timer = null; }
+    function schedule(delay) { clear(); if (visible() && !pending) timer = root.setTimeout(tick, delay); }
+    async function tick() {
+      timer = null;
+      if (!visible() || pending) return;
+      const captured = generation;
+      const isCurrent = () => visible() && generation === captured;
+      pending = true;
+      try {
+        if (canRefresh()) { await refresh({ isCurrent }); failures = 0; }
+      } catch (error) {
+        failures = Math.min(failures + 1, 3);
+        try {
+          if (onError) onError(error);
+          else root.console?.warn('Automatic updates could not complete.', error);
+        } catch (reportError) { root.console?.error('Automatic update error reporting failed.', reportError); }
+      } finally {
+        pending = false;
+        schedule(Math.min(intervalMs * (2 ** failures), 30000));
+      }
+    }
+    function visibilityChanged() { generation++; clear(); if (visible() && !pending) schedule(0); }
+    function pagehide(event) {
+      if (event?.persisted) { suspended = true; generation++; clear(); }
+      else stop();
+    }
+    function pageshow() { suspended = false; visibilityChanged(); }
+    function stop() {
+      stopped = true; generation++; clear();
+      doc.removeEventListener('visibilitychange', visibilityChanged);
+      root.removeEventListener('pagehide', pagehide);
+      root.removeEventListener('pageshow', pageshow);
+    }
+    doc.addEventListener('visibilitychange', visibilityChanged);
+    root.addEventListener('pagehide', pagehide);
+    root.addEventListener('pageshow', pageshow);
+    schedule(intervalMs);
+    return stop;
+  }
+  root.PCN_AUTO_REFRESH = { start };
+})(window);
