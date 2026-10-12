@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-10-12. Signed `pcn-test-13-1` is deployed with employee access, read-only Records, PCN-local users and the revised Users UI. Migrations 001–006 were already applied. The installed protected polling consumer, private configuration and pinned public key were retained. HTTPS SQL readiness, exact service identity and read-only trusted HTTPS desktop/mobile browser acceptance passed.
+Updated: 2026-10-12. Signed `pcn-test-14-1` is installed with explicit internal HTTP support, preserving production defaults for other deployments. The user-authorized conversion of the existing IIS port 8443 to HTTP passed host readiness and six desktop/mobile browser acceptance groups; the SYSTEM polling task is enabled / Ready / result 0. Migrations 001–006 were already applied. The protected polling consumer and pinned public key remain outside release payloads. Earlier HTTPS browser acceptance is historical evidence below.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -96,7 +96,15 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current deployment — pcn-test-13-1
+### Current runtime — pcn-test-14-1; HTTP acceptance passed
+
+[Actions 38215492045](https://github.com/akwaa2545-gif/PCN-/actions/runs/38215492045) passed 605 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-14-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-14-1) from main `4ef5da534484b8ad173348fe51729d391f115c1b` was installed at observed host time `2026-10-12T07:15:07.8901976Z`. Archive SHA-256: `3d0c4b9c2a08ef699bb69e15d5769bbd1873f01777f79e7f0185bf5d8a675ce5`.
+
+The user-authorized internal HTTP conversion retained **the same port 8443**, at `http://172.30.77.137:8443`. Only private `PUBLIC_ORIGIN` and `ALLOW_INTERNAL_HTTP` values, the exact PCNTest IIS / HTTP.sys binding and PCNTest's Require SSL access setting changed. The effective access `sslFlags` is 0; rollback restores 8. `NODE_ENV=production`, loopback backend, proxy web.config/client-IP overwrite, employee-network firewall restrictions and private SQL/mail values were retained. HTTP uses `pcn_session_http` with HttpOnly, SameSite Strict, exact-origin and CSRF enforcement; its traffic is unencrypted. GitHub downloads and Power Automate integrations still require HTTPS. The pending corporate certificate request is retained only for an optional HTTPS return.
+
+Exact-release HTTP Node PID 18368, workstation SQL readiness / login-page checks and unrelated HTTP :80 passed. Browser acceptance passed six groups, five public GETs (all 200) and sixteen read-only API responses, with no unexpected errors. It covered automatic employee-code sign-in, the separate HTTP cookie, persisted reload, old Secure cookie isolation, two expected 403 origin/CSRF logout probes retaining the session, Portal records, assigned/pending Users filters and yellow marker at desktop/mobile widths, read-only document History / print and final logout clearing the HTTP cookie. Only login/logout and two rejected auth probes were sent; notification-health requests were blocked locally, with no business writes, external requests or mail. At observed host time 2026-10-12T07:52:26.4834039Z, a repeat consumer poll returned already_current for runtime 14 and retained Node PID 18368. Independent final checks at 2026-10-12T07:52:46.7647158Z confirmed the service Running, sole 127.0.0.1:3000 listener, sole PCNTest HTTP :8443 binding, sslFlags 0, absent SSL mapping, readiness ready, unrelated HTTP :80 returning 200, and the polling task enabled / Ready / result 0.
+
+### Historical HTTPS deployment — pcn-test-13-1
 
 [Actions 38205693461](https://github.com/akwaa2545-gif/PCN-/actions/runs/38205693461) passed 600 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-13-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-13-1) from main `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc` was installed at observed host time `2026-10-12T05:12:29.8604841Z`, after host-side validate-only signature/archive/path checks. Archive SHA-256: `eefb60ae20ef6f10bf561833504246d9de4fa34e7b808151adae1c8751129dc9`.
 

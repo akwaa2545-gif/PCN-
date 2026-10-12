@@ -1,15 +1,15 @@
-# Windows HTTPS deployment and employee-code cutover
+# Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-12. Employee access, read-only Records, PCN-local users and the revised Users UI are deployed as signed `pcn-test-13-1` from `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc`. Migrations 001–006 were already applied before cutover. Exact service identity, HTTPS SQL readiness and read-only trusted HTTPS desktop/mobile browser acceptance passed. The former AD / Windows SSO runtime is retired.
+Updated: 2026-10-12. Signed `pcn-test-14-1` from `4ef5da534484b8ad173348fe51729d391f115c1b` is installed with explicit internal HTTP support. The user-authorized conversion of the same IIS port 8443 to HTTP passed host readiness and six read-only desktop/mobile browser acceptance groups. The SYSTEM polling task is enabled / Ready / result 0; a repeat consumer poll returned already_current for runtime 14, retaining Node PID 18368. Migrations 001–006 were already applied. The former AD / Windows SSO runtime is retired. Earlier HTTPS acceptance is retained as historical evidence below.
 
 ## Scope and retained components
 
-The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `https://172.30.77.137:8443`, with the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` WinSW service. Node serves application routes/static files only through `127.0.0.1:3000`. Default Web Site's `*:80` binding was verified unchanged and responds HTTP 200.
+The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `http://172.30.77.137:8443`, with the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` WinSW service. Node serves application routes/static files only through `127.0.0.1:3000`. Default Web Site's `*:80` binding was verified unchanged and responds HTTP 200.
 
 The replacement data flow is:
 
 ```text
-Browser employee code -> IIS HTTPS :8443 -> Node 127.0.0.1:3000
+Browser employee code -> IIS HTTP :8443 -> Node 127.0.0.1:3000
                                            | PCN users / sessions / roles -> Scn_DB
                                            | read-only employee lookup   -> KEY_Code_DB.dbo.tblEmployee
 ```
@@ -24,12 +24,12 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-13-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-14-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
 | Backend binding | `127.0.0.1:3000` only |
-| Browser origin | Exactly `https://172.30.77.137:8443` |
+| Browser origin | Exactly `http://172.30.77.137:8443` |
 | Runtime identity | `SupplierPCNTest` as NetworkService with service-SID-specific ACLs |
 | IIS identity | Separate PCNTest application pool, no SQL/environment-secret access |
 
@@ -43,12 +43,13 @@ HOST=127.0.0.1
 PORT=3000
 TRUST_PROXY=loopback
 NODE_ENV=production
-PUBLIC_ORIGIN=https://172.30.77.137:8443
+PUBLIC_ORIGIN=http://172.30.77.137:8443
+ALLOW_INTERNAL_HTTP=true
 ```
 
 `employee-code` is the normal runtime default. Explicit `AUTH_MODE=password` is maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings and proxy secrets are removed from the replacement environment; their presence must not activate Windows mode. Normal employee-code sign-in requires neither a PCN password nor a Windows-authenticated browser.
 
-## Reviewed cutover sequence
+## Historical employee-code cutover sequence
 
 1. Pause the `SupplierPCNTestDeployment` SYSTEM polling task for reviewed cutover; preserve its trust anchors, version records and current service/IIS configuration. Keep the live application running during preparation where possible.
 2. Confirm the intended administrator's source `EmpCode` with the user. The former AD SamAccountName is not assumed to identify the same SQL-source employee. For this rollout create the separately approved `2205529` Administrator / IT account; preserve the prior accounts and their ownership without relinking the unrelated former AD administrator.
@@ -58,19 +59,34 @@ PUBLIC_ORIGIN=https://172.30.77.137:8443
 6. Set employee-code mode in the private backend environment, validate the reviewed signed replacement runtime and installed consumer, switch only the PCN service and verify exact Node/WinSW identity, loopback listener, schema/SQL/source behavior.
 7. Verify real employee-code administrator login/session/authorization/logout through HTTPS, selected user creation/linking and source-outage denial; retain cookie/origin/CSRF protections and PCN signing/ownership permissions. Record the actual release and results before resuming the task.
 
-This rollout completed the sequence. PCNTest has Windows Authentication disabled / Anonymous Authentication enabled with empty anonymous username and its existing pool identity. The obsolete Windows module DLL/key were archived in protected maintenance storage and removed from the live site. Existing pool read/execute permissions, HTTPS binding, service-SID secret isolation and native `REMOTE_ADDR` client-IP rewrite remain intact. Real GUI automation against the local SQL-backed runtime passed; the user's own Edge observation remains separate.
+The earlier employee-code rollout completed this sequence. PCNTest has Windows Authentication disabled / Anonymous Authentication enabled with empty anonymous username and its existing pool identity. The obsolete Windows module DLL/key were archived in protected maintenance storage and removed from the live site. Existing pool read/execute permissions, the then-current HTTPS binding, service-SID secret isolation and native `REMOTE_ADDR` client-IP rewrite were retained. Real GUI automation against the local SQL-backed runtime passed; the user's own Edge observation remains separate.
 
-## TLS and client setup retained
+## Internal HTTP conversion
 
-The HTTPS binding uses certificate thumbprint `B3691FE671FDCB46718B8E4AC7EA5B9EDEDF64FB`, expiring on 2027-01-04. Pinned-certificate IP validation passed. The approved client's Current User Root store contains the verified public certificate; normal operating-system TLS trust passed without a custom CA file or TLS bypass. The private key remains on the server.
+The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
+
+```text
+PUBLIC_ORIGIN=http://172.30.77.137:8443
+ALLOW_INTERNAL_HTTP=true
+```
+
+The scoped operation converted only the IIS `PCNTest` binding at `172.30.77.137:8443` from HTTPS to HTTP, removed its exact HTTP.sys SSL mapping, and cleared PCNTest's Require SSL access setting (`sslFlags` 8 to 0). The existing certificate remains in LocalMachine My for rollback or a future HTTPS return. The existing `SupplierPCNTest-HTTPS` firewall rule retains TCP 8443, its employee-network scope and Domain/Private profiles despite its historical name. Proxy web.config, unrelated IIS sites, private SQL/mail values, service identity and loopback-only backend remain unchanged.
+
+The first HTTP conversion encountered IIS 403.4 because the effective access setting still required SSL (`sslFlags` 8); an initial preflight read of `sslFlags.Value` had returned null. Full HTTPS rollback succeeded. The corrected operation reads `access.Attributes`, preserves the Require SSL value for rollback and verified effective `sslFlags` 0 before HTTP readiness. The successful conversion retained a protected backup at `C:\SupplierPCN\deployment\http-transition\20261012T074810Z-0a08c12e8f0d435bb9bf9c5c6a9c0980`. The resulting private environment file SHA-256 is `ED6EFB877E4E9A53BD36337DB727B61B27683E0051AF6B2C9F222B01A4A74E25`; its contents remain private. Current HTTP readiness returned `ready` and `/login` returned 200 from the workstation. Six HTTP desktop/mobile browser groups passed; polling is enabled / Ready / result 0.
+
+HTTP traffic is unencrypted. A separate `pcn_session_http` cookie avoids collisions with existing Secure `pcn_session` cookies on the same IP. HttpOnly, SameSite Strict, exact-origin, CSRF, authorization and rate limits remain enabled. Server-side Power Automate and GitHub connections retain their HTTPS requirements. Host readiness, six desktop/mobile browser groups, task resumption and a repeat no-op consumer check passed; final evidence is recorded below.
+
+## Historical TLS and client setup; optional HTTPS return
+
+The earlier HTTPS binding used certificate thumbprint `B3691FE671FDCB46718B8E4AC7EA5B9EDEDF64FB`, expiring on 2027-01-04. Pinned-certificate IP validation passed. The approved client's Current User Root store contains the verified public certificate; normal operating-system TLS trust passed without a custom CA file or TLS bypass. The certificate and private key remain on the server; the authorized HTTP conversion does not export or delete them.
 
 The current user's HTTPS IP `172.30.77.137` was mapped to Local Intranet zone 1 during the former Windows-auth pilot. That mapping covers all HTTPS ports at this IP, with no HTTP/subnet/domain-wide mapping or credential-delegation/authentication-allowlist change. Employee-code login does not need that zone mapping for native SSO. Protected rollback metadata remains under `%LOCALAPPDATA%\SupplierPCN\deployment\sso-operations\backups\pcn-browser-before-*.json`; restore only the scoped client state if retiring it, retaining TLS trust required for the pilot.
 
-The HTTP.sys binding is back at its verified original baseline with Disable HTTP2 Not Set and all other TLS fields unchanged. A former HTTP/1.1 trial did not resolve Edge `ERR_TOO_MANY_RETRIES` and was reverted. The former browser incident involved a VPN extension overriding native HTTP authentication challenges; its credentials are not recorded here. Those SSO diagnostics are [historical](employee-windows-authentication.md#historical-edge-incident), not setup requirements for the replacement. Successful browser GUI access after the new cutover remains to be observed.
+Before the HTTP conversion, the HTTP.sys binding was at its verified original baseline with Disable HTTP2 Not Set and all other TLS fields unchanged. A former HTTP/1.1 trial did not resolve Edge `ERR_TOO_MANY_RETRIES` and was reverted. The former browser incident involved a VPN extension overriding native HTTP authentication challenges; its credentials are not recorded here. Those SSO diagnostics are [historical](employee-windows-authentication.md#historical-edge-incident), not setup requirements for employee-code login.
 
 Retire the pilot trust/binding when replacing the test with an approved CA-issued certificate. Remove only the installed pilot thumbprint from the client's Current User Root store when it is no longer needed, and never export a PFX/private key.
 
-### Company certificate request pending approval (2026-10-12)
+### Historical company certificate request; optional HTTPS return (2026-10-12)
 
 Other employee computers report `NET::ERR_CERT_AUTHORITY_INVALID` for the pilot certificate. A replacement request was generated on `THCHA-WEBHOST01` with a non-exportable 3072-bit machine RSA key, Server Authentication purpose, subject `CN=THCHA-WEBHOST01.KEMET.com`, both host DNS names and IP SAN `172.30.77.137`. The IP SAN preserves the current portal URL.
 
@@ -78,9 +94,9 @@ The host submitted this request as `KEMET\THCHA-WEBHOST01$` to `hq-cert2.KEMET.c
 
 Protected host artifacts are under `C:\SupplierPCN\deployment\certificate-requests\pcn-test-20261012`; the submission result is `hq-cert2-submission\result.json`. The public CSR SHA-256 is `AF7E8B7E3407671B4565D15D4A73E0496E8C6A818A961E060441B43B01DAF78E`; the requested public-key SHA-256 is `855FA80FCB54756F86C6B21E0907709526DC7C93E617C5D6A3F7293E2D4DAE9F`. No private key was exported.
 
-After issuance, retrieve request `1580097`, verify its key match, subject/SANs, Server Authentication purpose, validity and trusted company chain, accept it into the host machine store, and replace only the `PCNTest` HTTPS binding on `172.30.77.137:8443`. Keep the current binding thumbprint above for rollback. Verify normal HTTPS certificate validation and application readiness after replacement. The discovered issuing CA chains to `KEMET-HQ-CERT1-CA` (root thumbprint `4815A950F4A2DD55E8C57F4584EE853638A6A562`), which is trusted on the host and this workstation; trust on the affected employee computer still needs verification.
+For an explicitly authorized future HTTPS return after issuance, retrieve request `1580097`, verify its key match, subject/SANs, Server Authentication purpose, validity and trusted company chain, then accept it into the host machine store. Restore only the `PCNTest` HTTPS binding on `172.30.77.137:8443`, set the matching HTTPS `PUBLIC_ORIGIN` and disable `ALLOW_INTERNAL_HTTP`, then verify normal certificate validation, Secure cookies and application readiness. Keep the former pilot thumbprint above for rollback. The discovered issuing CA chains to `KEMET-HQ-CERT1-CA` (root thumbprint `4815A950F4A2DD55E8C57F4584EE853638A6A562`), which is trusted on the host and this workstation; trust on the affected employee computer still needs verification.
 
-The certificate has **not** been issued or installed. Post-submission checks confirmed the original binding, service Running, readiness `ready`, and removal of the temporary submission task. The employee browser warning remains unresolved until issuance, installation and client trust verification.
+The certificate has **not** been issued or installed. Post-submission checks confirmed the original binding, service Running, readiness `ready`, and removal of the temporary submission task. This pending request does not block the explicitly authorized HTTP deployment. Returning to HTTPS requires issuance, certificate installation, restored HTTPS origin and Secure cookies, and client trust verification; HTTP itself uses no server certificate.
 
 ## Historical release evidence
 
@@ -94,7 +110,15 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-### Current deployment — pcn-test-13-1
+### Current runtime — pcn-test-14-1; HTTP acceptance passed
+
+[Actions 38215492045](https://github.com/akwaa2545-gif/PCN-/actions/runs/38215492045) passed 605 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-14-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-14-1), commit `4ef5da534484b8ad173348fe51729d391f115c1b`, was installed at observed host time `2026-10-12T07:15:07.8901976Z`. Its ZIP SHA-256 is `3d0c4b9c2a08ef699bb69e15d5769bbd1873f01777f79e7f0185bf5d8a675ce5`. After the scoped HTTP conversion, exact-release Node PID 18368 served readiness `ready` and `/login` 200 at `http://172.30.77.137:8443`; unrelated Default Web Site HTTP :80 returned 200.
+
+Live HTTP acceptance passed six groups, five public GETs (all 200) and sixteen read-only API responses at workstation UTC `2026-10-12T07:45:27.879Z`–`2026-10-12T07:45:44.227Z`, with no unexpected errors. It verified automatic administrator sign-in; `pcn_session_http` with HttpOnly, SameSite Strict, Secure false and root path; an existing synthetic Secure `pcn_session` staying unsent over HTTP; persisted login after reload; wrong-Origin and missing-CSRF logout probes each returning 403 while retaining the session; three Portal PCNs; Users with four assigned / six pending accounts, filters and yellow indicator at desktop and 390-pixel widths; read-only existing-document History / print; and successful logout clearing only the HTTP cookie and authenticated session. Exactly login, logout and two rejected auth probes were sent. Two automatic notification-health GETs were blocked locally; no business writes, external requests or test mail occurred. The live report is retained in ignored `test-results/live-http-acceptance.json`.
+
+At observed host time 2026-10-12T07:52:26.4834039Z, the repeat consumer poll returned already_current for runtime 14 with Node PID 18368 unchanged. Independent final checks at 2026-10-12T07:52:46.7647158Z confirmed exact release / commit, service Running, sole 127.0.0.1:3000 listener, sole PCNTest HTTP :8443 binding, sslFlags 0, absent SSL mapping, readiness ready, unrelated HTTP :80 returning 200, and the SYSTEM polling task enabled / Ready / result 0.
+
+### Historical HTTPS deployment — pcn-test-13-1
 
 [Actions 38205693461](https://github.com/akwaa2545-gif/PCN-/actions/runs/38205693461) passed 600 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-13-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-13-1), commit `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc`, was installed at observed host time `2026-10-12T05:12:29.8604841Z`. Its ZIP SHA-256 is `eefb60ae20ef6f10bf561833504246d9de4fa34e7b808151adae1c8751129dc9`. The installed consumer and pinned public key retain the hashes recorded below; no trust-anchor, private configuration or IIS changes were made.
 
