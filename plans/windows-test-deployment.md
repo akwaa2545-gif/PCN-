@@ -1,6 +1,6 @@
 # Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-12. Signed `pcn-test-14-1` from `4ef5da534484b8ad173348fe51729d391f115c1b` is installed with explicit internal HTTP support. The user-authorized conversion of the same IIS port 8443 to HTTP passed host readiness and six read-only desktop/mobile browser acceptance groups. The SYSTEM polling task is enabled / Ready / result 0; a repeat consumer poll returned already_current for runtime 14, retaining Node PID 18368. Migrations 001–006 were already applied. The former AD / Windows SSO runtime is retired. Earlier HTTPS acceptance is retained as historical evidence below.
+Updated: 2026-10-12. Signed `pcn-test-15-1` is installed with automatic browser updates on the existing HTTP :8443 origin. CI, host readiness and live browser acceptance passed; the SYSTEM polling task is enabled / Ready / result 0 with a verified no-op repeat. Migrations 001–006 were already applied. Previous HTTP/HTTPS acceptance remains historical evidence below.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-14-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-15-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -62,6 +62,8 @@ ALLOW_INTERNAL_HTTP=true
 The earlier employee-code rollout completed this sequence. PCNTest has Windows Authentication disabled / Anonymous Authentication enabled with empty anonymous username and its existing pool identity. The obsolete Windows module DLL/key were archived in protected maintenance storage and removed from the live site. Existing pool read/execute permissions, the then-current HTTPS binding, service-SID secret isolation and native `REMOTE_ADDR` client-IP rewrite were retained. Real GUI automation against the local SQL-backed runtime passed; the user's own Edge observation remains separate.
 
 ## Internal HTTP conversion
+
+Automatic browser updates are deployed in runtime 15. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15 is installed, live browser acceptance passed and the SYSTEM deployment task is enabled / Ready / result 0.
 
 The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
 
@@ -109,8 +111,15 @@ Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 
 The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
 ## Current acceptance and recovery
+### Current runtime — pcn-test-15-1; automatic updates
 
-### Current runtime — pcn-test-14-1; HTTP acceptance passed
+[Actions 38224241715](https://github.com/akwaa2545-gif/PCN-/actions/runs/38224241715) passed 635 unit/API tests, the dependency audit, existing isolated browser checks and six automatic-update browser groups. Signed [pcn-test-15-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-15-1), commit `73009ce7272cce6282658f52aeb3063cc08799ac`, was published at `2026-10-12T08:36:11Z` and installed at observed host time `2026-10-12T08:53:29.0786995Z`. ZIP SHA-256: `0717db2b8dcc7811373b04035513d1d7ed66042e7fc1e8bc475acb169601037e` (15,557,032 bytes).
+
+Exact-release Node PID 3400 runs beneath the intended WinSW service as NetworkService, exclusively listening on `127.0.0.1:3000`; public HTTP :8443 readiness passed. Private environment and proxy hashes, IIS configuration, the protected consumer and signing key were retained. An initial activation failed before any service switch, version-record or release-folder change; inspection confirmed runtime 14 healthy before the successful retry. Its exact failure cause was not established. Live HTTP acceptance passed eight groups and five public GETs (all 200), at workstation UTC `2026-10-12T08:48:28.676Z`–`2026-10-12T08:48:59.459Z` (the host clock is about five minutes ahead). Portal polling repeated after 4,816 ms and Users polling after 2,785 ms within its existing timer phase. Filters, focus, scroll and unchanged table data were retained; desktop/mobile checks covered three PCNs, four assigned/six pending accounts, the yellow marker and 390-pixel fit. HTTP cookies, session reload and logout passed. Only login/logout writes were permitted; no business changes, external requests, directory lookup attempts or unexpected errors occurred. Profile reads were configured to be locally stubbed to prevent server-side directory-flow calls; none occurred. Two notification-health GETs were blocked locally. No test mail was sent. The ignored report is `test-results/live-auto-refresh-acceptance.json`.
+
+At observed host time `2026-10-12T08:56:27.2819451Z`, a repeat consumer invocation returned `already_current` for runtime 15, retained Node PID 3400 and resumed the task. Independent final checks at `2026-10-12T08:57:26.6256694Z` confirmed release 15 / commit `73009ce7272cce6282658f52aeb3063cc08799ac`, service Running, sole `127.0.0.1:3000` listener owned by PID 3400, sole PCNTest HTTP `172.30.77.137:8443:` binding, access SSL flags 0 with no SSL mapping, SQL readiness, unrelated Default Web Site HTTP :80 returning 200, and the SYSTEM task enabled / Ready / last result 0.
+
+### Historical HTTP conversion — pcn-test-14-1
 
 [Actions 38215492045](https://github.com/akwaa2545-gif/PCN-/actions/runs/38215492045) passed 605 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-14-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-14-1), commit `4ef5da534484b8ad173348fe51729d391f115c1b`, was installed at observed host time `2026-10-12T07:15:07.8901976Z`. Its ZIP SHA-256 is `3d0c4b9c2a08ef699bb69e15d5769bbd1873f01777f79e7f0185bf5d8a675ce5`. After the scoped HTTP conversion, exact-release Node PID 18368 served readiness `ready` and `/login` 200 at `http://172.30.77.137:8443`; unrelated Default Web Site HTTP :80 returned 200.
 
