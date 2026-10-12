@@ -12,7 +12,8 @@ async function handleApi(req, res, url, context, requestId) {
   const send = (data, status = 200) => writeJson(res, status, {success:true,data});
   const route = url.pathname;
   const method = req.method;
-  const token = readSessionToken(req);
+  const cookieOptions = { secure:context.secureCookies, cookieName:context.sessionCookieName };
+  const token = readSessionToken(req, cookieOptions);
   if (route === '/api/health' && method === 'GET') return send({status:'ok',service:'supplier-pcn-workflow',requestId});
   if (route === '/api/auth/config' && method === 'GET') return send({mode:authMode,employeeProvisioningConfigured:Boolean(employeeDirectory)});
   if (route === '/api/ready' && method === 'GET') {
@@ -28,7 +29,7 @@ async function handleApi(req, res, url, context, requestId) {
       await authService.logout(session.token);
       throw new ApiError(403, 'Administrator access required');
     }
-    setSessionCookie(res, session, {secure:context.secureCookies});
+    setSessionCookie(res, session, cookieOptions);
     return send({authenticated:true,user:session.user,csrfToken:session.csrfToken,expiresAt:session.expiresAt});
   }
   if (route === '/api/auth/change-password' && authMode !== 'password') throw new ApiError(403,'Employee-code sign-in does not use a password');
@@ -38,7 +39,7 @@ async function handleApi(req, res, url, context, requestId) {
     enforceSameOrigin(req, context.publicOrigin);
     if (principal) enforceCsrf(req, principal);
     await authService.logout(token);
-    clearSessionCookie(res, {secure:context.secureCookies});
+    clearSessionCookie(res, cookieOptions);
     return send({authenticated:false});
   }
   if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
@@ -61,7 +62,7 @@ async function handleApi(req, res, url, context, requestId) {
   }
   if (route === '/api/auth/change-password' && method === 'POST') {
     await authService.changePassword(token, await readJsonBody(req));
-    clearSessionCookie(res, {secure:context.secureCookies});
+    clearSessionCookie(res, cookieOptions);
     return send({authenticated:false,passwordChanged:true});
   }
   const actor = `user:${user.id}`;

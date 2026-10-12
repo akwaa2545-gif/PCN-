@@ -14,6 +14,23 @@ const { createAttachmentScanner } = require('./src/attachmentScanner');
 const { createApp } = require('./src/httpServer');
 const { readAuthConfiguration } = require('./src/authConfiguration');
 const { SqlEmployeeDirectory } = require('./src/sqlEmployeeDirectory');
+const { COOKIE_NAME, HTTP_COOKIE_NAME } = require('./src/authHttp');
+
+function parsePublicOrigin(value) {
+  if (typeof value !== 'string' || !value) throw new Error('Invalid PUBLIC_ORIGIN: use a canonical HTTP or HTTPS origin');
+  let parsed;
+  try { parsed = new URL(value); } catch { throw new Error('Invalid PUBLIC_ORIGIN: use a canonical HTTP or HTTPS origin'); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || value !== parsed.origin) {
+    throw new Error('Invalid PUBLIC_ORIGIN: use a canonical HTTP or HTTPS origin without credentials, path, query or fragment');
+  }
+  return parsed;
+}
+
+function isPrivateIpv4(hostname) {
+  if (net.isIP(hostname) !== 4) return false;
+  const [first, second] = hostname.split('.').map(Number);
+  return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
+}
 
 function readServerConfig(env = process.env) {
   const port = Number(env.PORT || 3000);
@@ -21,14 +38,21 @@ function readServerConfig(env = process.env) {
   const host = (env.HOST || '127.0.0.1').trim();
   if (host !== 'localhost' && !net.isIP(host)) throw new Error('Invalid HOST: use a bind IP address or localhost');
   const trustProxy = parseTrustProxy(env.TRUST_PROXY);
-  const publicOrigin = env.PUBLIC_ORIGIN || `http://localhost:${port}`;
-  if (env.NODE_ENV === 'production' && new URL(publicOrigin).protocol !== 'https:') throw new Error('Production requires HTTPS PUBLIC_ORIGIN');
-  return {port,host,trustProxy,publicOrigin};
+  if (env.ALLOW_INTERNAL_HTTP !== undefined && !['true', 'false'].includes(env.ALLOW_INTERNAL_HTTP)) throw new Error('ALLOW_INTERNAL_HTTP must be true or false');
+  const allowInternalHttp = env.ALLOW_INTERNAL_HTTP === 'true';
+  const publicOrigin = env.PUBLIC_ORIGIN === undefined ? `http://localhost:${port}` : env.PUBLIC_ORIGIN;
+  const origin = parsePublicOrigin(publicOrigin);
+  if (allowInternalHttp) {
+    if (origin.protocol !== 'http:' || !isPrivateIpv4(origin.hostname)) throw new Error('PUBLIC_ORIGIN for internal HTTP must use an RFC1918 literal IPv4 address');
+    const loopbackHost = host === 'localhost' || host === '::1' || (net.isIP(host) === 4 && host.startsWith('127.'));
+    if (!loopbackHost || trustProxy !== 'loopback') throw new Error('Internal HTTP requires loopback HOST and TRUST_PROXY=loopback');
+  } else if (env.NODE_ENV === 'production' && origin.protocol !== 'https:') throw new Error('Production requires HTTPS PUBLIC_ORIGIN');
+  return {port,host,trustProxy,publicOrigin,secureCookies:env.NODE_ENV === 'production' && !allowInternalHttp,sessionCookieName:allowInternalHttp ? HTTP_COOKIE_NAME : COOKIE_NAME};
 }
 
 async function main() {
   await loadRuntimeEnv();
-  const {port,host,trustProxy,publicOrigin} = readServerConfig();
+  const {port,host,trustProxy,publicOrigin,secureCookies,sessionCookieName} = readServerConfig();
   const authConfiguration = readAuthConfiguration(process.env,{host,trustProxy});
   const attachmentScanner = createAttachmentScanner();
   if (attachmentScanner) await attachmentScanner.ready();
@@ -43,7 +67,7 @@ async function main() {
   await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
   const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,employeeDirectory,integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,secureCookies:process.env.NODE_ENV === 'production'});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,secureCookies,sessionCookieName});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;

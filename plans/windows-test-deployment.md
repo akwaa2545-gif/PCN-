@@ -70,6 +70,18 @@ The HTTP.sys binding is back at its verified original baseline with Disable HTTP
 
 Retire the pilot trust/binding when replacing the test with an approved CA-issued certificate. Remove only the installed pilot thumbprint from the client's Current User Root store when it is no longer needed, and never export a PFX/private key.
 
+### Company certificate request pending approval (2026-10-12)
+
+Other employee computers report `NET::ERR_CERT_AUTHORITY_INVALID` for the pilot certificate. A replacement request was generated on `THCHA-WEBHOST01` with a non-exportable 3072-bit machine RSA key, Server Authentication purpose, subject `CN=THCHA-WEBHOST01.KEMET.com`, both host DNS names and IP SAN `172.30.77.137`. The IP SAN preserves the current portal URL.
+
+The host submitted this request as `KEMET\THCHA-WEBHOST01$` to `hq-cert2.KEMET.com\KEMET-HQ-CERT2-CA-1`, using the published `WebServerv2-new` template. **Request ID `1580097` is pending CA manager approval** (disposition 5, `Taken Under Submission`; observed host UTC timestamp `2026-10-12T06:33:52.7158578Z`). The template requires approval; do not change that policy or submit a duplicate. A CA administrator must review and issue this request from that CA's Pending Requests.
+
+Protected host artifacts are under `C:\SupplierPCN\deployment\certificate-requests\pcn-test-20261012`; the submission result is `hq-cert2-submission\result.json`. The public CSR SHA-256 is `AF7E8B7E3407671B4565D15D4A73E0496E8C6A818A961E060441B43B01DAF78E`; the requested public-key SHA-256 is `855FA80FCB54756F86C6B21E0907709526DC7C93E617C5D6A3F7293E2D4DAE9F`. No private key was exported.
+
+After issuance, retrieve request `1580097`, verify its key match, subject/SANs, Server Authentication purpose, validity and trusted company chain, accept it into the host machine store, and replace only the `PCNTest` HTTPS binding on `172.30.77.137:8443`. Keep the current binding thumbprint above for rollback. Verify normal HTTPS certificate validation and application readiness after replacement. The discovered issuing CA chains to `KEMET-HQ-CERT1-CA` (root thumbprint `4815A950F4A2DD55E8C57F4584EE853638A6A562`), which is trusted on the host and this workstation; trust on the affected employee computer still needs verification.
+
+The certificate has **not** been issued or installed. Post-submission checks confirmed the original binding, service Running, readiness `ready`, and removal of the temporary submission task. The employee browser warning remains unresolved until issuance, installation and client trust verification.
+
 ## Historical release evidence
 
 [Actions 37562025155](https://github.com/akwaa2545-gif/PCN-/actions/runs/37562025155) succeeded and published signed [pcn-test-9-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-9-1) from `9b00da23`. The observed host deployment timestamp is `2026-10-07T02:41:51.5138466Z`; its clock differed from the workstation. It included the Retry authentication card visibility fix, verified by two extra assertions in the existing 59-check isolated browser run. This release has the former Windows authentication model, not the replacement code-only design.

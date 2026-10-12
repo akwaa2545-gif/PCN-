@@ -81,6 +81,27 @@ test('HTTP auth verifies origin, CSRF, roles and secure cookie', () => {
   assert.equal(requirePrincipal({ user: { id: 'one', roles: ['admin'] } }, { roles: ['admin'] }).id, 'one');
 });
 
+test('fixed internal HTTP cookie name is consistently read, set and cleared', () => {
+  const headers = {};
+  const res = { setHeader(k, v) { headers[k] = v; } };
+  const options = { secure: false, cookieName: 'pcn_session_http' };
+  const internalToken = crypto.randomUUID();
+  const secureToken = crypto.randomUUID();
+  setSessionCookie(res, { token: internalToken, expiresAt: new Date(Date.now() + 60000).toISOString() }, options);
+  assert.match(headers['Set-Cookie'], new RegExp(`^pcn_session_http=${internalToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=`));
+  const req = { headers: { cookie: `pcn_session=${secureToken}; pcn_session_http=${internalToken}` } };
+  assert.equal(readSessionToken(req, options), internalToken);
+  assert.equal(readSessionToken(req), secureToken);
+  assert.equal(readSessionToken({ headers: { cookie: `pcn_session=${secureToken}` } }, options), null);
+  clearSessionCookie(res, options);
+  assert.equal(headers['Set-Cookie'], 'pcn_session_http=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+  for (const cookieName of ['other', 'pcn_session;Injected=value', '', null]) {
+    assert.throws(() => setSessionCookie(res, { token: 'x', expiresAt: new Date().toISOString() }, { cookieName }), /cookie name/i);
+    assert.throws(() => clearSessionCookie(res, { cookieName }), /cookie name/i);
+    assert.throws(() => readSessionToken(req, { cookieName }), /cookie name/i);
+  }
+});
+
 test('expired, disabled and changed-stamp sessions are rejected', async () => {
   let now = new Date('2026-01-01T00:00:00Z');
   const { service, state } = setup({ clock: () => now });

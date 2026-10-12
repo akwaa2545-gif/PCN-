@@ -27,6 +27,8 @@ Copy-Item .env.example .env
 
 Set `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PORT`, `PORT` and `PUBLIC_ORIGIN` for the installation. Supply `SQL_PASSWORD` through the process environment or a protected credential. Keep `.env` private; it is excluded from source control. The SQL login is the API connection account, separate from application users.
 
+Production requires HTTPS by default. An explicitly configured internal HTTP installation can keep `NODE_ENV=production` and set `ALLOW_INTERNAL_HTTP=true`, with an exact RFC1918 IPv4 `PUBLIC_ORIGIN` such as `http://172.30.77.137:8080`, loopback `HOST`, and `TRUST_PROXY=loopback`. The reverse proxy must replace the client-IP header and restrict access to the employee networks. HTTP uses a separate `pcn_session_http` cookie to avoid collisions with existing Secure HTTPS cookies; HttpOnly, SameSite Strict, exact-origin and CSRF checks remain enabled. HTTP traffic is unencrypted.
+
 SQL connections use encryption. `SQL_TRUST_SERVER_CERTIFICATE=false` is the default; use a trusted server certificate for deployment. An approved self-signed installation can explicitly set it to `true`.
 
 On Windows, the runtime can read a DPAPI-protected credential for the same Windows account and computer:

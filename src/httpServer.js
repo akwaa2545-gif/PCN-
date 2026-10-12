@@ -8,6 +8,7 @@ const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
 const { ProfileService } = require('./profileService');
+const { COOKIE_NAME, validateSessionCookieName } = require('./authHttp');
 
 const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
@@ -19,7 +20,7 @@ function createRequestHandler(options = {}) {
   if (!['password','employee-code'].includes(authMode)) throw new Error('Invalid authentication mode');
   const context = { ...options, authMode, employeeDirectory: options.employeeDirectory || options.authService.employeeDirectory,
     profileService: new ProfileService({ integrationService: options.integrationService, employeeDirectory: options.employeeDirectory || options.authService.employeeDirectory }),
-    trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production' };
+    trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production', sessionCookieName: validateSessionCookieName(options.sessionCookieName ?? COOKIE_NAME) };
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
   const rateLimiter = options.rateLimiter || new ApiRateLimiter();
   return async (req, res) => {

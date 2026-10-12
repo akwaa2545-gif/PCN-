@@ -1,19 +1,28 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const COOKIE_NAME = 'pcn_session';
+const HTTP_COOKIE_NAME = 'pcn_session_http';
 
-function readSessionToken(req) {
-  const cookie = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${COOKIE_NAME}=`));
-  return cookie ? cookie.slice(COOKIE_NAME.length + 1) : null;
+function validateSessionCookieName(cookieName) {
+  if (![COOKIE_NAME, HTTP_COOKIE_NAME].includes(cookieName)) throw new Error('Invalid session cookie name');
+  return cookieName;
 }
 
-function setSessionCookie(res, session, { secure = true } = {}) {
+function readSessionToken(req, { cookieName = COOKIE_NAME } = {}) {
+  validateSessionCookieName(cookieName);
+  const cookie = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${cookieName}=`));
+  return cookie ? cookie.slice(cookieName.length + 1) : null;
+}
+
+function setSessionCookie(res, session, { secure = true, cookieName = COOKIE_NAME } = {}) {
+  validateSessionCookieName(cookieName);
   const maxAge = Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - Date.now()) / 1000));
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${session.token}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}; Max-Age=${maxAge}`);
+  res.setHeader('Set-Cookie', `${cookieName}=${session.token}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}; Max-Age=${maxAge}`);
 }
 
-function clearSessionCookie(res, { secure = true } = {}) {
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}; Max-Age=0`);
+function clearSessionCookie(res, { secure = true, cookieName = COOKIE_NAME } = {}) {
+  validateSessionCookieName(cookieName);
+  res.setHeader('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}; Max-Age=0`);
 }
 
 function enforceSameOrigin(req, publicOrigin) {
@@ -40,4 +49,4 @@ function requirePrincipal(principal, { roles = [], allowPasswordChange = false }
   return principal.user;
 }
 
-module.exports = { COOKIE_NAME, readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal };
+module.exports = { COOKIE_NAME, HTTP_COOKIE_NAME, validateSessionCookieName, readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal };
