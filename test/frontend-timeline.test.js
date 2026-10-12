@@ -13,7 +13,7 @@ function portal(fetch) {
       setAttribute(name, value) { this.attributes[name] = value; },
       querySelectorAll() { return []; }, querySelector() { return null; },
       showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; },
-      scrollTo() {}, scrollBy() {},
+      scrollTo() {}, scrollBy() {}, getBoundingClientRect() { return { left: 20, top: 20, right: 800, bottom: 700 }; },
     });
     return nodes.get(id);
   };
@@ -25,13 +25,15 @@ function portal(fetch) {
     .replace(/\}\)\(\);\s*$/, `
       loadDetail = async id => window.selections.push(id);
       window.TEST = { state, els, openTimeline, loadTimeline, closeTimeline, selectTimelineRevision,
-        chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline };
+        initializeTimeline, chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline,
+        timelineEntries: typeof timelineEntries === 'function' ? timelineEntries : undefined };
     })();`);
   vm.runInNewContext(source, { window, document, Date });
   const html = fs.readFileSync(require.resolve('../admin.html'), 'utf8');
   for (const match of html.matchAll(/id="([^"]+)"/g)) window.TEST.els[match[1]] = element(match[1]);
   window.TEST.state.user = { roles: ['qa'] }; window.TEST.state.isLoading = false;
   element('adminRemoveDialog').hidden = true;
+  window.TEST.initializeTimeline();
   return { ...window.TEST, window, element };
 }
 
@@ -109,4 +111,88 @@ test('history never invents an actor, timestamp or creation event for a baseline
   const ordered = page.chronologicalTimeline([{ revision: 2 }, { revision: 1 }]);
   assert.deepEqual(Array.from(ordered, item => item.revision), [1, 2]);
   assert.equal(ordered[0].actor, undefined); assert.equal(ordered[0].createdAt, undefined);
+});
+
+test('keyboard event selection stays in chronological bounds and Escape/backdrop cancel only the open dialog', async () => {
+  const page = portal(async () => revisions);
+  await page.openTimeline({ id: 'one' }, page.element('eye'));
+  const select = key => page.element('pcnTimelineTrack').events.keydown({ key, preventDefault() {} });
+  select('ArrowLeft'); assert.equal(page.getTimeline().selectedRevision, 2);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /draft/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /submitted/);
+  select('Home'); select('ArrowLeft'); assert.equal(page.getTimeline().selectedRevision, 1);
+  select('End'); select('ArrowRight'); assert.equal(page.getTimeline().selectedRevision, 3);
+  const dialog = page.element('pcnTimelineDialog');
+  dialog.events.click({ target: dialog, clientX: 100, clientY: 100 });
+  assert.equal(dialog.open, true, 'clicking dialog padding is not a backdrop click');
+  dialog.events.cancel({ preventDefault() {} });
+  assert.equal(dialog.open, false); assert.equal(page.element('eye').focused, true);
+  await page.openTimeline({ id: 'two' });
+  dialog.events.click({ target: dialog, clientX: 0, clientY: 0 });
+  assert.equal(dialog.open, false);
+});
+
+test('a pending history read shows loading and cleared details without creating events or enabling duplicate refreshes', async () => {
+  let resolve;
+  const page = portal(() => new Promise(done => { resolve = done; }));
+  const loading = page.openTimeline({ id: 'one' });
+  assert.match(page.element('pcnTimelineMessage').textContent, /Loading change history/);
+  assert.equal(page.element('pcnTimelineRefreshButton').disabled, true);
+  assert.equal(page.element('pcnTimelineTrack').attributes['aria-busy'], 'true');
+  assert.equal(page.element('pcnTimelineTrack').innerHTML, '');
+  resolve([{ revision: 4, changes: [{ path: 'internalReview.materialCodeDescription', before: null, after: ['<strong>Code</strong>'] }] }]);
+  await loading;
+  assert.equal(page.element('pcnTimelineRefreshButton').disabled, false);
+  assert.match(page.element('pcnTimelineTrack').innerHTML, /Actor not recorded/);
+  assert.match(page.element('pcnTimelineTrack').innerHTML, /Time not recorded/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /Internal Review \/ Material Code Description/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /Not set/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /&lt;strong&gt;Code&lt;\/strong&gt;/);
+});
+
+test('timeline nodes show each actual department/action and signer from signing deltas, without metadata labels', async () => {
+  const item = { revision: 5, contentRevision: 3, actor: 'Admin operator', status: 'gsc_review', changes: [
+    { path: 'internalReview.signoff.gscTet.checked', before: false, after: true },
+    { path: 'internalReview.signoff.gscTet.checkedName', before: '', after: 'Verified checker' },
+    { path: 'internalReview.signoff.gscTet.approved', before: false, after: true },
+    { path: 'internalReview.signoff.gscTet.approvedName', before: '', after: 'Verified approver' },
+    { path: 'internalReview.tapbu.qa.prepared', before: false, after: true },
+    { path: 'internalReview.supplierSignoff.checked.checked', before: false, after: true },
+    { path: 'internalReview.supplierSignoff.checked.name', before: '', after: 'Supplier checker' },
+  ] };
+  const page = portal(async () => [item]);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.timelineEntries(item))), [
+    { label: 'GSC/TET — Checked', person: 'Verified checker', cleared: false },
+    { label: 'GSC/TET — Approved', person: 'Verified approver', cleared: false },
+    { label: 'QA/TaPBU — Prepared', person: 'Admin operator', cleared: false },
+    { label: 'Supplier — Checked', person: 'Supplier checker', cleared: false },
+  ]);
+  await page.openTimeline({ id: 'one' });
+  const track = page.element('pcnTimelineTrack').innerHTML;
+  assert.match(track, /GSC\/TET — Checked/); assert.match(track, /Verified checker/);
+  assert.match(track, /GSC\/TET — Approved/); assert.match(track, /Verified approver/);
+  assert.doesNotMatch(track, /fields changed|Event 5|Content revision/);
+});
+
+test('cleared signatures identify the clearing actor and never claim a completed signing action', () => {
+  const page = portal(async () => []);
+  const item = { revision: 6, actor: 'Clearing administrator', status: 'supplier_action', changes: [
+    { path: 'internalReview.signoff.gscTet.approved', before: true, after: false },
+    { path: 'internalReview.signoff.gscTet.approvedName', before: 'Former approver', after: '' },
+    { path: 'internalReview.signoff.qaTet.checked', before: false, after: false },
+    { path: 'internalReview.signoff.prodEngTet.preparedName', before: '', after: 'Name only' },
+  ] };
+  assert.deepEqual(JSON.parse(JSON.stringify(page.timelineEntries(item))), [
+    { label: 'GSC/TET — Approved cleared', person: 'Clearing administrator', cleared: true },
+  ]);
+});
+
+test('non-signing edits show the recorded current status and actor without inventing a department or action', async () => {
+  const item = { revision: 8, contentRevision: 3, actor: 'Actual editor', status: 'qa_review', changes: [{ path: 'supplierName', before: 'Old', after: 'New' }] };
+  const page = portal(async () => [item]);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.timelineEntries(item))), [{ label: 'Qa Review', person: 'Actual editor', cleared: false }]);
+  await page.openTimeline({ id: 'one' });
+  const track = page.element('pcnTimelineTrack').innerHTML;
+  assert.match(track, /Qa Review/); assert.match(track, /Actual editor/);
+  assert.doesNotMatch(track, /fields changed|Event 8|Content revision|GSC\/TET/);
 });
