@@ -1,4 +1,5 @@
 body.auth-page {
+  font-family: "Cairoli Classic", "Segoe UI", Arial, Helvetica, sans-serif;
   min-height: 100vh;
   min-height: 100dvh;
   display: grid;
@@ -457,6 +458,7 @@ body.auth-page {
 }
 
 .auth-content button {
+  font-family: inherit;
   width: 100%;
   min-height: 48px;
   border-radius: 8px;

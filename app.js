@@ -98,8 +98,8 @@
       const session = await window.PCN_SESSION.require();
       if (!session) return;
       state.user = session.user;
-      state.viewOnly = session.user?.identityProvider === 'employee-code' && !session.user?.roles?.length;
-      if (state.viewOnly) {
+      state.viewOnly = ['employee-code', 'pcn-local'].includes(session.user?.identityProvider) && !session.user?.roles?.length;
+      if (state.viewOnly && !getPcnIdFromPath()) {
         window.location.assign('/records');
         return;
       }
@@ -229,6 +229,7 @@
       }
 
       label.addEventListener("click", () => {
+        if (state.viewOnly || control.disabled) return;
         control.checked = true;
         control.dispatchEvent(new Event("change", { bubbles: true }));
       });
@@ -250,6 +251,7 @@
       }
 
       label.addEventListener("click", () => {
+        if (state.viewOnly || control.disabled) return;
         control.checked = true;
         control.dispatchEvent(new Event("change", { bubbles: true }));
       });
@@ -543,6 +545,7 @@
   }
 
   async function submitActiveRequest(mode) {
+    if (state.viewOnly) return;
     if (documentMutationBusy || document.body.classList.contains('is-saving')) return;
     hideUpdateSuccess();
     updateStateFromForm();
@@ -799,6 +802,8 @@
     els.submitButton.hidden = true;
     const adminLink = document.getElementById('formAdminLink');
     if (adminLink) adminLink.hidden = true;
+    const recordsLink = document.getElementById('formRecordsLink');
+    if (recordsLink) recordsLink.hidden = false;
     document.querySelectorAll('main input, main select, main textarea').forEach((control) => { control.disabled = true; });
   }
 
@@ -1247,7 +1252,7 @@
       const item = document.createElement("article");
       const isCompleted = step.state === "completed";
       const isActive = step.state === "active";
-      const canAdvance = Boolean(state.activeRequest.id && progress.nextStatus && isActive);
+      const canAdvance = Boolean(!state.viewOnly && state.activeRequest.id && progress.nextStatus && isActive);
       const lockedText = state.activeRequest.id
         ? "Complete previous step first"
         : "Save PCN before tracking";
@@ -1285,6 +1290,7 @@
   }
 
   async function advanceWorkflowStep(nextStatus) {
+    if (state.viewOnly) return;
     if (!state.activeRequest.id || !nextStatus) {
       showNotice("warning", "Tracking unavailable", "Save the PCN before marking workflow steps complete.");
       return;

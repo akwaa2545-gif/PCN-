@@ -45,7 +45,16 @@ async function handleApi(req, res, url, context, requestId) {
     return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
   }
   const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
-  if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to access the PCN workspace');
+  if (user.isActive === false) throw new ApiError(403, 'Active account required');
+  if (route === '/api/profile') {
+    if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
+    if (url.searchParams.size) throw new ApiError(400, 'Profile request does not accept selectors');
+    if (user.isActive === false) throw new ApiError(403, 'Active account required');
+    return send(await context.profileService.get(user));
+  }
+  if (isEmployeeViewer(user) && (method !== 'GET' || !isViewerReadRoute(route))) {
+    throw new ApiError(403, 'This account has read-only PCN access');
+  }
   if (!['GET','HEAD'].includes(method)) {
     enforceSameOrigin(req, context.publicOrigin);
     enforceCsrf(req, principal);
@@ -60,6 +69,11 @@ async function handleApi(req, res, url, context, requestId) {
   if (route.startsWith('/api/admin/')) {
     admin();
     if (route === '/api/admin/users' && method === 'GET') return send((await authService.repository.listUsers()).map(publicAccount));
+    if (route === '/api/admin/local-users' && method === 'POST') {
+      const body = await readJsonBody(req);
+      assertBodyKeys(body,['employeeCode','displayName','roles','department','signingStep','mailSelection']);
+      return send(await authService.createLocalEmployee(body,employeeDirectory,actor,user),201);
+    }
     if (route === '/api/admin/employees' && method === 'GET') {
       if (!employeeDirectory) throw new ApiError(503,'Employee service is unavailable');
       let employees;
@@ -75,6 +89,13 @@ async function handleApi(req, res, url, context, requestId) {
       }
       assertBodyKeys(body,['username','email','password','roles']);
       return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+    }
+    const roleRemoval=/^\/api\/admin\/users\/([^/]+)\/roles$/.exec(route);
+    if (roleRemoval && method==='DELETE') {
+      const userId=normalizeUserId(roleRemoval[1]);
+      const body=await readJsonBody(req);
+      assertBodyKeys(body,['version']);
+      return send(await authService.removeEmployeeRoles({...body,userId},actor,user));
     }
     const accountEdit=/^\/api\/admin\/users\/([^/]+)$/.exec(route);
     if(accountEdit && method==='PATCH') {
@@ -228,7 +249,12 @@ function requireVersion(body) {
   if (typeof body.version !== 'string' || !/^[a-fA-F0-9]{16}$/.test(body.version)) throw new ApiError(400,'The current PCN version is required');
 }
 function assertDocumentEdit(record,user) {
+  if (isEmployeeViewer(user)) throw new ApiError(403, 'This account has read-only PCN access');
   assertRecordAccess(record,user);
   if (['approved','rejected','closed'].includes(record.status) || !isInternal(user) && !['draft','supplier_action'].includes(record.status)) throw new ApiError(403,'Document edits are not allowed at this stage');
+}
+function isViewerReadRoute(route) {
+  if (['/api/pcns', '/api/master-data'].includes(route)) return true;
+  return /^\/api\/pcns\/PCN-\d{4}-\d{4}(?:\/(?:progress|workflow|checks|action|revisions(?:\/[1-9]\d*)?|documents(?:\/[0-9a-f-]{36}(?:\/preview)?)?))?$/i.test(route);
 }
 module.exports = { handleApi, requireVersion };

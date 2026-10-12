@@ -134,12 +134,12 @@ test('invalid source profile or assignments are rejected before SQL writes', asy
   }
 });
 
-test('employee code lookup uses normalized parameter and provider with no SQL interpolation', async () => {
+test('employee code lookup uses normalized parameter across providers with no SQL interpolation', async () => {
   const { repo, state } = fixture([hydrated()]);
   const user = await repo.getUserByEmployeeCode('001EMPLOYE');
   assert.equal(state.calls[0].inputs.employeeCode, '001employe');
   assert.match(state.calls[0].query, /u\.NormalizedEmployeeCode=@employeeCode/);
-  assert.match(state.calls[0].query, /u\.IdentityProvider='employee-code'/);
+  assert.doesNotMatch(state.calls[0].query, /u\.IdentityProvider=/);
   assert.equal(state.calls[0].query.includes('001employe'), false);
   assert.equal(user.employeeCode, identity.employeeCode);
   await assert.rejects(repo.getUserByEmployeeCode("' OR 1=1 --"), { statusCode: 400 });

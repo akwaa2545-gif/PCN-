@@ -20,6 +20,19 @@ function client(responses, location = {}) {
 }
 const success = (data) => ({ status: 200, body: { success: true, data } });
 
+test('portal gate accepts any assigned role and sends roleless accounts to read-only Records', async () => {
+  for (const roles of [['supplier'], ['reviewer'], ['gsc'], ['productionengineering'], ['qa'], ['tapbu'], ['admin'], ['qa', 'gsc']]) {
+    const c = client([success({ authenticated: true, user: { roles } })]);
+    assert.equal((await c.api.require(null, { requireRole: true })).authenticated, true);
+    assert.deepEqual(c.redirects, []);
+  }
+  for (const user of [{ roles: [] }, {}]) {
+    const c = client([success({ authenticated: true, user })]);
+    assert.equal(await c.api.require(null, { requireRole: true }), null);
+    assert.deepEqual(c.redirects, ['/records']);
+  }
+});
+
 test('loading an expired or mismatched session resets authentication and stale CSRF without a login loop', async () => {
   const c = client([success({ authenticated: true, user: { roles: ['admin'] }, csrfToken: 'stale-token' }),
     { status: 401, body: { success: false, error: 'Employee access could not be verified' } }, success({})]);

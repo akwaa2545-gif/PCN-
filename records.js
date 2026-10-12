@@ -61,23 +61,27 @@
       }
     };
 
-    search.addEventListener('input', render);
-    refresh.addEventListener('click', load);
     try {
       const session = await window.PCN_SESSION.require();
       if (!session) return;
       const roles = Array.isArray(session.user?.roles) ? session.user.roles : [];
-      const viewer = session.user?.identityProvider === 'employee-code' && roles.length === 0;
+      if (roles.length) {
+        window.location.assign('/admin');
+        return;
+      }
+      if (!['employee-code', 'pcn-local'].includes(session.user?.identityProvider) || !session.user.employeeCode || session.user.isActive === false) {
+        throw new Error('Records access requires verified employee sign-in.');
+      }
       window.PCN_SESSION.mountProfile(session.user, (error) => { message.textContent = error.message; });
-      document.getElementById('accessPending').hidden = !viewer;
-      document.getElementById('recordsWorkspace').hidden = viewer;
-      document.getElementById('createPcnLink').hidden = viewer;
-      document.getElementById('adminRecordsLink').hidden = !roles.some((role) => String(role).toLowerCase() === 'admin');
-      if (viewer) return;
-      document.getElementById('recordsAccessMessage').textContent = 'Select a PCN code to open its details.';
+      document.getElementById('recordsWorkspace').hidden = false;
+      document.getElementById('recordsAccessMessage').textContent = 'You have read-only access. Select a PCN code to view its details. An assigned role enables editing and Portal access.';
+      search.addEventListener('input', render);
+      refresh.addEventListener('click', load);
       await load();
     } catch (error) {
-      message.textContent = error.message;
+      const gateError = document.getElementById('recordsGateError');
+      gateError.textContent = error.message;
+      gateError.hidden = false;
     }
   }
 })();

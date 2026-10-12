@@ -11,14 +11,32 @@ function app(controls = [], workflow) {
       refreshPcns = async () => { state.activeRequest = window.PCN_WORKFLOW_TEST.refreshedRecord; };
       renderAll = () => {};
       showNotice = (...args) => window.PCN_WORKFLOW_TEST.notices.push(args);
+      if (window.PCN_WORKFLOW_TEST.readonlyTest) updateStateFromForm = () => { window.PCN_WORKFLOW_TEST.formReads += 1; };
     }
-    window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, advanceWorkflowStep, toApiPayload, canSignStep, updateApprovalCheckLocks, getHandwrittenSignature, getSignatureTooltip: typeof getSignatureTooltip === 'function' ? getSignatureTooltip : undefined };})();`);
+    window.PCN_TEST = { state, getPcnIdFromPath, sendPendingWorkflowNotifications, submitActiveRequest, advanceWorkflowStep, toApiPayload, canSignStep, updateApprovalCheckLocks, getHandwrittenSignature, getSignatureTooltip: typeof getSignatureTooltip === 'function' ? getSignatureTooltip : undefined };})();`);
   vm.runInNewContext(source, { window, URLSearchParams, document: { addEventListener() {},
     querySelector(selector) { const field = /data-internal-field="([^"]+)"/.exec(selector)?.[1]; return controls.find(control => control.dataset.internalField === field) || null; },
-    querySelectorAll() { return controls; }
+    querySelectorAll() { return controls; },
+    body: { classList: { contains() { return false; }, add() {}, remove() {} } }
   } });
   return { app: window.PCN_TEST, calls };
 }
+
+test('read-only users cannot start a save or change local form data', async () => {
+  const workflow = { readonlyTest: true, notices: [], formReads: 0 };
+  const c = app([], workflow);
+  c.app.state.viewOnly = true;
+  const before = JSON.stringify(c.app.state.activeRequest);
+  await c.app.submitActiveRequest('draft');
+  assert.equal(workflow.formReads, 0);
+  assert.equal(JSON.stringify(c.app.state.activeRequest), before);
+  assert.equal(c.calls.length, 0);
+});
+
+test('Records navigation is hidden by default on Create', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'form.html'), 'utf8');
+  assert.match(html, /<a[^>]+id="formRecordsLink"[^>]*hidden[^>]*>Records<\/a>/);
+});
 test('notification links with query ID open their saved PCN', () => {
   assert.equal(app().app.getPcnIdFromPath(), 'PCN-2026-0007');
 });

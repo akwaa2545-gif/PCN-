@@ -34,12 +34,12 @@ class PcnService {
   }
 
   async list(filters = {}, user) {
-    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to view records');
+    if (user?.isActive === false) throw new ApiError(403, 'Active account required');
     return this.repository.list({ ...filters, ...(user && !canViewAllRecords(user) ? { ownerUserId: user.id } : {}) });
   }
 
   async getById(id, user) {
-    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to view records');
+    if (user?.isActive === false) throw new ApiError(403, 'Active account required');
     assertValidId(id);
     const record = await this.repository.findById(id);
 
@@ -62,6 +62,7 @@ class PcnService {
   }
 
   async updateNotificationSettings(input, actor = "web", user) {
+    if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to change mail routing');
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiError(400, 'Mail routing body must be an object');
     if (input.schemaVersion !== undefined && input.schemaVersion !== 2) throw new ApiError(400, 'Unsupported mail routing schema version');
     const current = await this.repository.getNotificationSettings();

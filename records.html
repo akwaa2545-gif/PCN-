@@ -18,17 +18,11 @@
           </div>
         </div>
         <div class="topbar-actions">
-          <a class="ghost-link" id="createPcnLink" href="/create" hidden>Create PCN</a>
-          <a class="ghost-link" id="adminRecordsLink" href="/admin#records" hidden>Admin</a>
           <div class="account-menu" id="accountMenu"></div>
         </div>
       </header>
 
-      <main class="access-pending" id="accessPending" aria-labelledby="accessPendingTitle" hidden>
-        <p class="section-label">ACCOUNT ACCESS</p>
-        <h2 id="accessPendingTitle">Your PCN access is pending</h2>
-        <p>Your PCN workspace will be available after an administrator assigns your role. Open your profile to see your current access.</p>
-      </main>
+      <p class="records-main records-message" id="recordsGateError" role="alert" hidden></p>
 
       <main class="records-main" id="recordsWorkspace" hidden>
         <section class="admin-panel records-panel" aria-labelledby="recordsTitle">

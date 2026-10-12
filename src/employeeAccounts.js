@@ -28,6 +28,13 @@ function validateEmployeeAccount(account) {
   if (!Array.isArray(account.roles) || !account.roles.length || account.roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
   validateUserAssignment(account);
 }
+function validateLocalEmployeeAccount(account) {
+  validateEmployeeAccount(account);
+  if (!/^[0-9]{7}$/.test(normalizeEmployeeCode(account.employeeCode))) throw new ApiError(400, 'Enter a seven-digit employee code');
+  if (typeof account.displayName !== 'string' || /[\u0000-\u001f\u007f]/.test(account.displayName)
+    || !account.displayName.trim() || account.displayName.trim().length > 200) throw new ApiError(400, 'Enter a full name of up to 200 characters');
+  validateVerifiedMail(account);
+}
 function validateUserAssignment(account) {
   validateSigningAssignment(account);
 }
@@ -44,4 +51,4 @@ function validateVerifiedMail(account) {
     || typeof account.email !== 'string' || profile.email.toLowerCase() !== account.email.toLowerCase()) throw new ApiError(400,'Invalid verified directory email');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email) || account.email.length > 320) throw new ApiError(400,'Invalid verified directory email');
 }
-module.exports = { EMPLOYEE_CODE_PATTERN, employeeDepartments, employeeRoles, normalizeUserId, normalizeEmployeeCode, validateEmployeeIdentity, validateEmployeeAccount, validateUserAssignment, validateVerifiedMail };
+module.exports = { EMPLOYEE_CODE_PATTERN, employeeDepartments, employeeRoles, normalizeUserId, normalizeEmployeeCode, validateEmployeeIdentity, validateEmployeeAccount, validateLocalEmployeeAccount, validateUserAssignment, validateVerifiedMail };

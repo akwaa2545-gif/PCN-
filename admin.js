@@ -16,7 +16,7 @@
     view: getViewFromHash(),
     isLoading: true,
     busyAction: "",
-    loadingText: "Loading admin data...",
+    loadingText: "Loading portal data...",
     routingMessage: "Loading routing...",
     message: "Loading records...",
     pendingRemoveRecord: null
@@ -44,6 +44,7 @@
       "adminProgressSteps",
       "adminStatusSelect",
       "adminStatusButton",
+      "adminStatusControl",
       "notificationGroups",
       "notificationSaveButton",
       "notificationReloadButton",
@@ -95,17 +96,26 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !els.adminRemoveDialog.hidden) closeRemoveDialog();
     });
-    checkAdminSession();
+    checkPortalSession();
   }
 
-  async function checkAdminSession() {
+  function isAdmin() {
+    return (state.user?.roles || []).some(role => String(role).toLowerCase() === 'admin');
+  }
+
+  function permittedView(view) {
+    return isAdmin() ? view : 'pcns';
+  }
+
+  async function checkPortalSession() {
     try {
-      const session = await window.PCN_SESSION.require("admin");
+      const session = await window.PCN_SESSION.require(null, { requireRole: true });
       if (!session) return;
       state.user = session.user;
+      state.view = permittedView(state.view);
       window.PCN_SESSION.mountProfile(session.user, (error) => showAdminNotice("error", "Sign out failed", error.message));
       initializeAdminControls();
-      refreshNotificationHealth();
+      if (isAdmin()) refreshNotificationHealth();
       await loadPcns();
     } catch (error) {
       stopBusy();
@@ -161,6 +171,7 @@
   }
 
   async function refreshManagedRecipients() {
+    if (!isAdmin()) return;
     try {
       const settings = await apiFetch('/api/notification-settings');
       if (!state.hasMailChanges) state.notificationSettings = settings;
@@ -177,12 +188,12 @@
   }
 
   async function loadPcns(successMessage, action = "load") {
-    startBusy(action, action === "refresh" ? "Refreshing PCN records..." : "Loading admin data...");
+    startBusy(action, action === "refresh" ? "Refreshing PCN records..." : "Loading portal data...");
 
     try {
       const [pcns, notificationSettings] = await Promise.all([
         apiFetch("/api/pcns"),
-        apiFetch("/api/notification-settings")
+        isAdmin() ? apiFetch("/api/notification-settings") : Promise.resolve(state.notificationSettings)
       ]);
       state.pcns = pcns;
       if (!state.hasMailChanges) state.notificationSettings = notificationSettings;
@@ -191,7 +202,7 @@
       state.progress = state.selected ? await apiFetch(`/api/pcns/${encodeURIComponent(state.selected.id)}/progress`) : null;
       state.message = successMessage || (state.pcns.length ? "Records loaded from database." : "No PCNs saved.");
       if (!state.hasMailChanges) state.routingMessage = notificationSettings.groups.some((group) => String(group.emails || "").trim()) ? "Mail routing loaded." : "Step recipient lists are empty. Assign recipients and save routing.";
-      showAdminNotice("success", action === "refresh" ? "Refresh complete" : "Admin ready", state.message);
+      showAdminNotice("success", action === "refresh" ? "Refresh complete" : "Portal ready", state.message);
     } catch (error) {
       state.message = error.message;
       state.routingMessage = error.message;
@@ -207,6 +218,7 @@
   }
 
   async function saveNotificationSettings() {
+    if (!isAdmin()) return false;
     try {
       if (!validateNotificationGroups()) {
         showAdminNotice("error", "Mail routing needs review", "Fix invalid or duplicate email addresses before saving.");
@@ -269,6 +281,7 @@
   }
 
   async function reloadMailRouting() {
+    if (!isAdmin()) return;
     if (state.hasMailChanges && !window.confirm("Discard your unsaved routing draft and load the latest saved recipient lists?")) return;
     startBusy("routingReload", "Loading saved mail routing...", false);
     renderLoadingState();
@@ -304,6 +317,7 @@
   }
 
   async function refreshNotificationHealth() {
+    if (!isAdmin()) return;
     if (state.healthLoading) return;
     state.healthLoading = true;
     renderNotificationHealth();
@@ -382,6 +396,7 @@
   }
 
   async function updateSelectedStatus(forcedStatus) {
+    if (!isAdmin()) return;
     const requestedStatus = typeof forcedStatus === "string" ? forcedStatus : els.adminStatusSelect.value;
 
     if (!state.selected || !requestedStatus) {
@@ -412,6 +427,7 @@
   }
 
   function requestRemovePcn(record) {
+    if (!isAdmin()) return;
     if (isAnyBusy()) {
       return;
     }
@@ -448,6 +464,7 @@
   }
 
   async function removePcn(record) {
+    if (!isAdmin()) return;
     startBusy(`remove:${record.id}`, `Removing ${record.id}...`);
     els.adminRemoveConfirmButton.disabled = true;
     els.adminRemoveConfirmButton.textContent = "Removing...";
@@ -520,7 +537,7 @@
                     </svg>`
               }
             </button>
-            <button class="danger-button" type="button">${isBusy(`remove:${record.id}`) ? "Removing..." : "Remove"}</button>
+            ${isAdmin() ? `<button class="danger-button" type="button">${isBusy(`remove:${record.id}`) ? "Removing..." : "Remove"}</button>` : ''}
           </div>
         </td>
       `;
@@ -528,9 +545,9 @@
       const viewButton = row.querySelector(".admin-row-button");
       const removeButton = row.querySelector(".danger-button");
       viewButton.disabled = isAnyBusy();
-      removeButton.disabled = isAnyBusy();
+      if (removeButton) removeButton.disabled = isAnyBusy();
       viewButton.addEventListener("click", () => loadDetail(record.id));
-      removeButton.addEventListener("click", () => requestRemovePcn(record));
+      if (removeButton) removeButton.addEventListener("click", () => requestRemovePcn(record));
       row.addEventListener("click", (event) => {
         if (event.target.closest("a, button")) {
           return;
@@ -551,8 +568,10 @@
     els.adminDetailPreview.textContent = state.selected ? JSON.stringify(toDetailPayload(state.selected), null, 2) : "Select a PCN row to view details.";
     renderProgress();
     renderStatusControl();
-    renderNotificationSettings();
-    renderWebhookSettings();
+    if (isAdmin()) {
+      renderNotificationSettings();
+      renderWebhookSettings();
+    }
   }
 
   function renderWebhookSettings() {
@@ -1644,7 +1663,7 @@
 
     state.progress.steps.forEach((step, index) => {
       const item = document.createElement("article");
-      const canAdvance = step.state === "active" && Boolean(state.progress.nextStatus);
+      const canAdvance = isAdmin() && step.state === "active" && Boolean(state.progress.nextStatus);
       item.className = `progress-step is-${step.state}${canAdvance ? " is-checkable" : ""}`;
       item.innerHTML = `
         <label class="progress-step-check" aria-label="${escapeHtml(step.title)}">
@@ -1674,6 +1693,8 @@
   }
 
   function renderStatusControl() {
+    els.adminStatusControl.hidden = !isAdmin();
+    if (!isAdmin()) return;
     els.adminStatusSelect.innerHTML = "";
     els.adminStatusButton.disabled = !state.selected || !state.progress || isAnyBusy();
     els.adminStatusButton.textContent = isBusy("status") ? "Updating..." : "Update Status";
@@ -1697,6 +1718,11 @@
   }
 
   function renderAdminView() {
+    state.view = permittedView(state.view);
+    els.adminMailRoutingButton.hidden = !isAdmin();
+    els.adminUsersButton.hidden = !isAdmin();
+    els.mailRoutingView.hidden = !isAdmin();
+    els.adminUsersView.hidden = !isAdmin();
     const isMailView = state.view === "mail";
     const isRecordsView = state.view === "pcns";
     const isUsersView = state.view === "users";
@@ -1722,6 +1748,7 @@
   }
 
   function setAdminView(view) {
+    view = permittedView(view);
     const nextHash = view === "mail" ? "#mail-routing" : view === "users" ? "#users" : "#records";
 
     if (window.location.hash !== nextHash) {
@@ -1734,7 +1761,7 @@
   }
 
   function syncViewFromHash() {
-    const nextView = getViewFromHash();
+    const nextView = permittedView(getViewFromHash());
 
     if (state.view === nextView) {
       return;

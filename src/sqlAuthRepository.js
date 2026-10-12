@@ -1,7 +1,7 @@
 const sql = require('mssql');
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
-const { normalizeEmployeeCode, validateEmployeeAccount, validateEmployeeIdentity, validateVerifiedMail } = require('./employeeAccounts');
+const { normalizeEmployeeCode, validateEmployeeAccount, validateLocalEmployeeAccount, validateEmployeeIdentity, validateVerifiedMail } = require('./employeeAccounts');
 const {lockUserMailRouting,readUserMailAssignments,applyUserMailRouting,assertCurrentUser}=require('./userMailRouting');
 const {normalizeMailRouting}=require('./mailRouting');
 function mapProfile(row) {
@@ -41,7 +41,7 @@ class SqlAuthRepository {
 
   async getUserByEmployeeCode(employeeCode) {
     const code = normalizeEmployeeCode(employeeCode).toLowerCase();
-    return this.userQuery(this.pool.request().input('employeeCode', sql.NVarChar(100), code), "u.NormalizedEmployeeCode=@employeeCode AND u.IdentityProvider='employee-code'");
+    return this.userQuery(this.pool.request().input('employeeCode', sql.NVarChar(100), code), 'u.NormalizedEmployeeCode=@employeeCode');
   }
 
   async createEmployeeViewer(profile) {
@@ -87,16 +87,28 @@ class SqlAuthRepository {
     validateEmployeeAccount({...account,employeeCode:'valid',department:account.department??'other'});
     validateVerifiedMail(account);
     if(typeof account.isActive!=='boolean'||typeof account.version!=='string'||!/^[a-fA-F0-9]{16}$/.test(account.version))throw new ApiError(400,'The current account version is required');
+    return this.#saveEmployeeAssignments(id,account,actor,user);
+  }
+
+  async removeEmployeeRoles(id,input,actor='administrator',user) {
+    if(!input||typeof input.version!=='string'||!/^[a-fA-F0-9]{16}$/.test(input.version))throw new ApiError(400,'The current account version is required');
+    return this.#saveEmployeeAssignments(id,{version:input.version},actor,user,true);
+  }
+
+  async #saveEmployeeAssignments(id,input,actor,user,roleRemoval=false) {
     const transaction=this.pool.transaction();await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     try {
       await lockUserMailRouting(transaction,'Exclusive');
       await assertCurrentUser(transaction,user);
       const prior=await this.userQuery(transaction.request().input('id',sql.UniqueIdentifier,id),'u.Id=@id');
       if(!prior)throw new ApiError(404,'User not found');
+      const account=roleRemoval?{...prior,roles:[],department:null,signingStep:null,version:input.version}:input;
       if(prior.version!==account.version.toLowerCase())throw new ApiError(409,'Account changed. Reload and try again');
-      if(account.signingStep!=null&&prior.identityProvider!=='employee-code')throw new ApiError(400,'Link an employee before assigning a signing step');
-      if(prior.isActive&&prior.identityProvider==='employee-code'&&prior.roles.includes('admin')&&(!account.isActive||!account.roles.includes('admin'))){
-        const admins=await transaction.request().query("SELECT COUNT(DISTINCT u.Id) AS Total FROM pcn.Users u WITH (UPDLOCK,HOLDLOCK) JOIN pcn.UserRoles ur ON ur.UserId=u.Id JOIN pcn.Roles r ON r.Id=ur.RoleId WHERE u.IsActive=1 AND u.IdentityProvider='employee-code' AND r.Name='admin'");
+      if(roleRemoval&&!prior.roles.length)throw new ApiError(409,'This user has no assigned roles');
+      const codeAccount=['employee-code','pcn-local'].includes(prior.identityProvider);
+      if(account.signingStep!=null&&!codeAccount)throw new ApiError(400,'Link an employee before assigning a signing step');
+      if(prior.isActive&&codeAccount&&prior.roles.includes('admin')&&(!account.isActive||!account.roles.includes('admin'))){
+        const admins=await transaction.request().query("SELECT COUNT(DISTINCT u.Id) AS Total FROM pcn.Users u WITH (UPDLOCK,HOLDLOCK) JOIN pcn.UserRoles ur ON ur.UserId=u.Id JOIN pcn.Roles r ON r.Id=ur.RoleId WHERE u.IsActive=1 AND u.IdentityProvider IN ('employee-code','pcn-local') AND r.Name='admin'");
         if((admins.recordset[0]?.Total||0)<=1)throw new ApiError(409,'Keep at least one active employee Administrator');
       }
       const update=await transaction.request().input('id',sql.UniqueIdentifier,id).input('version',sql.Binary(8),Buffer.from(account.version,'hex'))
@@ -105,7 +117,9 @@ class SqlAuthRepository {
         .input('mailId',sql.NVarChar(200),account.mailDirectoryId??null).input('mailVerifiedAt',sql.DateTime2,account.mailVerifiedAt?new Date(account.mailVerifiedAt):null)
         .input('mailProfile',sql.NVarChar(sql.MAX),account.mailProfile?JSON.stringify(account.mailProfile):null).input('active',sql.Bit,account.isActive)
         .input('stamp',sql.UniqueIdentifier,crypto.randomUUID())
-        .query('UPDATE pcn.Users SET DepartmentKey=@department,SigningStep=@signingStep,Email=@email,NormalizedEmail=@normalizedEmail,MailDirectoryId=@mailId,MailVerifiedAt=@mailVerifiedAt,MailProfileJson=@mailProfile,IsActive=@active,SecurityStamp=@stamp,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id AND AccessVersion=@version');
+        .query(roleRemoval
+          ?'UPDATE pcn.Users SET DepartmentKey=NULL,SigningStep=NULL,SecurityStamp=@stamp,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id AND AccessVersion=@version'
+          :'UPDATE pcn.Users SET DepartmentKey=@department,SigningStep=@signingStep,Email=@email,NormalizedEmail=@normalizedEmail,MailDirectoryId=@mailId,MailVerifiedAt=@mailVerifiedAt,MailProfileJson=@mailProfile,IsActive=@active,SecurityStamp=@stamp,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id AND AccessVersion=@version');
       if(update.rowsAffected[0]!==1)throw new ApiError(409,'Account changed. Reload and try again');
       await transaction.request().input('id',sql.UniqueIdentifier,id).query('DELETE FROM pcn.UserRoles WHERE UserId=@id');
       for(const role of new Set(account.roles)){
@@ -115,7 +129,7 @@ class SqlAuthRepository {
       }
       await transaction.request().input('id',sql.UniqueIdentifier,id).query('UPDATE pcn.Sessions SET RevokedAt=SYSUTCDATETIME() WHERE UserId=@id AND RevokedAt IS NULL; UPDATE pcn.AccountTokens SET UsedAt=SYSUTCDATETIME() WHERE UserId=@id AND UsedAt IS NULL;');
       await this.validateRoutingCapacity(transaction);
-      await this.auditAccount(transaction,id,'account-assignments-updated',actor,account);
+      await this.auditAccount(transaction,id,roleRemoval?'account-roles-removed':'account-assignments-updated',actor,account);
       await transaction.commit();
     }catch(error){
       try{await transaction.rollback();}catch{/* Preserve original error after SQL automatic rollback. */}
@@ -128,14 +142,29 @@ class SqlAuthRepository {
   async createEmployeeUser(account,actor='administrator',user) {
     validateEmployeeAccount(account);
     validateVerifiedMail(account);
+    return this.createAssignedEmployee(account,actor,user,'employee-code');
+  }
+
+  async createLocalEmployeeUser(account,actor='administrator',user) {
+    validateLocalEmployeeAccount(account);
+    return this.createAssignedEmployee({...account,displayName:account.displayName.trim()},actor,user,'pcn-local');
+  }
+
+  async createAssignedEmployee(account,actor,user,provider) {
+    if(!['employee-code','pcn-local'].includes(provider))throw new ApiError(400,'Invalid account source');
     const employeeCode = normalizeEmployeeCode(account.employeeCode);
     const { department, displayName = null, email = null, roles } = account;
     const transaction = this.pool.transaction();
-    await transaction.begin();
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
     const id = crypto.randomUUID();
     try {
       await lockUserMailRouting(transaction,'Exclusive');
       await assertCurrentUser(transaction,user);
+      if(provider==='pcn-local'){
+        const existing=await transaction.request().input('employeeCode',sql.NVarChar(100),employeeCode.toLowerCase())
+          .query('SELECT Id FROM pcn.Users WITH (UPDLOCK,HOLDLOCK) WHERE NormalizedEmployeeCode=@employeeCode OR NormalizedUsername=@employeeCode OR LOWER(LTRIM(RTRIM(EmployeeCode)))=@employeeCode');
+        if(existing.recordset.length)throw new ApiError(409,'Employee code already belongs to a PCN account');
+      }
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('username', sql.NVarChar(100), employeeCode).input('normalizedUsername', sql.NVarChar(100), employeeCode.toLowerCase())
         .input('employeeCode', sql.NVarChar(100), employeeCode).input('normalizedEmployeeCode', sql.NVarChar(100), employeeCode.toLowerCase())
@@ -144,14 +173,14 @@ class SqlAuthRepository {
         .input('signingStep',sql.NVarChar(16),account.signingStep??null).input('mailId',sql.NVarChar(200),account.mailDirectoryId??null)
         .input('mailVerifiedAt',sql.DateTime2,account.mailVerifiedAt?new Date(account.mailVerifiedAt):null).input('mailProfile',sql.NVarChar(sql.MAX),account.mailProfile?JSON.stringify(account.mailProfile):null)
         .input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
-        .query("INSERT pcn.Users (Id,Username,NormalizedUsername,EmployeeCode,NormalizedEmployeeCode,DepartmentKey,IdentityProvider,DisplayName,Email,NormalizedEmail,SigningStep,MailDirectoryId,MailVerifiedAt,MailProfileJson,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@employeeCode,@normalizedEmployeeCode,@department,'employee-code',@displayName,@email,@normalizedEmail,@signingStep,@mailId,@mailVerifiedAt,@mailProfile,NULL,1,0,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())");
+        .query(`INSERT pcn.Users (Id,Username,NormalizedUsername,EmployeeCode,NormalizedEmployeeCode,DepartmentKey,IdentityProvider,DisplayName,Email,NormalizedEmail,SigningStep,MailDirectoryId,MailVerifiedAt,MailProfileJson,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@employeeCode,@normalizedEmployeeCode,@department,'${provider}',@displayName,@email,@normalizedEmail,@signingStep,@mailId,@mailVerifiedAt,@mailProfile,NULL,1,0,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())`);
       for (const role of new Set(roles)) {
         const result = await transaction.request().input('id', sql.UniqueIdentifier, id).input('role', sql.NVarChar(40), role)
           .query('INSERT pcn.UserRoles (UserId,RoleId) SELECT @id,Id FROM pcn.Roles WHERE Name=@role');
         if (result.rowsAffected[0] !== 1) throw new ApiError(400, 'Invalid user role');
       }
       await this.validateRoutingCapacity(transaction);
-      await this.auditAccount(transaction,id,'account-created',actor,account);
+      await this.auditAccount(transaction,id,provider==='pcn-local'?'local-account-created':'account-created',actor,account);
       await transaction.commit();
     } catch (error) {
       try { await transaction.rollback(); } catch { /* Preserve original SQL error after automatic rollback. */ }
@@ -174,7 +203,7 @@ class SqlAuthRepository {
       const user = existing.recordset[0];
       if (!user) throw new ApiError(404, 'User not found');
       if (!user.IsActive) throw new ApiError(400, 'Only active users can be linked to an employee');
-      if (user.IdentityProvider === 'employee-code' && user.EmployeeCode?.toLowerCase() !== employeeCode.toLowerCase()) throw new ApiError(409, 'Account is already linked to another employee');
+      if (['employee-code','pcn-local'].includes(user.IdentityProvider) && user.EmployeeCode?.toLowerCase() !== employeeCode.toLowerCase()) throw new ApiError(409, 'Account is already linked to another employee');
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('employeeCode', sql.NVarChar(100), employeeCode).input('normalizedEmployeeCode', sql.NVarChar(100), employeeCode.toLowerCase())
         .input('displayName', sql.NVarChar(200), profile.displayName ?? null).input('email', sql.NVarChar(320), profile.email ?? null)

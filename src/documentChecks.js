@@ -1,6 +1,6 @@
 const { ApiError } = require('./apiError');
 const { documentRequirements } = require('./documentRequirements');
-const { isInternal, routeGroups, hasRole } = require('./workflowAccess');
+const { isInternal, isEmployeeViewer, routeGroups, hasRole } = require('./workflowAccess');
 const { actions, stageDepartments, departments, canSign } = require('./signingPermissions');
 
 const at = (value, field) => field.split('.').reduce((item, key) => item?.[key], value);
@@ -49,7 +49,7 @@ function buildAction(record, user, users = []) {
   if (['draft','supplier_action'].includes(record.status)) {
     const owner = String(user.id) === String(record.ownerUserId);
     return { ...none, stage:'supplier_submission',field:'supplierName',label:'Prepare and submit PCN',
-      people: owner ? [publicPerson(user)] : [],canAct:user.isActive !== false && (owner || isInternal(user)) };
+      people: owner ? [publicPerson(user)] : [],canAct:user.isActive !== false && !isEmployeeViewer(user) && (owner || isInternal(user)) };
   }
   const review = record.internalReview || {};
   const groups = routeGroups(record.riskLevel, review).map(stage => [stage,stageDepartments[stage]]);

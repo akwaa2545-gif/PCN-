@@ -61,7 +61,8 @@ class NotificationService {
     await lockUserMailRouting(tx);
     const rows = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (HOLDLOCK) WHERE Id=1');
     const settings = rows.recordset[0] ? JSON.parse(rows.recordset[0].SettingsJson) : {};
-    const policy = before ? before.mailRoutingPolicyVersion || 1 : settings.schemaVersion === 2 ? 2 : 1;
+    const policy = settings.schemaVersion === 2 ? 2 : before?.mailRoutingPolicyVersion || 1;
+    const adoptingCurrentRouting = Boolean(before && (before.mailRoutingPolicyVersion || 1) !== 2 && policy === 2);
     const policyRecord = { ...proposed, mailRoutingPolicyVersion: policy };
     if (settings.schemaVersion !== 2 || policy !== 2) return { record: policyRecord };
     proposed = policyRecord;
@@ -79,7 +80,13 @@ class NotificationService {
     const prerequisiteResolved = prior?.reason === 'tapbu_requirement_not_selected'
       && before?.internalReview?.tapbu?.need !== true && proposed.internalReview?.tapbu?.need === true;
     const prerequisiteInvalidated = target?.blockedReason && prior?.groupKey === target.groupKey && prior.reason !== target.blockedReason;
-    const handoff = submitted || ((changes.completed.length > 0 || prerequisiteResolved) && !changes.invalidated);
+    const currentActionActivated = adoptingCurrentRouting && target
+      && !['approved', 'rejected', 'closed'].includes(proposed.status) && !changes.invalidated;
+    const handoff = submitted || ((changes.completed.length > 0 || prerequisiteResolved || currentActionActivated) && !changes.invalidated);
+    if (currentActionActivated) {
+      await tx.request().input('pcnId', sql.NVarChar(32), proposed.id)
+        .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Current step routing replaced legacy notification' WHERE PcnId=@pcnId AND Action=N'completed' AND Status=N'pending'");
+    }
     if (prior?.activationId && (priorKey !== nextKey || changes.invalidated || handoff || prerequisiteInvalidated)) {
       await tx.request().input('eventKey', sql.NVarChar(200), `${proposed.id}:${prior.activationId}:handoff`)
         .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Pending signoff changed before sending' WHERE EventKey=@eventKey AND Status=N'pending'");
@@ -110,7 +117,8 @@ class NotificationService {
     const record = { ...proposed, mailRoutingState: state };
     const summary = { queued: false, ...(reason ? { reason } : {}), nextGroupKey: target.groupKey, nextLabel: target.label };
     if (reason) return { record, plan: summary };
-    const completed = submitted ? 'Supplier submission' : prerequisiteResolved ? 'TaPBU approval requirement selected' : describeCompletion(changes.completed.at(-1));
+    const completed = submitted ? 'Supplier submission' : prerequisiteResolved ? 'TaPBU approval requirement selected'
+      : changes.completed.length ? describeCompletion(changes.completed.at(-1)) : 'Current workflow routing activated';
     try {
       const payload = { to: emailList(group.effectiveEmails), subject: `[Action Required] ${record.id} - ${target.label}`,
         message: buildWorkflowNotificationMessage(record, { completedGroup: completed, nextGroup: target.label,
@@ -122,7 +130,8 @@ class NotificationService {
         automaticRecipients: group.automaticRecipients.map(recipient => ({ userId: recipient.userId, email: recipient.email,
           department: target.departmentKey, signingStep: target.action, directoryId: recipient.id })) };
       return { record, plan: { ...summary, queued: true, payload,
-        completedStage: submitted ? 'supplier_submission' : prerequisiteResolved ? 'tapbu_requirement' : changes.completed.at(-1).stageKey } };
+        completedStage: submitted ? 'supplier_submission' : prerequisiteResolved ? 'tapbu_requirement'
+          : changes.completed.at(-1)?.stageKey || 'routing_activation' } };
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       return { record: { ...record, mailRoutingState: { ...state, status: 'blocked', reason: 'notification_configuration_invalid' } },

@@ -70,7 +70,6 @@ async function verifyPcnEmailLinks(browser, errors) {
     const login=async(employeeCode)=>{
       await page.locator('#employeeLoginForm').waitFor({state:'visible'});
       await page.locator('#employeeCode').fill(employeeCode);
-      await page.locator('#employeeLoginForm button[type=submit]').click();
       await page.waitForURL(pcnUrl);
     };
     const loaded=async()=>{
@@ -547,7 +546,7 @@ async function verifyUnsavedDocumentWarning(browser) {
       await page.locator('#submitButton:not([disabled])').waitFor();
       await page.locator('#appNoticeTitle').filter({hasText:/PCN loaded|Create PCN/}).waitFor();
     };
-    const recordsLink = () => page.locator('.topbar-actions a[href="/records"]');
+    const portalLink = () => page.locator('#formAdminLink');
     const unsavedDialog = page.locator('#pcnUnsavedDialog');
     const confirmClick = async (locator,accept,clickOptions={}) => {
       await locator.click(clickOptions);
@@ -584,10 +583,10 @@ async function verifyUnsavedDocumentWarning(browser) {
     await page.reload({timeout:1500}).catch(error=>assert.match(error.message,/ERR_ABORTED|aborted|Timeout 1500ms exceeded/i));
     await reloadPrompt;
     assert.equal(await page.locator('#reason').inputValue(),'Unsaved reason แก้ไข 😀','Canceling browser reload retains the unsaved PCN');
-    await confirmClick(recordsLink(),false);
+    await confirmClick(portalLink(),false);
     assert.equal(page.url(),documentUrl,'Cancel keeps the current PCN open');
     assert.equal(await page.locator('#reason').inputValue(),'Unsaved reason แก้ไข 😀','Cancel preserves the typed document');
-    await recordsLink().click();
+    await portalLink().click();
     await unsavedDialog.waitFor({state:'visible'});
     await fs.mkdir(path.resolve('test-results'),{recursive:true});
     await page.screenshot({path:path.resolve('test-results/pcn-unsaved-dialog-desktop.png')});
@@ -600,7 +599,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     assert.equal(page.url(),documentUrl,'Escape keeps the PCN open');
     assert.equal(await unloadBlocked(),true,'Escape does not mark any changes saved');
     await page.setViewportSize({width:320,height:700});
-    await recordsLink().click();
+    await portalLink().click();
     await unsavedDialog.waitFor({state:'visible'});
     const mobileDialog = await unsavedDialog.boundingBox();
     assert.ok(mobileDialog.x>=0 && mobileDialog.x+mobileDialog.width<=320,'The complete warning fits a small mobile screen');
@@ -627,8 +626,8 @@ async function verifyUnsavedDocumentWarning(browser) {
     const selectedRow = page.locator('.option-row').filter({has:page.locator('input[name="changeOption"]:checked')});
     await selectedRow.locator('.option-condition-cell textarea').first().fill('Dynamic condition changed');
     assert.equal(await unloadBlocked(),true,'Dynamic document condition rows are protected');
-    await confirmClick(recordsLink(),true);
-    await page.waitForURL(`${origin}/records`);
+    await confirmClick(portalLink(),true);
+    await page.waitForURL(`${origin}/admin`);
     await page.goto(documentUrl);
     await loaded();
     assert.equal(await unloadBlocked(),false,'Accepting discard and reopening loads a clean canonical PCN');
@@ -677,8 +676,8 @@ async function verifyUnsavedDocumentWarning(browser) {
     await page.locator('#saveDraftButton').click();
     await page.locator('#appNoticeTitle').filter({hasText:'PCN updated'}).waitFor();
     assert.equal(await unloadBlocked(),false,'Successful PATCH clears the unsaved warning');
-    await recordsLink().click();
-    await page.waitForURL(`${origin}/records`);
+    await portalLink().click();
+    await page.waitForURL(`${origin}/admin`);
 
     await page.goto(documentUrl);
     await loaded();
@@ -689,8 +688,8 @@ async function verifyUnsavedDocumentWarning(browser) {
     await refreshFailure;
     await page.locator('#submitButton:not([disabled])').waitFor();
     assert.equal(await unloadBlocked(),false,'A confirmed successful write remains saved when its later refresh fails');
-    await recordsLink().click();
-    await page.waitForURL(`${origin}/records`);
+    await portalLink().click();
+    await page.waitForURL(`${origin}/admin`);
 
     await page.goto(`${origin}/create`);
     await loaded();
@@ -788,7 +787,7 @@ async function main() {
     if(healthError) throw new Error('PRIVATE_DIAGNOSTIC_MARKER');
     return structuredClone(workerHealth);
   }};
-  const server = createApp({repository,service:new BrowserPcnService(repository),integrationService,notificationWorker,authService:fakeAuthService(),rootDir:path.resolve(__dirname,'..'),publicOrigin:'http://127.0.0.1:3099',secureCookies:false});
+  const server = createApp({repository,service:new BrowserPcnService(repository),integrationService,notificationWorker,authService:fakeAuthService({additionalUsers:[{username:'browser-viewer',employeeCode:'0000001',displayName:'View Only Employee',roles:[],identityProvider:'employee-code',department:null}]}),rootDir:path.resolve(__dirname,'..'),publicOrigin:'http://127.0.0.1:3099',secureCookies:false});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(3099,'127.0.0.1',resolve);});
   let browser;
   try {
@@ -1169,9 +1168,12 @@ async function main() {
     let assignedUsers=[existingUser];
     const provisioningWrites=[];
     const sourceMail={id:'source-mail',email:'source@example.test',displayName:'Source Employee',jobTitle:'Engineer',department:'Engineering',photo:directoryPhoto};
+    const legacyRequesterMail={...sourceMail,id:'legacy-requester-mail',email:'requester@example.test',displayName:'Legacy Requester'};
+    const combinedAdminMail={...sourceMail,id:'combined-admin-mail',email:'combined.admin@example.test',displayName:'Combined Administrator'};
     let assignmentConflict=false;
     await page.route('**/api/admin/directory-users?*',async route=>{
       const query=new URL(route.request().url()).searchParams.get('query');
+      if(query==='Legacy Requester') return route.fulfill({json:{success:true,data:{users:[legacyRequesterMail]}}});
       if(query?.startsWith('Source') || query==='typed@example.test') return route.fulfill({json:{success:true,data:{users:[sourceMail,{...sourceMail,id:'source-other',email:'another@example.test',department:'Other office'}]}}});
       return route.fallback();
     });
@@ -1195,7 +1197,8 @@ async function main() {
       const isEdit=route.request().method()==='PATCH';
       if(isEdit&&assignmentConflict) return route.fulfill({status:409,json:{success:false,error:'User changed on the server'}});
       const current=assignedUsers.find(user=>new URL(route.request().url()).pathname.endsWith(user.id));
-      const user=isEdit?{...current,...body,version:'0000000000000002'}:isLink?{...existingUser,employeeCode:linkedEmployee.employeeCode,identityProvider:'employee-code'}:{id:'created-employee',username:employee.employeeCode,...employee,roles:body.roles,department:body.department,signingStep:body.signingStep,mailProfile:body.mailSelection?sourceMail:null,version:'0000000000000001',isActive:true,identityProvider:'employee-code'};
+      const selectedProfile=body.mailSelection?(body.mailSelection.id===legacyRequesterMail.id?legacyRequesterMail:sourceMail):null;
+      const user=isEdit?{...current,...body,mailProfile:selectedProfile||current.mailProfile,version:'0000000000000002'}:isLink?{...existingUser,employeeCode:linkedEmployee.employeeCode,identityProvider:'employee-code'}:{id:'created-employee',username:employee.employeeCode,...employee,roles:body.roles,department:body.department,signingStep:body.signingStep,mailProfile:selectedProfile,version:'0000000000000001',isActive:true,identityProvider:'employee-code'};
       assignedUsers=isLink||isEdit?assignedUsers.map(existing=>existing.id===user.id?user:existing):[...assignedUsers,user];
       return route.fulfill({status:isLink?200:201,json:{success:true,data:user}});
     });
@@ -1207,6 +1210,8 @@ async function main() {
     assert.equal(await page.locator('#pcnAdminView').isVisible(),false);
     assert.equal(await page.locator('#mailRoutingView').isVisible(),false);
     assert.equal(await page.locator('#adminRefreshButton').isVisible(),false,'PCN refresh is hidden in Users');
+    assert.equal(await page.locator('#employeeUserForm').isVisible(),false,'Employee creation opens in a popup');
+    await page.locator('#usersAddRoleButton').click();
     assert.deepEqual(await page.locator('#employeeRole option').evaluateAll(options=>options.map(option=>({value:option.value,label:option.textContent}))),[
       {value:'',label:'Select role'},{value:'admin',label:'Administrator'},{value:'approved',label:'Approved'},{value:'checked',label:'Checked'},{value:'prepared',label:'Prepared'}
     ],'One PCN role select contains exactly the four requested choices');
@@ -1289,20 +1294,20 @@ async function main() {
     assert.equal(JSON.stringify(manualSave.postDataJSON()).includes('source@example.test'),false,'Managed mail never enters the manual routing save body');
     await page.locator('#mailRoutingMessage').filter({hasText:'Mail routing saved.'}).waitFor();
     await page.locator('#adminUsersButton').click();
-    await page.getByRole('button',{name:'Edit user Source Employee',exact:true}).click();
+    await page.locator('#adminUsersRows [data-user-id="created-employee"][data-user-action="edit"]').click();
     assert.equal(await employeeSearch.isDisabled(),true,'Editing cannot change employee identity');
     await page.locator('#employeeRole').selectOption('prepared');
     await page.locator('#employeeActive').uncheck();
     assignmentConflict=true;
     await page.locator('#employeeCreateButton').click();
-    await page.locator('#usersMessage').filter({hasText:'Your edit is kept'}).waitFor();
+    await page.locator('#employeeDialogMessage').filter({hasText:'Your edit is kept'}).waitFor();
     assert.equal(await page.locator('#employeeRole').inputValue(),'prepared','A concurrency conflict preserves the draft');
     assert.equal(await page.locator('#employeeActive').isChecked(),false);
     assert.deepEqual(provisioningWrites[1],{path:'/api/admin/users/created-employee',body:{roles:['qa'],department:'qaTet',signingStep:'prepared',isActive:false,version:'0000000000000001'}});
     await page.locator('#employeeCancelButton').click();
     assert.equal(provisioningWrites.length,2,'Cancelling the conflicted draft performs no write');
     assignmentConflict=false;
-    await page.getByRole('button',{name:'Edit user Source Employee',exact:true}).click();
+    await page.locator('#adminUsersRows [data-user-id="created-employee"][data-user-action="edit"]').click();
     await page.locator('#employeeRole').selectOption('prepared');
     await page.locator('#employeeActive').uncheck();
     await page.locator('#employeeCreateButton').click();
@@ -1322,13 +1327,14 @@ async function main() {
     assert.deepEqual(provisioningWrites[3],{path:'/api/admin/users/legacy-admin/employee',body:{employeeCode:linkedEmployee.employeeCode}});
     assert.deepEqual(assignedUsers[0].roles,['admin']);
     assert.equal(assignedUsers[0].department,'it');
+    await page.locator('#usersAddRoleButton').click();
     await employeeSearch.fill('Source Employee');
     await page.locator('#employeeResults button').click();
     await page.locator('#employeeCancelButton').click();
     assert.equal(await employeeSearch.inputValue(),'');
     assert.equal(await page.locator('#employeeCreateButton').isDisabled(),true);
-    assert.equal(provisioningWrites.length,4,'Clear selection performs no provisioning write');
-    await page.getByRole('button',{name:'Edit user Local Administrator',exact:true}).click();
+    assert.equal(provisioningWrites.length,4,'Cancelling the popup performs no provisioning write');
+    await page.locator('#adminUsersRows [data-user-id="legacy-admin"][data-user-action="edit"]').click();
     await page.locator('#employeeRole').selectOption('checked');
     await page.locator('#employeeDepartment').selectOption('qaTet');
     await page.locator('#employeeMailSearch').fill('Source Employee');
@@ -1340,25 +1346,29 @@ async function main() {
     assert.equal(await page.locator('#employeeRole').inputValue(),'checked','Cancelled Administrator removal retains the draft');
     await page.locator('#employeeCancelButton').click();
     assignedUsers=[...assignedUsers,
-      {...existingUser,id:'combined-admin',displayName:'Combined Administrator',roles:['reviewer','admin'],department:'qaTet',signingStep:'approved',mailProfile:sourceMail,identityProvider:'employee-code'},
+      {...existingUser,id:'combined-admin',displayName:'Combined Administrator',roles:['reviewer','admin'],department:'qaTet',signingStep:'approved',mailProfile:combinedAdminMail,identityProvider:'employee-code'},
       {...existingUser,id:'legacy-requester',displayName:'Legacy Requester',roles:['supplier'],department:'qaTet',identityProvider:'employee-code'}
     ];
     await page.locator('#usersRefreshButton').click();
     await page.locator('#usersMessage').filter({hasText:'4 user accounts'}).waitFor();
-    await page.getByRole('button',{name:'Edit user Combined Administrator',exact:true}).click();
+    await page.locator('#adminUsersRows [data-user-id="combined-admin"][data-user-action="edit"]').click();
     assert.equal(await page.locator('#employeeRole').inputValue(),'admin');
     assert.match(await page.locator('#employeeRoleHelp').textContent(),/preserved.*QA\/TET.*Approved/);
     await page.locator('#employeeActive').uncheck();
     await page.locator('#employeeCreateButton').click();
     await page.locator('#usersMessage').filter({hasText:'Employee access updated'}).waitFor();
     assert.deepEqual(provisioningWrites[4].body,{roles:['reviewer','admin'],department:'qaTet',signingStep:'approved',isActive:false,version:'0000000000000001'},'Unrelated status edits retain exact multiple roles and signing authority');
-    await page.getByRole('button',{name:'Edit user Legacy Requester',exact:true}).click();
+    await page.locator('#adminUsersRows [data-user-id="legacy-requester"][data-user-action="edit"]').click();
     assert.equal(await page.locator('#employeeRole').inputValue(),'');
     assert.equal(await page.locator('#employeeRole').getAttribute('required'),null,'A legacy user needs no new signing grant for unrelated edits');
+    assert.equal(await page.locator('#employeeCreateButton').isDisabled(),true,'An access edit needs a confirmed mail identity');
+    await page.locator('#employeeMailSearch').fill('Legacy Requester');
+    await page.locator('#employeeMailResults button').first().click();
     await page.locator('#employeeActive').uncheck();
     await page.locator('#employeeCreateButton').click();
     await page.locator('#usersMessage').filter({hasText:'Employee access updated'}).waitFor();
-    assert.deepEqual(provisioningWrites[5].body,{roles:['supplier'],department:'qaTet',signingStep:null,isActive:false,version:'0000000000000001'},'Legacy Requester is never implicitly converted to a signer');
+    assert.deepEqual(provisioningWrites[5].body,{roles:['supplier'],department:'qaTet',signingStep:null,
+      mailSelection:{id:legacyRequesterMail.id,email:legacyRequesterMail.email},isActive:false,version:'0000000000000001'},'Legacy Requester is never implicitly converted to a signer');
     await page.screenshot({path:path.resolve('test-results/admin-users-browser-smoke.png'),fullPage:true});
     await page.setViewportSize({width:320,height:844});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'Users view fits a mobile viewport');
@@ -1367,7 +1377,8 @@ async function main() {
     await page.route('**/api/auth/config',route=>route.fulfill({json:{success:true,data:{mode:'password',employeeProvisioningConfigured:false}}}));
     await page.locator('#usersRefreshButton').click();
     await page.locator('#usersMessage').filter({hasText:'not configured'}).waitFor();
-    assert.equal(await employeeSearch.isDisabled(),true);
+    assert.equal(await page.locator('#usersCreateButton').isDisabled(),true,'Manual creation requires the source configuration to check code collisions');
+    assert.equal(await page.locator('#usersAddRoleButton').isDisabled(),false,'Cached account roles remain editable without a source');
     assert.equal(await page.locator('#employeeCreateButton').isDisabled(),true);
     const employeeContext=await browser.newContext();
     const employeePage=await employeeContext.newPage();
@@ -1400,10 +1411,9 @@ async function main() {
     assert.equal(await employeePage.locator('#loginForm').isVisible(),false);
     assert.equal(await employeePage.locator('input[type=password]:visible').count(),0,'Employee mode exposes no password fields');
     assert.equal(await employeePage.locator('#employeeCode').getAttribute('type'),'text','Employee codes preserve leading zeros');
-    await employeePage.locator('#employeeCode').fill('0000001');
     const employeeLoginResponse=employeePage.waitForResponse('**/api/auth/login');
     const employeeDestination=employeePage.waitForRequest('**/employee-complete');
-    await employeePage.locator('#employeeLoginForm button[type=submit]').click({noWaitAfter:true});
+    await employeePage.locator('#employeeCode').fill('0000001');
     await employeeLoginResponse;
     await employeeDestination;
     assert.deepEqual(employeeRequest.body,{employeeCode:'0000001'});
@@ -1422,19 +1432,23 @@ async function main() {
     viewerPage.on('pageerror',error=>errors.push(error.message));
     const viewerRecord = (await repository.list())[0];
     assert(viewerRecord, 'Browser fixture has a PCN for the viewer');
-    await viewerPage.route('**/api/session',route=>route.fulfill({json:{success:true,data:{authenticated:true,user:{username:'0000001',employeeCode:'0000001',displayName:'View Only Employee',roles:[],identityProvider:'employee-code',department:null},csrfToken:'viewer-csrf'}}}));
+    // Use a genuine isolated roleless session to exercise record authorization.
+    await viewerPage.route('**/api/profile',route=>route.fulfill({json:{success:true,data:{status:'unavailable',photo:'',email:'',jobTitle:'',directoryDepartment:''}}}));
     let viewerRecordRequests = 0;
-    await viewerPage.route('**/api/pcns*',route=>{viewerRecordRequests++;return route.fulfill({status:403,json:{success:false,error:{message:'A PCN role is required'}}});});
-    await viewerPage.goto('http://127.0.0.1:3099/records');
-    await viewerPage.locator('#accessPending').waitFor({state:'visible'});
+    viewerPage.on('request',request=>{if(new URL(request.url()).pathname.startsWith('/api/pcns')) viewerRecordRequests++;});
+    await viewerPage.goto('http://127.0.0.1:3099/login?returnTo=%2Frecords');
+    await viewerPage.locator('#username').fill('browser-viewer');
+    await viewerPage.locator('#password').fill(TEST_PASSWORD);
+    await viewerPage.locator('#loginForm button').click();
+    await viewerPage.waitForURL('**/records');
+    await viewerPage.locator('#recordsRows a').first().waitFor();
     assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning opens from the profile button');
     assert.equal(await viewerPage.locator('.account-trigger').getAttribute('aria-label'), 'Open profile for View Only Employee; PCN role not assigned');
     await viewerPage.locator('.account-trigger').click();
     assert.match(await viewerPage.locator('#accountAccessWarning').textContent(),/Contact an administrator to assign your PCN role/);
-    assert.equal(await viewerPage.locator('#accessPending').isVisible(),true,'Viewer sees the pending-access page');
-    assert.equal(await viewerPage.locator('#recordsWorkspace').isVisible(),false,'Viewer has no record list or record controls');
-    assert.equal(viewerRecordRequests,0,'No record request is made without a role');
-    assert.equal(await viewerPage.locator('#createPcnLink').isVisible(),false,'Viewer cannot navigate to PCN creation');
+    assert.equal(await viewerPage.locator('#recordsWorkspace').isVisible(),true,'Roleless viewer sees the records list');
+    assert.ok(viewerRecordRequests>0,'Roleless viewer loads record data');
+    assert.equal(await viewerPage.locator('.topbar-actions a').count(),0,'Records has no Create or Portal navigation');
     await viewerPage.screenshot({path:path.resolve('test-results/pcn-viewer-profile-smoke.png'),fullPage:true});
     await viewerPage.locator('.account-trigger').click();
     assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning can be dismissed with the profile button');
@@ -1443,10 +1457,10 @@ async function main() {
     assert.equal(await viewerPage.locator('.account-sign-out').isVisible(),true,'Sign Out remains available');
     await viewerPage.screenshot({path:path.resolve('test-results/pcn-viewer-browser-smoke.png'),fullPage:true});
     await viewerPage.goto(`http://127.0.0.1:3099/${viewerRecord.id}`);
-    await viewerPage.waitForURL('**/records');
-    await viewerPage.locator('#accessPending').waitFor({state:'visible'});
-    assert.equal(await viewerPage.locator('#recordsWorkspace').isVisible(),false,'Direct record URL returns viewer to the no-role screen');
-    assert.equal(viewerRecordRequests,0,'Direct record URL does not load record data');
+    await viewerPage.locator('#appNoticeTitle').filter({hasText:'PCN loaded'}).waitFor();
+    assert.equal(new URL(viewerPage.url()).pathname,`/${viewerRecord.id}`,'Direct record URL opens for the roleless viewer');
+    assert.equal(await viewerPage.locator('main input:not(:disabled), main select:not(:disabled), main textarea:not(:disabled)').count(),0,'Roleless detail controls stay read-only');
+    assert.equal(await viewerPage.locator('#submitButton').isVisible(),false,'Viewer has no update action');
     await viewerPage.close();
     assert.deepEqual(outbound,[],'The complete browser suite performs no outbound email');
     assert.deepEqual(errors,[],'All browser journeys complete without page errors');

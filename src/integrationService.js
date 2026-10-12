@@ -123,4 +123,4 @@ class IntegrationService {
   }
 }
 
-module.exports = { IntegrationService, emailList };
+module.exports = { IntegrationService, emailList, directoryPhoto };

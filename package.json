@@ -11,6 +11,8 @@
     "test:coverage": "node --test --experimental-test-coverage",
     "test:e2e": "node scripts/e2e-smoke.js",
     "test:documents": "node scripts/document-e2e.js",
+    "test:profile": "node scripts/profile-e2e.js",
+    "test:login": "node scripts/login-e2e.js",
     "db:check": "node scripts/db-check.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import": "node scripts/db-import.js",

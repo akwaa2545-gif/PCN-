@@ -67,7 +67,7 @@ async function harness(t, { roles = ['admin'], directory = true, sourceProfile =
   return { request, login, calls, state, pcnRepository };
 }
 
-test('unassigned employees can sign in and sign out but cannot access the PCN workspace', async t => {
+test('unassigned employees can sign in, view Records and sign out while PCN writes stay forbidden', async t => {
   const { request, login, calls, pcnRepository } = await harness(t, { unassigned: true });
   const record = await pcnRepository.create({ createdAt: '2026-10-07T00:00:00.000Z', ownerUserId: 'another-user',
     status: 'submitted', riskLevel: 'RL2', supplierName: 'Example supplier', materialName: 'Example material', internalReview: {} });
@@ -76,9 +76,11 @@ test('unassigned employees can sign in and sign out but cannot access the PCN wo
   assert.deepEqual(signedIn.body.data.user.roles, []);
   assert.deepEqual(calls.filter(call => call[0] === 'viewer'), [['viewer', '001234']]);
   assert.equal((await request('/api/session')).body.data.authenticated, true);
-  assert.equal((await request('/api/pcns')).status, 403);
-  assert.equal((await request(`/api/pcns/${record.id}`)).status, 403);
-  assert.equal((await request('/api/master-data')).status, 403);
+  const records = await request('/api/pcns');
+  assert.equal(records.status, 200);
+  assert.deepEqual(records.body.data.map(item => item.id), [record.id]);
+  assert.equal((await request(`/api/pcns/${record.id}`)).status, 200);
+  assert.equal((await request('/api/master-data')).status, 200);
   assert.equal((await request('/records')).status, 200);
   assert.equal((await request('/api/pcns', { method: 'POST', body: {} })).status, 403);
   assert.equal((await request(`/api/pcns/${record.id}`, { method: 'PATCH', body: { version: record.version } })).status, 403);
@@ -101,12 +103,49 @@ test('administrator assignment edit selects exactly one verified email and inval
 
 test('account edit enforces origin, CSRF, current version, scalar step and strict fields before persistence',async t=>{
   const {request,login,state,calls}=await harness(t);await login();
+  state.user={...state.user,email:'employee@example.com',mailDirectoryId:'mail-id',mailVerifiedAt:'2026-10-12T00:00:00.000Z',
+    mailProfile:{id:'mail-id',email:'employee@example.com',displayName:'Selected Person'}};
   const body={roles:['admin'],department:'it',signingStep:null,isActive:true,version:state.user.version};
   assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body,csrf:false})).status,403);
   assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body,origin:'https://evil.invalid'})).status,403);
   for(const patch of [{version:null},{signingStep:['approved']},{mailProfile:{email:'free@example.com'}},{employeeCode:'001234'},{email:'free@example.com'}])assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,...patch}})).status,400);
   assert.equal(calls.some(call=>call[0]==='edit'),false);
   assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,version:'8899aabbccddeeff'}})).status,409);
+});
+
+test('ordinary account edits require selected or retained verified mail even without a signing step',async t=>{
+  const {request,login,state,calls}=await harness(t);await login();
+  const body={roles:['admin','reviewer'],department:'it',signingStep:null,isActive:true,version:state.user.version};
+  for(const patch of [{},{email:'employee@example.com'},
+    {email:'employee@example.com',mailDirectoryId:'mail-id'},
+    {email:'employee@example.com',mailVerifiedAt:'2026-10-12T00:00:00.000Z'},
+    {email:'employee@example.com',mailProfile:{id:'mail-id',email:'employee@example.com'}}]) {
+    state.user={...state.user,...patch};
+    assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body})).status,400);
+    state.user={...state.user,email:null,mailDirectoryId:null,mailVerifiedAt:null,mailProfile:null};
+  }
+  assert.equal(calls.some(call=>call[0]==='edit'),false);
+  state.mailUsers=[{id:'mail-id',email:'employee@example.com',displayName:'Selected Person'}];
+  for(const mailSelection of ['employee@example.com',{id:'forged-id',email:'employee@example.com'},
+    {id:'mail-id',email:'employee@example.com',displayName:'Forged Person'}]) {
+    assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,mailSelection}})).status,400);
+  }
+  assert.equal(calls.some(call=>call[0]==='edit'),false);
+  assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,mailSelection:{id:'mail-id',email:'employee@example.com'}}})).status,200);
+  assert.deepEqual(state.user.roles,['admin','reviewer']);
+});
+
+test('verified work email can be retained for status edits but cannot be explicitly cleared',async t=>{
+  const {request,login,state,calls}=await harness(t);await login();
+  state.user={...state.user,email:'employee@example.com',mailDirectoryId:'mail-id',mailVerifiedAt:'2026-10-12T00:00:00.000Z',
+    mailProfile:{id:'mail-id',email:'employee@example.com',displayName:'Selected Person'}};
+  const body={roles:['admin'],department:'it',signingStep:null,isActive:false,version:state.user.version};
+  assert.equal((await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body:{...body,mailSelection:null}})).status,400);
+  assert.equal(calls.some(call=>call[0]==='edit'),false);
+  const result=await request(`/api/admin/users/${USER_ID}`,{method:'PATCH',body});
+  assert.equal(result.status,200);assert.equal(result.body.data.isActive,false);
+  assert.equal(result.body.data.mailProfile.email,'employee@example.com');
+  assert.equal((await request('/api/admin/users')).status,401);
 });
 
 test('employee code HTTP login works without Windows headers and public config contains no secrets', async t => {

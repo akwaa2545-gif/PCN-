@@ -27,7 +27,7 @@ function meaningfulUpdate(before, after) {
 }
 
 function notificationRecipient(user, record) {
-  if (!record || user.identityProvider !== 'employee-code' || !user.isActive || !user.mailVerifiedAt || !user.mailDirectoryId
+  if (!record || !['employee-code', 'pcn-local'].includes(user.identityProvider) || !user.isActive || !user.mailVerifiedAt || !user.mailDirectoryId
     || user.mailProfile?.id !== user.mailDirectoryId || (!isInternal(user) && String(record.ownerUserId || '') !== String(user.id))) return null;
   try {
     const email = emailList(user.email);

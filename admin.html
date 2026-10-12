@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PCN Administration</title>
+    <title>PCN Portal</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="admin.css" />
   </head>
@@ -19,8 +19,8 @@
         </div>
         <div class="topbar-actions">
           <button class="ghost-button admin-nav-button" id="adminRecordsButton" type="button">PCN Records</button>
-          <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button">Mail Routing</button>
-          <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button">Users</button>
+          <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button" hidden>Mail Routing</button>
+          <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button" hidden>Users</button>
           <a class="ghost-link" href="/create">Create PCN</a>
           <div class="account-menu" id="accountMenu"></div>
         </div>
@@ -51,7 +51,7 @@
       </div>
       <div class="admin-loading-bar" id="adminLoadingBar" hidden>
         <span></span>
-        <strong id="adminLoadingText">Loading admin data...</strong>
+        <strong id="adminLoadingText">Loading portal data...</strong>
       </div>
 
       <main>
@@ -145,7 +145,7 @@
                 <span class="progress-percent" id="adminProgressPercent">0%</span>
               </div>
 
-              <div class="admin-status-control">
+              <div class="admin-status-control" id="adminStatusControl" hidden>
                 <label>
                   Move workflow status
                   <select id="adminStatusSelect"></select>
@@ -199,13 +199,58 @@
         </section>
         <section class="admin-view" id="adminUsersView" aria-labelledby="adminUsersTitle">
           <section class="admin-panel users-panel">
-            <div class="panel-header"><div><h2 id="adminUsersTitle">Users</h2><p>Manage employee access and signing assignments.</p></div><button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button></div>
-            <p id="usersMessage" class="admin-message" role="status" aria-live="polite" aria-atomic="true">Open Users to load employee access.</p>
-            <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
-              <div class="employee-form-intro">
-                <h3 id="employeeFormTitle">Create employee user</h3>
-                <p id="employeeProvisioningHelp">Select an employee, then set their PCN access.</p>
+            <div class="panel-header">
+              <div><h2 id="adminUsersTitle">Users</h2><p>Manage employee access and signing assignments.</p></div>
+              <div class="users-header-actions">
+                <button class="ghost-button" id="usersRefreshButton" type="button">Refresh users</button>
+                <button class="ghost-button" id="usersAddRoleButton" type="button" aria-haspopup="dialog" aria-controls="employeeUserDialog">Add role</button>
+                <button class="primary-button" id="usersCreateButton" type="button" aria-haspopup="dialog" aria-controls="employeeUserDialog"><span aria-hidden="true">+</span> Create user</button>
               </div>
+            </div>
+            <p id="usersMessage" class="admin-message" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Open Users to load employee access.</p>
+
+            <div class="users-filters" role="group" aria-label="Filter users">
+              <label for="usersSearchFilter">Search users<input id="usersSearchFilter" type="search" maxlength="200" autocomplete="off" placeholder="Name, employee code or email" /></label>
+              <label for="usersRoleFilter">PCN role<select id="usersRoleFilter"><option value="">All roles</option><option value="unassigned">Unassigned</option><option value="admin">Administrator</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option><option value="legacy">No signing assignment</option></select></label>
+              <label for="usersDepartmentFilter">PCN department<select id="usersDepartmentFilter"><option value="">All departments</option><option value="unassigned">Unassigned</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
+              <label for="usersStatusFilter">Status<select id="usersStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+              <button id="usersClearFiltersButton" class="ghost-button" type="button">Clear filters</button>
+            </div>
+            <p id="usersFilterSummary" class="users-filter-summary" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
+            <section class="users-group users-group-pending" aria-labelledby="pendingUsersTitle">
+              <div class="users-group-heading"><h3 id="pendingUsersTitle">Pending access</h3><span id="pendingUsersCount"></span></div>
+              <p id="pendingUsersEmpty" class="users-empty" hidden></p>
+              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Users pending access table"><table class="users-table"><caption>Users pending access</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="pendingUsersRows"></tbody></table></div>
+            </section>
+            <section class="users-group" aria-labelledby="assignedUsersTitle">
+              <div class="users-group-heading"><h3 id="assignedUsersTitle">Assigned PCN users</h3><span id="assignedUsersCount"></span></div>
+              <p id="assignedUsersEmpty" class="users-empty" hidden></p>
+              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
+            </section>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="employeeUserDialog" class="employee-user-dialog" aria-labelledby="employeeFormTitle" aria-describedby="employeeFormDescription">
+      <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
+        <div class="employee-form-intro employee-dialog-heading">
+          <div>
+            <h3 id="employeeFormTitle">Add role</h3>
+            <div id="employeeFormDescription"><p id="employeeProvisioningHelp">Select an employee, then set their PCN access.</p></div>
+          </div>
+          <button class="employee-dialog-close" id="employeeDialogCloseButton" type="button" aria-label="Close user form"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+        </div>
+        <div class="employee-dialog-body">
+          <p id="employeeDialogMessage" class="employee-dialog-message" role="alert" aria-atomic="true" tabindex="-1" hidden></p>
+          <div class="employee-directory-column">
+            <div id="employeeManualFields" class="employee-manual-fields" hidden>
+              <label for="employeeManualCode">Employee code</label>
+              <input id="employeeManualCode" type="text" inputmode="numeric" pattern="[0-9]{7}" minlength="7" maxlength="7" autocomplete="off" placeholder="Employee code" />
+              <label for="employeeManualName">Full name</label>
+              <input id="employeeManualName" type="text" maxlength="200" autocomplete="off" placeholder="Full name" />
+            </div>
+            <div id="employeeDirectoryFields" class="employee-directory-fields">
               <label for="employeeSearch">Employee name or ID</label>
               <div class="employee-search-control">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg>
@@ -217,31 +262,37 @@
                 <label for="employeeCode">Selected employee code</label><input id="employeeCode" type="text" readonly />
                 <p id="employeeProfile"></p>
               </div>
-              <div id="employeeAssignments" class="employee-assignments">
-                <h4 class="employee-assignments-title">Access settings</h4>
-                <label for="employeeRole">PCN role<select id="employeeRole" required aria-describedby="employeeRoleHelp employeeRoutePreview"><option value="">Select role</option><option value="admin">Administrator</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option></select></label>
-                <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
+            </div>
+          </div>
+          <div id="employeeAssignments" class="employee-assignments">
+            <h4 class="employee-assignments-title">Access settings</h4>
+            <label for="employeeRole">PCN role<select id="employeeRole" required aria-describedby="employeeRoleHelp employeeRoutePreview"><option value="">Select role</option><option value="admin">Administrator</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option></select></label>
+            <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="other">Other</option></select></label>
 
-                <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
-                <p id="employeeRoleHelp" class="employee-assignment-help"></p>
-                <div class="employee-mail-assignment">
-                  <label for="employeeMailSearch">Verified work email</label>
-                  <p class="employee-assignment-help">Choose the matching directory result. Typed addresses are not saved.</p>
-                  <input id="employeeMailSearch" type="search" autocomplete="off" maxlength="100" placeholder="Search the mail directory" aria-describedby="employeeMailStatus" aria-controls="employeeMailResults" disabled />
-                  <p id="employeeMailStatus" role="status" aria-live="polite"></p>
-                  <div id="employeeMailResults" class="employee-results" role="group" aria-label="Mail recipient search results" hidden></div>
-                  <p id="employeeMailSelected" role="status" aria-live="polite"></p>
-                </div>
-                <p id="employeeRoutePreview" class="employee-route-preview" role="status" aria-live="polite">No signing assignment.</p>
+            <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
+            <p id="employeeRoleHelp" class="employee-assignment-help"></p>
+            <div class="employee-mail-assignment">
+              <label for="employeeMailSearch">Verified work email</label>
+              <p class="employee-assignment-help">Choose the matching directory result. Typed addresses are not saved.</p>
+              <input id="employeeMailSearch" type="search" autocomplete="off" maxlength="100" placeholder="Search the mail directory" aria-describedby="employeeMailStatus" aria-controls="employeeMailResults" disabled />
+              <div id="employeeMailLoading" class="employee-mail-loading" aria-hidden="true" hidden>
+                <span class="employee-mail-loading-avatar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" /><path d="M5 20v-2a7 7 0 0 1 14 0v2" /></svg>
+                  <span class="employee-mail-spinner"></span>
+                </span>
+                <span id="employeeMailLoadingText">Searching mail directory…</span>
               </div>
-              <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. The employee code becomes their sign-in code and existing sessions will be signed out.</p>
-              <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Clear selection</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
-            </form>
-            <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
-          </section>
-        </section>
-      </main>
-    </div>
+              <p id="employeeMailStatus" role="status" aria-live="polite"></p>
+              <div id="employeeMailResults" class="employee-results" role="group" aria-label="Mail recipient search results" hidden></div>
+              <p id="employeeMailSelected" role="status" aria-live="polite"></p>
+            </div>
+            <p id="employeeRoutePreview" class="employee-route-preview" role="status" aria-live="polite">No signing assignment.</p>
+          </div>
+          <p id="employeeLinkHelp" hidden>Linking preserves this user's role, PCN department and records. The employee code becomes their sign-in code and existing sessions will be signed out.</p>
+        </div>
+        <div class="employee-user-actions"><button class="ghost-button" id="employeeCancelButton" type="button">Cancel</button><button class="primary-button" id="employeeCreateButton" type="submit" disabled>Create user</button></div>
+      </form>
+    </dialog>
 
     <dialog class="recipient-dialog" id="notificationRecipientDialog" aria-labelledby="notificationRecipientTitle" aria-describedby="notificationRecipientInstructions">
       <div class="recipient-dialog-heading">

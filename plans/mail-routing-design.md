@@ -63,7 +63,9 @@ PCN account activation controls automatic mail membership. Removing an employee 
 
 ## Routing policy and save-time mail
 
-The first successful **Save Mail** persists schema version 2. There is no separate activation endpoint. New PCNs created afterward select mailRoutingPolicyVersion=2 under the create transaction; existing records retain their stored policy, and an absent policy means legacy policy 1. A draft created before the settings switch remains legacy. No existing PCN is silently opted in.
+The first successful **Save Mail** persists schema version 2. There is no separate activation endpoint. With schema-2 settings, new and existing PCNs select mailRoutingPolicyVersion=2 under their save transaction. Existing legacy PCNs adopt the current routing on their next save and queue their current pending action once. This includes an unchanged save used to activate routing. Draft, Supplier Action and completed records do not produce retrospective action notices. Pending legacy completed-group jobs are cancelled when an active record adopts its current step; accepted, sending and uncertain jobs are preserved.
+
+On 2026-10-12, a scoped activation applied this local fix to `PCN-2026-0001`: its current pending step was GSC/TET Checked with two configured recipients. The expected-version repository update atomically persisted policy 2 and one action-required job; it made no domain-content changes and queued no informational update. The running worker posted the original four-field payload to Power Automate. SQL recorded one accepted job, one attempt, no error, and `SentAt=2026-10-12T02:14:04.686Z`. This proves upstream acceptance, not inbox delivery. `PCN-2026-0002` was waiting for Supplier Action and was left unchanged. The source fix passed 491 tests with 91.23% line coverage; its notification pipeline tests use an isolated HTTP transport. No release deployment was performed for this fix.
 
 For policy 2, the SQL repository calls NotificationService.prepare before persistence and NotificationService.persisted after the parent/children/audit write, all in the same transaction. The server derives the next pending stage/action from the locked saved record and existing workflow prerequisites. It snapshots recipients/payload for one handoff and returns a transient notification summary with the saved PCN. app.js displays that result and does not issue the old second enqueue POST.
 
@@ -76,7 +78,7 @@ For policy 2, the SQL repository calls NotificationService.prepare before persis
 | QA/TET initial Prepared completes on RL0 | QA/TET Final Judgment Approved, using QA/TET Approved recipients |
 | QA/TET final Prepared completes | supplierNotification |
 
-A save completing several contiguous steps creates one handoff to the next pending action, not emails to steps completed in that same save. Unchanged saves, comments, approvals without signoff changes, routing edits, reloads and historical import do not create handoffs.
+A save completing several contiguous steps creates one handoff to the next pending action, not emails to steps completed in that same save. After the one-time adoption of current routing, unchanged saves, comments, approvals without signoff changes, routing edits, reloads and historical import do not create handoffs. Adoption without domain changes creates no informational update email.
 
 RL0 excludes TaPBU. For other risks, existing server routes/prerequisites remain authoritative: when a required TaPBU step is reached without tapbu.need selected, its handoff is blocked. Saving the resolved prerequisite creates a fresh eligible handoff. This does not redefine No Need as permission to bypass the server route.
 

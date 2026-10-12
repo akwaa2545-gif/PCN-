@@ -26,7 +26,7 @@ async function readMailUsers(tx, signingOnly) {
   const rows = await tx.request().query(`SELECT u.Id,u.EmployeeCode,u.IsActive,u.IdentityProvider,u.DepartmentKey,u.SigningStep,
     u.Email,u.MailDirectoryId,u.MailVerifiedAt,u.MailProfileJson,ur.UserId,r.Name AS RoleName
     FROM pcn.Users u LEFT JOIN pcn.UserRoles ur ON ur.UserId=u.Id LEFT JOIN pcn.Roles r ON r.Id=ur.RoleId
-    WHERE u.IsActive=1 AND u.IdentityProvider=N'employee-code' ${signingOnly ? 'AND u.SigningStep IS NOT NULL' : ''}
+    WHERE u.IsActive=1 AND u.IdentityProvider IN (N'employee-code', N'pcn-local') ${signingOnly ? 'AND u.SigningStep IS NOT NULL' : ''}
       AND u.MailVerifiedAt IS NOT NULL AND u.MailDirectoryId IS NOT NULL ORDER BY u.Id,r.Name;`);
   const users = rows.recordset.reduce((list, row) => {
     const previous = list.find(user => user.id === row.Id);
@@ -42,7 +42,7 @@ async function readMailUsers(tx, signingOnly) {
 }
 
 function managedRecipient(user) {
-  if (user.identityProvider !== 'employee-code' || !user.isActive || !user.mailVerifiedAt || !user.mailDirectoryId
+  if (!['employee-code', 'pcn-local'].includes(user.identityProvider) || !user.isActive || !user.mailVerifiedAt || !user.mailDirectoryId
     || !user.mailProfile || user.mailProfile.id !== user.mailDirectoryId || !canSign(user, user.department, user.signingStep)) return null;
   try {
     const email = emailList(user.email);

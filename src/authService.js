@@ -1,12 +1,13 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
-const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode, validateUserAssignment, validateVerifiedMail } = require('./employeeAccounts');
+const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode, normalizeUserId, validateUserAssignment, validateVerifiedMail, validateLocalEmployeeAccount } = require('./employeeAccounts');
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const providerOf = user => user?.identityProvider || (user?.directoryId ? 'retired-windows' : 'password');
+const isEmployeeProvider = user => ['employee-code', 'pcn-local'].includes(providerOf(user));
 const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive,
   signingStep:user.signingStep || null,mailProfile:user.mailProfile || null,version:user.version || null,
-  mustChangePassword: providerOf(user) === 'employee-code' ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
+  mustChangePassword: isEmployeeProvider(user) ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
   ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null } : {}) });
 function sessionPrincipal(user, session, tokenHash) {
   const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
@@ -83,9 +84,18 @@ class AuthService {
     if (body.remember !== undefined && typeof body.remember !== 'boolean') throw new ApiError(400, 'Invalid remember option');
     let code;
     try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Employee access could not be verified'); }
+    let user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
+    if (user && providerOf(user) === 'pcn-local') {
+      if (!this.matchesLocalEmployee(user, code)) throw new ApiError(401, 'Employee access could not be verified');
+      const latest = await this.repository.getUserById(user.id);
+      if (!this.matchesLocalEmployee(latest, code) || latest.securityStamp !== user.securityStamp) throw new ApiError(401, 'Employee access could not be verified');
+      return this.issueSession(latest, body.remember === true);
+    }
+    if (user && providerOf(user) !== 'employee-code') throw new ApiError(401, 'Employee access could not be verified');
     const profile = await this.lookupEmployee(code);
     if (!profile) throw new ApiError(401, 'Employee access could not be verified');
-    let user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
+    // Source verification can take time; use the account state after that lookup.
+    user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
     if (!user) {
       try { user = await this.repository.createEmployeeViewer(profile); }
       catch (error) {
@@ -103,6 +113,11 @@ class AuthService {
       const code = normalizeEmployeeCode(user.employeeCode).toLowerCase();
       return user.normalizedEmployeeCode === code && code === normalizeEmployeeCode(profile.employeeCode).toLowerCase();
     } catch { return false; }
+  }
+  matchesLocalEmployee(user, expectedCode = user?.employeeCode) {
+    if (!user?.isActive || providerOf(user) !== 'pcn-local') return false;
+    return typeof user.employeeCode === 'string' && /^\d{7}$/.test(user.employeeCode)
+      && user.normalizedEmployeeCode === user.employeeCode && user.employeeCode === expectedCode;
   }
   async issueSession(user, remember = false) {
     const token = crypto.randomBytes(32).toString('hex');
@@ -152,6 +167,30 @@ class AuthService {
     validateVerifiedMail({...mail,signingStep});
     return safeUser(await this.repository.createEmployeeUser({ employeeCode: normalizeEmployeeCode(profile.employeeCode), displayName: profile.displayName, roles: [...new Set(roles)], department,signingStep,...mail },actor,user));
   }
+  async createLocalEmployee(body = {}, directory = this.employeeDirectory, actor='administrator',user) {
+    assertFields(body,['employeeCode','displayName','roles','department','signingStep','mailSelection']);
+    const employeeCode = typeof body.employeeCode === 'string' ? body.employeeCode.trim() : '';
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : '';
+    const signingStep = body.signingStep === undefined ? null : body.signingStep;
+    if (!/^\d{7}$/.test(employeeCode)) throw new ApiError(400,'Employee code must contain seven digits');
+    if (!displayName || displayName.length > 200 || /[\u0000-\u001f\u007f-\u009f]/.test(body.displayName)) throw new ApiError(400,'Enter a valid full name');
+    this.validateAssignments({roles:body.roles,department:body.department,signingStep});
+    if (!directory) throw new ApiError(503,'Employee service is unavailable');
+    let existing;
+    try {
+      existing = await directory.getByCode(employeeCode);
+      if (existing !== null) {
+        validateEmployeeIdentity(existing);
+        if (normalizeEmployeeCode(existing.employeeCode) !== employeeCode) throw new Error('Unexpected employee identity');
+      }
+    } catch { throw new ApiError(503,'Employee service is unavailable'); }
+    if (existing) throw new ApiError(409,'This employee already exists. Select the employee from search results');
+    const mail = await this.resolveMail(body.mailSelection);
+    validateVerifiedMail({...mail,signingStep});
+    const account = {employeeCode,displayName,roles:[...new Set(body.roles)],department:body.department,signingStep,...mail};
+    validateLocalEmployeeAccount(account);
+    return safeUser(await this.repository.createLocalEmployeeUser(account,actor,user));
+  }
   async updateEmployee(body={},actor='administrator',user) {
     assertFields(body,['userId','roles','department','signingStep','mailSelection','isActive','version']);
     if(typeof body.version!=='string'||!/^[a-fA-F0-9]{16}$/.test(body.version))throw new ApiError(400,'The current account version is required');
@@ -159,10 +198,17 @@ class AuthService {
     this.validateAssignments(body);
     const prior=await this.repository.getUserById(body.userId);
     if(!prior)throw new ApiError(404,'User not found');
-    if(body.signingStep!==null&&providerOf(prior)!=='employee-code')throw new ApiError(400,'Link an employee before assigning a signing step');
+    if(body.signingStep!==null&&!isEmployeeProvider(prior))throw new ApiError(400,'Link an employee before assigning a signing step');
     const mail=await this.resolveMail(body.mailSelection,prior);
+    if (!mail.mailDirectoryId || !mail.mailVerifiedAt || !mail.mailProfile) throw new ApiError(400,'Select a verified work email before saving access');
     validateVerifiedMail({...mail,signingStep:body.signingStep});
     return safeUser(await this.repository.updateEmployeeAccount(body.userId,{roles:[...new Set(body.roles)],department:body.department,signingStep:body.signingStep,isActive:body.isActive,version:body.version,...mail},actor,user));
+  }
+  async removeEmployeeRoles(body={},actor='administrator',user) {
+    assertFields(body,['userId','version']);
+    const userId = normalizeUserId(body.userId);
+    if (typeof body.version !== 'string' || !/^[a-fA-F0-9]{16}$/.test(body.version)) throw new ApiError(400,'The current account version is required');
+    return safeUser(await this.repository.removeEmployeeRoles(userId,{version:body.version},actor,user));
   }
   async linkEmployee(body = {}, directory = this.employeeDirectory,actor='administrator',user) {
     assertFields(body,['userId','employeeCode']);
@@ -180,7 +226,17 @@ class AuthService {
     const session = await this.repository.getSession(tokenHash);
     if (!session || session.revokedAt || new Date(session.expiresAt) <= this.now()) return null;
     const user = await this.repository.getUserById(session.userId);
-    if (!user?.isActive || session.securityStamp !== user.securityStamp || providerOf(user) !== this.authMode) return null;
+    if (!user?.isActive || session.securityStamp !== user.securityStamp
+      || (this.authMode === 'employee-code' ? !isEmployeeProvider(user) : providerOf(user) !== 'password')) return null;
+    if (providerOf(user) === 'pcn-local') {
+      if (!this.matchesLocalEmployee(user)) return null;
+      const latestSession = await this.repository.getSession(tokenHash);
+      if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
+        || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
+      const latestUser = await this.repository.getUserById(latestSession.userId);
+      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesLocalEmployee(latestUser, user.employeeCode)) return null;
+      return sessionPrincipal(latestUser, latestSession, tokenHash);
+    }
     if (this.authMode === 'employee-code' && !skipEmployeeLookup) {
       let code;
       try {code=normalizeEmployeeCode(user.employeeCode);}catch{return null;}

@@ -64,7 +64,7 @@
     }
   }
 
-  async function requireSession(role) {
+  async function requireSession(role, { requireRole = false } = {}) {
     const current = await load();
     if (!current.authenticated) {
       redirectToLogin();
@@ -74,7 +74,12 @@
       redirectToLogin(true);
       return null;
     }
-    if (role && !(current.user?.roles || []).some((value) => String(value).toLowerCase() === role.toLowerCase())) throw new Error('Your account does not have access to this page.');
+    const roles = Array.isArray(current.user?.roles) ? current.user.roles : [];
+    if (requireRole && !roles.length) {
+      window.location.assign('/records');
+      return null;
+    }
+    if (role && !roles.some((value) => String(value).toLowerCase() === role.toLowerCase())) throw new Error('Your account does not have access to this page.');
     return current;
   }
 
@@ -84,6 +89,13 @@
     window.location.assign('/login');
   }
 
+  function profilePhoto(value) {
+    if (typeof value !== 'string') return '';
+    const photo = value.trim();
+    const match = /^data:image\/(?:png|jpeg|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$/i.exec(photo);
+    return photo.length <= 100 * 1024 && match && match[1].length % 4 === 0 ? photo : '';
+  }
+
   function mountProfile(user, onLogoutError) {
     const container = document.getElementById('accountMenu');
     if (!container || !user) return;
@@ -91,7 +103,7 @@
     const fullName = String(user.displayName || user.fullName || '').trim();
     const email = String(user.email || user.mailProfile?.email || '').trim();
     const roleNames = {
-      admin: 'Admin', reviewer: 'Reviewer', supplier: 'Supplier',
+      admin: 'Administrator', reviewer: 'Reviewer', supplier: 'Supplier',
       gsc: 'GSC/TET', productionengineering: 'Prod. Eng./TET',
       qa: 'QA/TET', tapbu: 'TaPBU'
     };
@@ -100,10 +112,10 @@
       gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', it: 'IT', other: 'Other'
     };
     const roles = (Array.isArray(user.roles) ? user.roles : []).map(role => roleNames[String(role).toLowerCase()] || String(role));
-    const noPcnRole = user.identityProvider === 'employee-code' && roles.length === 0;
+    const noPcnRole = ['employee-code', 'pcn-local'].includes(user.identityProvider) && roles.length === 0;
     const roleText = roles.join(', ') || 'Not assigned';
     const signingSteps = { approved: 'Approved', checked: 'Checked', prepared: 'Prepared' };
-    const pcnStepText = signingSteps[user.signingStep] || 'No signing assignment';
+    const pcnStepText = roles.includes('Administrator') ? 'All signing steps' : signingSteps[user.signingStep] || 'Not assigned';
     const departmentText = departmentNames[user.department] || 'Not assigned';
     const nameParts = (fullName || username).split(/[\s._-]+/).filter(Boolean);
     const initials = (nameParts.length > 1 ? nameParts[0][0] + nameParts[nameParts.length - 1][0] : (nameParts[0] || 'U').slice(0, 2)).toUpperCase();
@@ -113,9 +125,11 @@
       if (value !== undefined) node.textContent = value;
       return node;
     };
+    const avatars = [];
     const avatar = (className) => {
       const node = element('span', className, initials);
       node.setAttribute('aria-hidden', 'true');
+      avatars.push(node);
       return node;
     };
 
@@ -136,10 +150,17 @@
     const heading = element('div', 'account-panel-heading');
     const headingText = element('div', 'account-panel-heading-copy');
     headingText.append(element('strong', 'account-panel-username', username));
-    headingText.append(element('span', 'account-panel-email', email || 'No email on file'));
-    const signOut = element('button', 'account-sign-out', 'Sign Out');
+    const emailLine = element('span', 'account-panel-email', email || 'No email on file');
+    const positionLine = element('span', 'account-panel-position', user.mailProfile?.jobTitle || '');
+    positionLine.hidden = !positionLine.textContent;
+    const photoStatus = element('span', 'account-photo-status');
+    photoStatus.setAttribute('role', 'status');
+    photoStatus.setAttribute('aria-live', 'polite');
+    photoStatus.hidden = true;
+    headingText.append(positionLine, emailLine, photoStatus);
+    const signOut = element('button', 'account-sign-out', 'Sign out');
     signOut.type = 'button';
-    heading.append(avatar('account-avatar account-avatar-large'), headingText, signOut);
+    heading.append(avatar('account-avatar account-avatar-large'), headingText);
     if (noPcnRole) {
       const warning = element('div', 'account-access-warning');
       warning.id = 'accountAccessWarning';
@@ -159,12 +180,54 @@
       details.append(row);
     };
     addDetail('Employee ID', user.employeeCode || 'Not linked');
-    addDetail('Role', roleText);
-    addDetail('PCN step', pcnStepText);
+    addDetail('PCN role', roleText);
+    addDetail('Signing step', pcnStepText);
     addDetail('Department', departmentText);
     panel.prepend(heading);
-    panel.append(details);
+    const footer = element('div', 'account-panel-footer');
+    footer.append(signOut);
+    panel.append(details, footer);
     container.replaceChildren(trigger, panel);
+
+    const showPhotoUnavailable = () => {
+      photoStatus.textContent = 'Profile photo unavailable';
+      photoStatus.hidden = false;
+    };
+    const setPhoto = (photo) => {
+      if (!photo) return showPhotoUnavailable();
+      photoStatus.hidden = true;
+      avatars.forEach(node => {
+        const image = element('img', 'account-avatar-photo');
+        image.alt = '';
+        image.decoding = 'async';
+        image.addEventListener('error', () => {
+          if (!node.contains(image)) return;
+          node.replaceChildren();
+          node.textContent = initials;
+          showPhotoUnavailable();
+        }, { once: true });
+        image.src = photo;
+        node.replaceChildren(image);
+      });
+    };
+    const savedPhoto = profilePhoto(user.mailProfile?.photo);
+    if (savedPhoto) setPhoto(savedPhoto);
+    else {
+      photoStatus.textContent = 'Loading profile photo…';
+      photoStatus.hidden = false;
+      apiFetch('/api/profile').then(profile => {
+        if (!container.contains(panel)) return;
+        if (profile?.status !== 'available') return showPhotoUnavailable();
+        if (typeof profile.email === 'string' && profile.email) emailLine.textContent = profile.email;
+        if (typeof profile.jobTitle === 'string' && profile.jobTitle) {
+          positionLine.textContent = profile.jobTitle;
+          positionLine.hidden = false;
+        }
+        setPhoto(profilePhoto(profile.photo));
+      }).catch(() => {
+        if (container.contains(panel)) showPhotoUnavailable();
+      });
+    }
 
     const close = (returnFocus = false) => {
       panel.hidden = true;

@@ -16,8 +16,9 @@
       </div>
       <div class="auth-brand-copy">
         <p class="auth-kicker">Product change management</p>
-        <p class="auth-brand-headline">Every change.<br /><span>Clearly connected.</span></p>
-        <p>Create, review and track product change notifications in one place.</p>
+        <p class="auth-brand-headline">PCN<br /><span>Managment</span></p>
+        <p>NSN-000244
+</p>
       </div>
       <div class="auth-brand-footer"><span class="auth-brand-marker" aria-hidden="true"></span> Built for precision and clarity</div>
     </section>
@@ -41,7 +42,7 @@
             <path d="M62 82h4l-1 12h-2z" fill="#fff" />
           </svg>
           <h1 class="employee-entry-title">Enter your Employee ID</h1>
-          <p class="employee-entry-help">Enter your Employee ID to continue to the PCN portal.</p>
+          <p id="employeeEntryHelp" class="employee-entry-help">Enter your 7-digit Employee ID to sign in automatically.</p>
           <label class="visually-hidden" for="employeeCode">Employee ID</label>
           <div class="employee-pin-entry">
             <div class="employee-pin-slots" aria-hidden="true">
@@ -53,7 +54,7 @@
               <span class="employee-pin-slot" id="employeeDigit6"></span>
               <span class="employee-pin-slot" id="employeeDigit7"></span>
             </div>
-            <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeAuthMessage" required />
+            <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeEntryHelp employeeAuthMessage" required />
           </div>
           <p id="employeeAuthMessage" role="alert"></p>
         </div>

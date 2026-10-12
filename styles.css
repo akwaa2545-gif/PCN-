@@ -8211,10 +8211,10 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   display: grid;
   align-items: center;
   justify-items: center;
-  width: 44px;
-  height: 44px;
-  min-height: 44px;
-  padding: 4px;
+  width: 56px;
+  height: 56px;
+  min-height: 56px;
+  padding: 5px;
   border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.1);
@@ -8249,15 +8249,23 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
 .account-avatar {
   display: grid;
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
   place-items: center;
   border-radius: 50%;
   background: #e7ebff;
   color: #242b78;
-  font-size: 12px;
+  font-size: 16px;
   font-weight: 800;
   line-height: 1;
+}
+
+.account-avatar-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .account-panel {
@@ -8265,7 +8273,7 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   top: calc(100% + 10px);
   right: 0;
   z-index: 40;
-  width: min(380px, calc(100vw - 24px));
+  width: min(420px, calc(100vw - 24px));
   overflow: hidden;
   border: 1px solid #dce2ee;
   border-radius: 12px;
@@ -8306,17 +8314,19 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
 .account-access-warning-copy p { margin: 4px 0 0; font-size: 12px; line-height: 1.45; }
 
 .account-panel-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
   align-items: center;
-  gap: 16px;
-  padding: 22px;
-  background: #f6f7fc;
+  gap: 18px;
+  padding: 22px 20px;
+  border-bottom: 1px solid #d5dce2;
+  background: #fff;
 }
 
 .account-avatar-large {
-  width: 60px;
-  height: 60px;
-  font-size: 20px;
+  width: 84px;
+  height: 84px;
+  font-size: 28px;
 }
 
 .account-panel-heading-copy {
@@ -8330,24 +8340,53 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
 .account-panel-username {
   overflow-wrap: anywhere;
   font-size: 18px;
+  line-height: 1.35;
 }
 
 .account-panel-email {
   overflow-wrap: anywhere;
   color: #475467;
   font-size: 13px;
+  line-height: 1.5;
 }
+
+.account-panel-position,
+.account-photo-status {
+  overflow-wrap: anywhere;
+  color: #536575;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.account-photo-status { font-size: 11px; }
+.account-panel-heading-copy [hidden] { display: none; }
+
+.account-panel-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #d5dce2;
+  background: #f5f7f8;
+}
+.account-panel-footer .account-sign-out {
+  width: 100%;
+  margin: 0;
+  padding: 8px 16px;
+  border: 1px solid #b8c7d4;
+  background: #fff;
+  color: #00407f;
+  font: inherit;
+  font-size: 13px;
+}
+.account-panel-footer .account-sign-out:hover { background: #eaf1f6; }
 
 .account-profile-details {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   margin: 0;
-  padding: 18px 22px 20px;
+  padding: 20px;
 }
 
 .account-profile-detail {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
+  grid-template-columns: 108px minmax(0, 1fr);
   gap: 12px;
   font-size: 13px;
   line-height: 1.4;
@@ -8365,7 +8404,7 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
   font-weight: 600;
 }
 
-.pcn-page.is-view-only .topbar-actions [hidden] { display: none !important; }
+.pcn-page .topbar-actions [hidden] { display: none !important; }
 .pcn-page.is-view-only main input:not([type="checkbox"]):disabled,
 .pcn-page.is-view-only main select:disabled,
 .pcn-page.is-view-only main textarea:disabled {
@@ -8412,10 +8451,17 @@ body.pcn-page .pcn-save-overlay:not([hidden]) .pcn-progress-circle::after {
     z-index: 50;
   }
 
+  .topbar-actions .account-menu { position: static; }
   .account-panel {
-    right: 0;
-    left: auto;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100dvh - 180px);
+    overflow-y: auto;
   }
+  .account-panel-heading { grid-template-columns: 72px minmax(0, 1fr); gap: 14px; padding: 18px; }
+  .account-avatar-large { width: 72px; height: 72px; font-size: 24px; }
+  .account-profile-details { padding: 18px; }
 }
 /* Each department owns three distinct mail lists in signing order. */
 #notificationGroups {
@@ -8749,7 +8795,7 @@ body.pcn-page .account-panel {
   box-shadow: 0 16px 38px rgba(11, 31, 65, 0.2);
 }
 body.admin-page .account-panel-heading,
-body.pcn-page .account-panel-heading { background: #f2f7fb; }
+body.pcn-page .account-panel-heading { background: #fff; }
 body.admin-page .account-avatar,
 body.pcn-page .account-avatar { background: #d9e9f4; color: var(--portal-navy); }
 body.admin-page .account-profile-label,
@@ -9034,9 +9080,7 @@ body.pcn-page .summary-panel { border-color: var(--portal-line); background: #ff
 body.admin-page .admin-overview > div,
 body.admin-page .mail-routing-summary,
 body.admin-page .mail-routing-summary > div,
-body.admin-page .admin-table-toolbar,
-body.admin-page .account-panel-heading,
-body.pcn-page .account-panel-heading { background: #f3f5f6; }
+body.admin-page .admin-table-toolbar { background: #f3f5f6; }
 body.admin-page .admin-table th {
   background: var(--mes-blue);
   color: #fff;

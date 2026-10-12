@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const sql = require('mssql');
 const { ApiError } = require('./apiError');
-const { assertRecordAccess, isInternal } = require('./workflowAccess');
+const { assertRecordAccess, isInternal, isEmployeeViewer } = require('./workflowAccess');
 const { versionHex } = require('./sqlPcnHydration');
 const { SqlPcnRepository } = require('./sqlPcnRepository');
 const { SqlRevisions } = require('./sqlRevisions');
@@ -46,6 +46,7 @@ class SqlDocuments {
     return result.recordset.map(documentMetadata);
   }
   async save(pcnCode, input, context) {
+    if (isEmployeeViewer(context?.user)) throw new ApiError(403, 'This account has read-only PCN access');
     assertCode(pcnCode);
     const file = validateFile(input);
     let scanStatus = 'pendingScan';
@@ -89,6 +90,7 @@ class SqlDocuments {
     return file;
   }
   async delete(pcnCode, id, context) {
+    if (isEmployeeViewer(context?.user)) throw new ApiError(403, 'This account has read-only PCN access');
     assertCode(pcnCode); assertId(id);
     return this.mutate(pcnCode, context, async (tx, current, attachments) => {
       const result = await tx.request().input('id', sql.UniqueIdentifier, id).input('pcnCode', sql.NVarChar(32), pcnCode)
@@ -99,6 +101,7 @@ class SqlDocuments {
   }
 
   async mutate(pcnCode, context, work, action) {
+    if (isEmployeeViewer(context?.user)) throw new ApiError(403, 'This account has read-only PCN access');
     if (typeof context?.version !== 'string' || !/^[a-fA-F0-9]{16}$/.test(context.version)) {
       throw new ApiError(400, 'The current PCN version is required');
     }

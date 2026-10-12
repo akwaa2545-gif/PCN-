@@ -115,14 +115,26 @@ test('assignment edit requires current version and preserves verified mail only 
   assert.equal(result.version,state.user.version);
   await assert.rejects(service.updateEmployee({userId:state.user.id,...account,mailSelection:null}),{statusCode:400});
   await assert.rejects(service.updateEmployee({userId:state.user.id,...account,version:null}),{statusCode:400});
-  await service.updateEmployee({userId:state.user.id,...account,signingStep:null,mailSelection:null});
-  assert.equal(state.updated.account.email,null);
+  await assert.rejects(service.updateEmployee({userId:state.user.id,...account,signingStep:null,mailSelection:null}),{statusCode:400});
+  await service.updateEmployee({userId:state.user.id,...account,signingStep:null});
+  assert.equal(state.updated.account.email,'person@example.com');
 });
 
 test('directory workflow failure is safe and causes no partial grant',async()=>{
   const {state,service}=fixture();state.mailOutage=true;
   await assert.rejects(service.createEmployee({employeeCode:'001234',roles:['qa'],department:'qaTet',signingStep:'approved',mailSelection:{id:'directory-1',email:'person@example.com'}}),error=>error.statusCode===503&&!error.message.includes('private'));
   assert.equal(state.created,undefined);
+});
+test('every ordinary account provider requires verified work email before saving access',async()=>{
+  for(const identityProvider of ['employee-code','pcn-local','password','retired-windows']) {
+    const {state,service}=fixture();state.user={...state.user,identityProvider};
+    const account={userId:state.user.id,roles:['admin'],department:'it',signingStep:null,isActive:true,version:'0011223344556677'};
+    await assert.rejects(service.updateEmployee(account),{statusCode:400});assert.equal(state.updated,undefined);
+    state.user={...state.user,email:'person@example.com',mailDirectoryId:'mail-id',mailVerifiedAt:'2026-10-12T00:00:00.000Z',
+      mailProfile:{id:'mail-id',email:'person@example.com',displayName:'Verified Person'}};
+    const updated=await service.updateEmployee(account);assert.equal(updated.mailProfile.displayName,'Verified Person');
+    assert.equal(state.updated.account.email,'person@example.com');
+  }
 });
 
 test('password maintenance cannot convert its administrator and lose recovery access', async () => {
