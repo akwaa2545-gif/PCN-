@@ -1,6 +1,6 @@
 # Windows HTTPS deployment and employee-code cutover
 
-Updated: 2026-10-09. Document control and [SQL employee-code-only login](employee-code-authentication.md) are deployed as signed `pcn-test-12-1` from `a5777eb9b92887b29b4f85aeb68614c79fadc294`. Migrations 001–005 were already applied. Exact service identity, HTTPS SQL readiness and read-only trusted HTTPS browser acceptance passed. The former AD / Windows SSO runtime is retired.
+Updated: 2026-10-12. Employee access, read-only Records, PCN-local users and the revised Users UI are deployed as signed `pcn-test-13-1` from `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc`. Migrations 001–006 were already applied before cutover. Exact service identity, HTTPS SQL readiness and read-only trusted HTTPS desktop/mobile browser acceptance passed. The former AD / Windows SSO runtime is retired.
 
 ## Scope and retained components
 
@@ -14,7 +14,7 @@ Browser employee code -> IIS HTTPS :8443 -> Node 127.0.0.1:3000
                                            | read-only employee lookup   -> KEY_Code_DB.dbo.tblEmployee
 ```
 
-Both databases are on the configured server `svr120a`. The source table has 1,935 inspected records, unique non-null `EmpCode` text up to ten characters, names, job title and source department. It has no email/active flag. Source presence plus an explicit active PCN account/provider and manually granted PCN roles govern access. The source remains read-only; no bulk employee import or synchronization is performed.
+Both databases are on the configured server `svr120a`. The source table has 1,935 inspected records, unique non-null `EmpCode` text up to ten characters, names, job title and source department. It has no email/active flag. Source-backed accounts revalidate source presence and active PCN account/session state; PCN-local accounts use PCN account/session state. Assigned roles enable actions; active roleless employee accounts use read-only Records. The source remains read-only; no bulk employee import or synchronization is performed.
 
 The host has Node.js 26.10 and WinSW 2.12.0. The service currently runs as exact `NT AUTHORITY\NetworkService`, with its unique `NT SERVICE\SupplierPCNTest` SID enabled. Its previous process owner, parent, loopback listener and SQL readiness were verified. Changing the application auth mode does not require weakening these service-SID ACLs or giving the shared NetworkService account access to SQL secrets.
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-12-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-13-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -81,6 +81,18 @@ Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 
 The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
 ## Current acceptance and recovery
+
+### Current deployment — pcn-test-13-1
+
+[Actions 38205693461](https://github.com/akwaa2545-gif/PCN-/actions/runs/38205693461) passed 600 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-13-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-13-1), commit `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc`, was installed at observed host time `2026-10-12T05:12:29.8604841Z`. Its ZIP SHA-256 is `eefb60ae20ef6f10bf561833504246d9de4fa34e7b808151adae1c8751129dc9`. The installed consumer and pinned public key retain the hashes recorded below; no trust-anchor, private configuration or IIS changes were made.
+
+Independent verification found Node PID 19360, exact `pcn-test-13-1\server.js`, WinSW parent PID 6300, `NT AUTHORITY\NETWORK SERVICE` ownership and one listener at `127.0.0.1:3000`. Trusted HTTPS returned readiness 200 / employee-code mode; unrelated HTTP :80 returned 200. Migration 006 had already been applied during the separate startup repair, preserving the existing ten users, three PCNs, six role grants and one master-data row; the deployment ran no DDL, account import or bootstrap. Fourteen public assets matched the release after line-ending/BOM normalization; four private source/configuration paths returned 404.
+
+Trusted HTTPS browser acceptance passed nine groups and seventeen read-only API responses, all 200: seven-digit automatic administrator login, Portal records, split Users tables, filters, yellow Pending access marker, Add role/Create user popup fit at desktop and 390-pixel widths, canceled dialogs, missing-mail Save disabled, read-only Mail Routing, existing document panels and logout. Only login/logout POSTs were allowed. Notification endpoints were blocked locally before server contact; no business writes or test emails were performed. There were no page errors, unexpected console errors or failed responses; the one deliberate notification block produced an expected browser resource error. Coverage remains separate local evidence: 600 tests, 91.63% lines, 90.81% branches and 93.80% functions. The attachment scanner remains disabled; pending files remain quarantined.
+
+The SYSTEM polling task was resumed enabled / Ready / result 0 after acceptance. A repeat consumer invocation returned `already_current` for `pcn-test-13-1`, preserving Node PID 19360, exact release state and trust anchors.
+
+### Historical document-control deployment — pcn-test-12-1
 
 [Actions 37891473630](https://github.com/akwaa2545-gif/PCN-/actions/runs/37891473630) passed 444 unit/API tests, 120 existing browser checks and the high/critical dependency audit gate. Signed `pcn-test-12-1` was installed at observed host time `2026-10-09T06:11:55.8831811Z`. The protected consumer was independently upgraded only for its public asset allowlist, with a protected backup and ACL retained. Its SHA-256 is `9D245F204BFF2F533A1A14DA27146022BC0F9BFD31F2847515E9E53472A19DD2`; pinned public-key SHA-256 stayed `04D893A9C5021114C816C9DA5BDD5D7A80EA6E061C6573CACB9196CC38EA3306`.
 

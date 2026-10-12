@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-10-09. Signed `pcn-test-12-1` is deployed with document control and [SQL employee-code-only authentication](employee-code-authentication.md). Migrations 001–005 were already applied. The protected polling consumer's public asset allowlist was independently upgraded, retaining its backup, ACL and pinned public key. The task is enabled / Ready / result 0. HTTPS SQL readiness, exact service identity and read-only trusted HTTPS browser acceptance passed.
+Updated: 2026-10-12. Signed `pcn-test-13-1` is deployed with employee access, read-only Records, PCN-local users and the revised Users UI. Migrations 001–006 were already applied. The installed protected polling consumer, private configuration and pinned public key were retained. HTTPS SQL readiness, exact service identity and read-only trusted HTTPS desktop/mobile browser acceptance passed.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -96,7 +96,17 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current deployment — pcn-test-12-1
+### Current deployment — pcn-test-13-1
+
+[Actions 38205693461](https://github.com/akwaa2545-gif/PCN-/actions/runs/38205693461) passed 600 unit/API tests, the isolated browser suite and the high/critical dependency audit gate. Signed [pcn-test-13-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-13-1) from main `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc` was installed at observed host time `2026-10-12T05:12:29.8604841Z`, after host-side validate-only signature/archive/path checks. Archive SHA-256: `eefb60ae20ef6f10bf561833504246d9de4fa34e7b808151adae1c8751129dc9`.
+
+The existing consumer/public-key hashes below were preserved. Independent checks confirmed Node PID 19360, WinSW parent PID 6300, the exact new release command, NetworkService ownership and exclusive loopback port 3000. Trusted HTTPS readiness/authentication and unrelated HTTP :80 returned 200. Fourteen public assets matched after line-ending/BOM normalization; private source/configuration paths returned 404. Migration 006 was already applied during the separately recorded startup repair; deployment ran no migrations, bootstrap or account import.
+
+Live trusted HTTPS acceptance passed nine groups and seventeen read-only API responses, all 200. It covered automatic administrator login/logout, Portal records, pending/assigned Users filters and yellow indicator, Add role/Create user desktop/mobile dialogs, disabled Save without selected mail, read-only Mail Routing and existing document controls. Only login/logout writes were permitted, all notification endpoints were blocked locally, and no business writes or test emails occurred. There were no page errors, unexpected console errors or failed responses; the deliberate notification block generated one expected resource error. Local coverage is separate: 600 tests, 91.63% lines / 90.81% branches / 93.80% functions. Live account creation/role removal, record saves, scanning, signing and notification delivery were not exercised. The scanner remains disabled and pending files quarantined.
+
+The SYSTEM polling task is resumed enabled / Ready / result 0. A repeat consumer poll returned `already_current` for `pcn-test-13-1`, preserving Node PID 19360 and the exact release/commit state.
+
+### Historical document-control deployment — pcn-test-12-1
 
 [Actions 37891473630](https://github.com/akwaa2545-gif/PCN-/actions/runs/37891473630) succeeded with 444 unit/API tests, 120 existing browser checks and the high/critical dependency audit gate. Signed [pcn-test-12-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-12-1) from main `a5777eb9b92887b29b4f85aeb68614c79fadc294` was installed at observed host time `2026-10-09T06:11:55.8831811Z`.
 

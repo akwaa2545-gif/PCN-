@@ -10,6 +10,8 @@
 
 **Spec:** The accepted design and contracts below implement the user's 2026-10-12 request and employee-code-only sign-in choice; existing baseline: [employee-code authentication](employee-code-authentication.md).
 
+**Deployment:** The subsequent explicit deployment request published and activated signed `pcn-test-13-1`, commit `ae9e86bf4365d8f96b7fff65d0eb58eaaa672dbc`, on 2026-10-12. Migration 006 was already applied during the separate startup repair. CI passed 600 tests and the isolated browser suite; trusted HTTPS desktop/mobile Users acceptance passed without account/role writes or test email. See the [deployment evidence](windows-test-deployment.md#current-acceptance-and-recovery).
+
 ## Global Constraints
 
 - Users header has separate **Add role** and **Create user** actions. Add role searches existing employees/accounts, updating a PCN account or provisioning a source employee through the existing assignment flow. Create user manually enters employee ID/full name and includes role selection in the same popup.
