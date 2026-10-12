@@ -88,6 +88,7 @@
       'usersSearchFilter', 'usersRoleFilter', 'usersDepartmentFilter', 'usersStatusFilter', 'usersClearFiltersButton', 'usersFilterSummary'];
     const els = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
     let state = { authorized: false, loaded: false, configured: false, busy: false, manual: false, users: [], selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
+    let viewGeneration = 0;
     let timer;
     let controller;
     let mailTimer;
@@ -105,6 +106,7 @@
     };
     function openUserDialog(focusTarget, opener) {
       if (!state.authorized || state.busy || window.location.hash !== '#users') return;
+      viewGeneration++;
       if (!els.employeeUserDialog.open) {
         dialogOpener = opener || document.activeElement || els.usersCreateButton;
         dialogRowAction = dialogOpener.getAttribute?.('data-user-id') ? {
@@ -515,6 +517,41 @@
       } catch (error) { message(error.message); }
       finally { state = { ...state, busy: false }; updateControls(); renderUsers(); }
     }
+    function canAutoRefresh() {
+      return state.authorized && state.loaded && !state.busy && window.location.hash === '#users'
+        && !els.employeeUserDialog.open && !document.querySelector?.('dialog[open]');
+    }
+    async function refreshUsersQuietly({ isCurrent = () => true } = {}) {
+      if (!canAutoRefresh()) return;
+      const before = state;
+      const generation = viewGeneration;
+      try {
+        const users = await window.PCN_SESSION.fetch('/api/admin/users');
+        if (!Array.isArray(users)) throw new Error('The user list returned an invalid response.');
+        if (!isCurrent() || !canAutoRefresh() || before !== state || generation !== viewGeneration) return;
+        if (JSON.stringify(users) === JSON.stringify(state.users)) return;
+        const focused = document.activeElement;
+        const userId = focused?.getAttribute?.('data-user-id');
+        const action = focused?.getAttribute?.('data-user-action');
+        const scroll = [window.scrollX, window.scrollY];
+        state = { ...state, users };
+        renderUsers();
+        if (userId) {
+          const buttons = [...els.adminUsersRows.querySelectorAll('[data-user-id]'), ...els.pendingUsersRows.querySelectorAll('[data-user-id]')];
+          const replacement = buttons.find(button => button.getAttribute('data-user-id') === userId && button.getAttribute('data-user-action') === action)
+            || buttons.find(button => button.getAttribute('data-user-id') === userId && button.getAttribute('data-user-action') === 'edit');
+          (replacement || els.usersSearchFilter).focus({ preventScroll: true });
+        }
+        if (scroll.every(Number.isFinite)) window.scrollTo?.(...scroll);
+      } catch (error) {
+        if (error.status === 401 || error.status === 403) {
+          state = { ...state, authorized: false, users: [], selected: null, editUser: null, linkUser: null, mail: null };
+          closeUserDialog(); updateControls(); renderUsers();
+          message('Access unavailable. Reload to check your current permissions.', true);
+        }
+        throw error;
+      }
+    }
     els.employeeSearch.addEventListener('input', () => {
       if (state.busy || state.manual || state.editUser) return;
       cancelLookup(); hideResults();
@@ -651,6 +688,7 @@
       }
     });
     window.addEventListener('hashchange', () => {
+      viewGeneration++;
       cancelLookup(); hideResults();
       cancelMailLookup();
       if (window.location.hash !== '#users') closeUserDialog();
@@ -663,6 +701,7 @@
       if (!session) return;
       state = { ...state, authorized: true };
       await loadUsers();
+      window.PCN_AUTO_REFRESH?.start({ refresh: refreshUsersQuietly, canRefresh: canAutoRefresh, intervalMs: 5000 });
     } catch (error) { message(error.message); }
   }
 })();

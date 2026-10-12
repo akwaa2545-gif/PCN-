@@ -15,12 +15,13 @@ function fixture() {
   const calls = [];
   const notices = [];
   const elements = {};
+  let modalOpen = false;
   const document = {
     activeElement:null,
     addEventListener() {},
     querySelectorAll() { return controls; },
-    getElementById(id) { return elements[id] || {querySelectorAll:()=>controls}; },
-    querySelector() { return {querySelectorAll:()=>controls}; }
+    getElementById(id) { return elements[id] || {querySelectorAll:()=>controls,setAttribute(){}}; },
+    querySelector(selector) { return selector === 'dialog[open]' ? modalOpen ? {} : null : {querySelectorAll:()=>controls}; }
   };
   const element = () => {
     const listeners = new Map();
@@ -37,6 +38,8 @@ function fixture() {
   elements.pcnUnsavedDialog = dialog;
   elements.pcnKeepEditing = element();
   elements.pcnLeaveWithoutSaving = element();
+  elements.appNotice = {hidden:false};
+  elements.appNoticeTitle = {textContent:''};
   const window = {
     location:{href:'https://pcn.example.test/PCN-2026-0001',origin:'https://pcn.example.test',pathname:'/PCN-2026-0001',search:''},
     confirm() {throw new Error('In-page navigation must use the custom PCN dialog');},
@@ -44,15 +47,154 @@ function fixture() {
   };
   const source = fs.readFileSync(path.join(__dirname,'..','app.js'),'utf8').replace(/\}\)\(\);\s*$/, `
     cacheElements();
-    showNotice = (...args) => window.TEST_NOTICES.push(args);
-    window.TEST_UNSAVED = {state,getSubmissionSnapshot,hasUnsavedChanges,markSubmissionSaved,confirmDiscardChanges,guardBeforeUnload,guardPageNavigation,advanceWorkflowStep,syncSavedRecordKeepingEdits};})();`);
+    showNotice = (...args) => {window.TEST_NOTICES.push(args);els.appNotice.hidden=false;els.appNoticeTitle.textContent=args[1];};
+    window.TEST_UNSAVED = {state,getSubmissionSnapshot,hasUnsavedChanges,markSubmissionSaved,confirmDiscardChanges,guardBeforeUnload,guardPageNavigation,advanceWorkflowStep,syncSavedRecordKeepingEdits,pollSavedRecord,reloadRemoteRecord,handleRemoteRefreshError,
+      setupPoll(fetch,apply,notice) { apiFetch=fetch;applyRemoteRecord=apply;showRemoteChange=notice; },
+      setPollBusy(value) { documentMutationBusy=value; },advanceLoadGeneration() { documentLoadGeneration++; }};})();`);
   window.TEST_NOTICES = notices;
   vm.runInNewContext(source,{window,document,URL,URLSearchParams});
   const app = window.TEST_UNSAVED;
   app.state.apiReady = true;
   app.markSubmissionSaved();
-  return {app,controls,prompts,calls,notices,dialog,document,choose(value) {elements[value?'pcnLeaveWithoutSaving':'pcnKeepEditing'].click();}};
+  return {app,controls,prompts,calls,notices,dialog,document,elements,setModalOpen(value) {modalOpen=value;},choose(value) {elements[value?'pcnLeaveWithoutSaving':'pcnKeepEditing'].click();}};
 }
+
+test('automatic record refresh applies a clean remote change and leaves a dirty baseline intact',async()=>{
+  const {app,controls}=fixture();
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};
+  app.state.savedRecord={...app.state.activeRequest};
+  let applied=0, warned=0;
+  app.setupPoll(async()=>({id:'PCN-2026-0001',version:'2'}),()=>applied++,()=>warned++);
+  await app.pollSavedRecord();
+  assert.equal(applied,1);
+  controls[0].value='Unsaved edit';
+  await app.pollSavedRecord();
+  assert.equal(applied,1);
+  assert.equal(warned,1);
+  assert.equal(app.state.savedRecord.version,'1');
+  assert.equal(controls[0].value,'Unsaved edit');
+});
+
+test('late user edits and manual saves make an in-flight automatic refresh safe',async()=>{
+  for(const change of ['edit','save','busy','hidden']) {
+    const {app,controls}=fixture();
+    app.state.activeRequest={id:'PCN-2026-0001',version:'1'};
+    app.state.savedRecord={...app.state.activeRequest};
+    let resolve,applied=0;
+    app.setupPoll(()=>new Promise(done=>resolve=done),()=>applied++,()=>{});
+    let current=true;
+    const polling=app.pollSavedRecord({isCurrent:()=>current});
+    if(change==='edit')controls[0].value='Typed while loading';
+    if(change==='save')app.state.savedRecord={...app.state.savedRecord,version:'3'};
+    if(change==='busy')app.setPollBusy(true);
+    if(change==='hidden')current=false;
+    resolve({id:'PCN-2026-0001',version:'2'});
+    await polling;
+    assert.equal(applied,0,change);
+  }
+});
+
+test('automatic refresh skips unsaved new records and unchanged payloads',async()=>{
+  const {app}=fixture();let requests=0,applied=0;
+  app.setupPoll(async()=>{requests++;return {id:'PCN-2026-0001',version:'1'};},()=>applied++,()=>{});
+  app.state.activeRequest={};await app.pollSavedRecord();assert.equal(requests,0);
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+  await app.pollSavedRecord();assert.equal(requests,1);assert.equal(applied,0);
+});
+
+test('document metadata changes refresh even when the form version stays the same',async()=>{
+  const {app}=fixture();let applied=0;
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1',documents:[]};
+  app.state.savedRecord={...app.state.activeRequest};
+  app.setupPoll(async()=>({...app.state.activeRequest,documents:[{name:'Latest attachment'}]}),()=>applied++,()=>{});
+  await app.pollSavedRecord();assert.equal(applied,1);
+});
+
+test('stale automatic refresh rejections do not report access loss for a newer record or lifecycle',async()=>{
+  for(const change of ['record','generation','baseline','hidden']) {
+    const {app}=fixture();let reject;
+    app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+    app.setupPoll(()=>new Promise((resolve,fail)=>reject=fail),()=>{},()=>{});
+    let current=true;
+    const pending=app.pollSavedRecord({isCurrent:()=>current});
+    if(change==='record')app.state.activeRequest={id:'PCN-2026-0002',version:'1'};
+    if(change==='generation')app.advanceLoadGeneration();
+    if(change==='baseline')app.state.savedRecord={...app.state.savedRecord,version:'2'};
+    if(change==='hidden')current=false;
+    reject(Object.assign(new Error('Old record unavailable'),{status:404}));
+    await pending;
+    assert.equal(app.state.apiReady,true,change);
+  }
+});
+
+test('current automatic refresh access revocation still reaches the existing error handler',async()=>{
+  const {app}=fixture();const denied=Object.assign(new Error('Forbidden'),{status:403});
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+  app.setupPoll(async()=>{throw denied;},()=>{},()=>{});
+  await assert.rejects(app.pollSavedRecord(),error=>error===denied);
+});
+
+test('stale explicit reload rejection leaves the newer record accessible',async()=>{
+  for(const change of ['record','generation','baseline','hidden']) {
+    const {app,notices}=fixture();let reject;
+    app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+    app.setupPoll(()=>new Promise((resolve,fail)=>reject=fail),()=>{},()=>{});
+    let current=true;
+    const pending=app.reloadRemoteRecord({isCurrent:()=>current});
+    await Promise.resolve();
+    if(change==='record')app.state.activeRequest={id:'PCN-2026-0002',version:'1'};
+    if(change==='generation')app.advanceLoadGeneration();
+    if(change==='baseline')app.state.savedRecord={...app.state.savedRecord,version:'2'};
+    if(change==='hidden')current=false;
+    reject(Object.assign(new Error('Old record unavailable'),{status:404}));
+    await pending;
+    assert.equal(app.state.apiReady,true,change);
+    assert.equal(notices.length,0,change);
+  }
+});
+
+test('current explicit reload revocation disables the inaccessible record',async()=>{
+  const {app,notices}=fixture();
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+  app.setupPoll(async()=>{throw Object.assign(new Error('Forbidden'),{status:403});},()=>{},()=>{});
+  await app.reloadRemoteRecord();
+  assert.equal(app.state.apiReady,false);
+  assert.equal(notices[0][1],'PCN unavailable');
+});
+
+test('successful polling clears its paused notice without hiding a newer unrelated notice',async()=>{
+  const {app,elements}=fixture();
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+  app.setupPoll(async()=>({...app.state.savedRecord}),()=>{},()=>{});
+  app.handleRemoteRefreshError(new Error('Temporarily offline'));
+  assert.equal(elements.appNoticeTitle.textContent,'Updates paused');
+  assert.equal(elements.appNotice.hidden,false);
+  await app.pollSavedRecord();
+  assert.equal(elements.appNotice.hidden,true);
+  app.handleRemoteRefreshError(new Error('Temporarily offline'));
+  elements.appNoticeTitle.textContent='Save failed';
+  await app.pollSavedRecord();
+  assert.equal(elements.appNotice.hidden,false);
+  assert.equal(elements.appNoticeTitle.textContent,'Save failed');
+});
+
+test('document workspace dialogs block both polling starts and in-flight record replacement',async()=>{
+  const {app,setModalOpen}=fixture();let requests=0,applied=0,resolve;
+  app.state.activeRequest={id:'PCN-2026-0001',version:'1'};app.state.savedRecord={...app.state.activeRequest};
+  app.setupPoll(()=>{requests++;return new Promise(done=>resolve=done);},()=>applied++,()=>{});
+  setModalOpen(true);
+  const blocked=app.pollSavedRecord();
+  if (resolve) resolve({...app.state.savedRecord});
+  await blocked;
+  assert.equal(requests,0,'an open upload dialog must preserve the record version');
+  setModalOpen(false);
+  const pending=app.pollSavedRecord();
+  assert.equal(requests,1);
+  setModalOpen(true);
+  resolve({id:'PCN-2026-0001',version:'2'});
+  await pending;
+  assert.equal(applied,0,'a dialog opened during the fetch must keep its version identity');
+});
 
 function unloadEvent() {
   return {defaultPrevented:false,preventDefault() {this.defaultPrevented=true;}};

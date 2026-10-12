@@ -19,6 +19,7 @@ async function recordsPage(session, result = []) {
   const requests = [];
   const redirects = [];
   const profiles = [];
+  let automatic;
   let init;
   const document = {
     addEventListener(name, callback) { if (name === 'DOMContentLoaded') init = callback; },
@@ -26,6 +27,7 @@ async function recordsPage(session, result = []) {
     createElement: element
   };
   const window = {
+    PCN_AUTO_REFRESH: {start(options) {automatic=options;}},
     location: { assign: (url) => redirects.push(url) },
     PCN_SESSION: {
       require: async () => {
@@ -36,14 +38,38 @@ async function recordsPage(session, result = []) {
       fetch: async (url) => {
         requests.push(url);
         if (result instanceof Error) throw result;
-        return result;
+        return typeof result === 'function' ? result() : result;
       }
     }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'records.js'), 'utf8'), { document, window });
   await init();
-  return { elements, requests, redirects, profiles };
+  return { elements, requests, redirects, profiles, automatic };
 }
+
+test('automatic Records refresh preserves search and unchanged row identity, replacing only changed results',async()=>{
+  let data=[{id:'PCN-2026-0001',supplierName:'Acme'}];
+  const page=await recordsPage({user:{identityProvider:'employee-code',employeeCode:'EMP001',roles:[]}},()=>data);
+  const search=page.elements.get('recordsSearch');search.value='acme';search.events.input();
+  const row=page.elements.get('recordsRows').children[0];
+  await page.automatic.refresh();assert.equal(page.elements.get('recordsRows').children[0],row);
+  data=[...data,{id:'PCN-2026-0002',supplierName:'Other'}];
+  await page.automatic.refresh();assert.equal(search.value,'acme');assert.equal(page.elements.get('recordsCount').textContent,'1');
+  assert.equal(page.automatic.intervalMs,5000);
+});
+
+test('lost Records access clears visible stale records and stops subsequent polling',async()=>{
+  let revoked=false;
+  const page=await recordsPage({user:{identityProvider:'employee-code',employeeCode:'EMP001',roles:[]}},()=>{
+    if(revoked)throw Object.assign(new Error('Forbidden'),{status:403});
+    return [{id:'PCN-2026-0001',supplierName:'Acme'}];
+  });
+  revoked=true;
+  await assert.rejects(page.automatic.refresh(),{status:403});
+  assert.equal(page.elements.get('recordsRows').children.length,0);
+  assert.equal(page.elements.get('recordsWorkspace').hidden,true);
+  assert.equal(page.automatic.canRefresh(),false);
+});
 
 test('roleless employee can list records and open read-only details', async () => {
   const page = await recordsPage({ user: { identityProvider: 'employee-code', employeeCode: 'EMP001', roles: [] } }, [

@@ -26,6 +26,8 @@
   const directoryLookupTimers = new WeakMap();
   const directoryLookupControllers = new WeakMap();
   const directorySelections = new WeakMap();
+  let refreshGeneration = 0;
+  let autoRefreshBlocked = false;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -117,10 +119,80 @@
       initializeAdminControls();
       if (isAdmin()) refreshNotificationHealth();
       await loadPcns();
+      window.PCN_AUTO_REFRESH?.start({ refresh: refreshQuietly, canRefresh: canAutoRefresh, intervalMs: 5000 });
     } catch (error) {
       stopBusy();
       showAdminNotice("error", "Access unavailable", error.message);
     }
+  }
+
+  function canAutoRefresh() {
+    return Boolean(state.user) && !autoRefreshBlocked && !state.isLoading && !isAnyBusy()
+      && !document.querySelector('dialog[open]') && els.adminRemoveDialog?.hidden !== false
+      && (state.view === 'pcns' || (state.view === 'mail' && isAdmin()
+        && !state.hasMailChanges && !state.recipientTargetKey && !els.notificationRecipientDialog?.open));
+  }
+
+  async function refreshQuietly({ isCurrent = () => true } = {}) {
+    if (!canAutoRefresh()) return;
+    const generation = refreshGeneration;
+    const view = state.view;
+    const selectedId = state.selected?.id;
+    const stillCurrent = () => isCurrent() && canAutoRefresh() && generation === refreshGeneration
+      && view === state.view && selectedId === state.selected?.id;
+    try {
+      if (view === 'mail') {
+        const settings = await apiFetch('/api/notification-settings');
+        if (!stillCurrent() || JSON.stringify(settings) === JSON.stringify(state.notificationSettings)) return;
+        state.notificationSettings = settings;
+        preservePortalPosition(renderNotificationSettings);
+        return;
+      }
+      const pcns = await apiFetch('/api/pcns');
+      if (!Array.isArray(pcns)) throw new Error('The record list returned an invalid response.');
+      if (!stillCurrent()) return;
+      const selected = selectedId ? pcns.find(record => record.id === selectedId) || null : null;
+      const progress = selected ? await apiFetch(`/api/pcns/${encodeURIComponent(selected.id)}/progress`) : null;
+      if (!stillCurrent()) return;
+      if (JSON.stringify(pcns) === JSON.stringify(state.pcns) && JSON.stringify(progress) === JSON.stringify(state.progress)) return;
+      state.pcns = pcns;
+      state.selected = selected;
+      state.progress = progress;
+      preservePortalPosition(() => render({ routing: false }));
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) {
+        autoRefreshBlocked = true;
+        refreshGeneration++;
+        state.pcns = []; state.selected = null; state.progress = null;
+        state.notificationSettings = { schemaVersion: 2, groups: [], legacyGroups: [] };
+        state.mailDraftRows = null; state.hasMailChanges = false;
+        state.message = 'Access unavailable. Reload to check your current permissions.';
+        state.routingMessage = state.message;
+        render();
+      }
+      throw error;
+    }
+  }
+
+  function preservePortalPosition(update) {
+    const active = document.activeElement;
+    const row = active?.closest?.('[data-pcn-id]');
+    const position = row ? [row.dataset.pcnId, [...row.querySelectorAll('a, button')].indexOf(active)] : null;
+    const card = active?.closest?.('[data-notification-group]');
+    const routingPosition = card ? [card.dataset.notificationGroup, [...card.querySelectorAll('button, input')].indexOf(active)] : null;
+    const scroll = [window.scrollX, window.scrollY];
+    const status = els.adminStatusSelect?.value;
+    update();
+    if (active === els.adminStatusSelect && status && state.selected) els.adminStatusSelect.value = status;
+    if (position) {
+      const replacement = [...els.adminPcnRows.querySelectorAll('[data-pcn-id]')].find(node => node.dataset.pcnId === position[0]);
+      (position[1] < 0 ? replacement : replacement?.querySelectorAll('a, button')[position[1]])?.focus({ preventScroll: true });
+      if (!replacement) els.adminSearchInput?.focus({ preventScroll: true });
+    } else if (routingPosition) {
+      const replacement = [...els.notificationGroups.querySelectorAll('[data-notification-group]')].find(node => node.dataset.notificationGroup === routingPosition[0]);
+      replacement?.querySelectorAll('button, input')[routingPosition[1]]?.focus({ preventScroll: true });
+    } else if (active?.isConnected) active.focus?.({ preventScroll: true });
+    if (scroll.every(Number.isFinite)) window.scrollTo?.(...scroll);
   }
 
   function initializeAdminControls() {
@@ -171,18 +243,12 @@
   }
 
   async function refreshManagedRecipients() {
+    refreshGeneration++;
     if (!isAdmin()) return;
     try {
       const settings = await apiFetch('/api/notification-settings');
-      if (!state.hasMailChanges) state.notificationSettings = settings;
-      else {
-        const fresh = new Map(settings.groups.map((group) => [group.key, group]));
-        state.notificationSettings = { ...state.notificationSettings, routingVersion: settings.routingVersion,
-          groups: state.notificationSettings.groups.map((group) => ({ ...group,
-            automaticRecipients: fresh.get(group.key)?.automaticRecipients || [],
-            effectiveEmails: fresh.get(group.key)?.effectiveEmails || '',
-            effectiveRecipients: fresh.get(group.key)?.effectiveRecipients || [] })) };
-      }
+      if (state.hasMailChanges || state.recipientTargetKey) return;
+      state.notificationSettings = settings;
       renderNotificationSettings();
     } catch (error) { state.routingMessage = `User access saved; mail routing could not refresh: ${error.message}`; render(); }
   }
@@ -432,6 +498,7 @@
       return;
     }
 
+    refreshGeneration++;
     state.pendingRemoveRecord = record;
     els.adminRemoveCode.textContent = record.id;
     els.adminRemoveMessage.textContent = `${record.supplierName || "This supplier"} / ${record.materialName || "No material name"} will be removed from PCN records.`;
@@ -490,7 +557,7 @@
     }
   }
 
-  function render() {
+  function render({ routing = true } = {}) {
     renderAdminView();
     renderLoadingState();
     renderOverview();
@@ -515,6 +582,7 @@
 
     visiblePcns.forEach((record) => {
       const row = document.createElement("tr");
+      row.dataset.pcnId = record.id;
       row.className = state.selected && state.selected.id === record.id ? "is-selected" : "";
       row.tabIndex = 0;
       row.setAttribute("aria-selected", state.selected && state.selected.id === record.id ? "true" : "false");
@@ -568,7 +636,7 @@
     els.adminDetailPreview.textContent = state.selected ? JSON.stringify(toDetailPayload(state.selected), null, 2) : "Select a PCN row to view details.";
     renderProgress();
     renderStatusControl();
-    if (isAdmin()) {
+    if (isAdmin() && routing) {
       renderNotificationSettings();
       renderWebhookSettings();
     }
@@ -828,6 +896,7 @@
 
   function openRecipientDialog(group) {
     if (isAnyBusy()) return;
+    refreshGeneration++;
     state.recipientTargetKey = group.key;
     els.notificationRecipientTitle.textContent = recipientTargetLabel(group);
     els.notificationRecipientEditor.dataset.notificationGroup = group.key;
@@ -1591,6 +1660,7 @@
   }
 
   function startBusy(action, loadingText, shouldRender = true) {
+    refreshGeneration++;
     state.busyAction = action;
     state.loadingText = loadingText;
     state.isLoading = true;
@@ -1748,6 +1818,7 @@
   }
 
   function setAdminView(view) {
+    refreshGeneration++;
     view = permittedView(view);
     const nextHash = view === "mail" ? "#mail-routing" : view === "users" ? "#users" : "#records";
 
@@ -1761,6 +1832,7 @@
   }
 
   function syncViewFromHash() {
+    refreshGeneration++;
     const nextView = permittedView(getViewFromHash());
 
     if (state.view === nextView) {

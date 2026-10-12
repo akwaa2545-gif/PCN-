@@ -8,6 +8,9 @@
     const search = document.getElementById('recordsSearch');
     const refresh = document.getElementById('recordsRefreshButton');
     let records = [];
+    let loading = false;
+    let accessible = true;
+    let fingerprint;
 
     const render = () => {
       const query = search.value.trim().toLowerCase();
@@ -45,18 +48,39 @@
       });
     };
 
-    const load = async () => {
+    const load = async ({quiet = false,isCurrent = () => true} = {}) => {
+      if (loading || !accessible) return;
+      loading = true;
       refresh.disabled = true;
-      message.textContent = 'Loading records...';
+      if (!quiet) message.textContent = 'Loading records...';
       try {
         const result = await window.PCN_SESSION.fetch('/api/pcns');
+        if (!isCurrent()) return;
         if (!Array.isArray(result)) throw new Error('The records list could not be loaded.');
-        records = result;
-        render();
+        const nextFingerprint = JSON.stringify(result);
+        if (fingerprint !== nextFingerprint) {
+          const focusedId = document.activeElement?.closest?.('a')?.getAttribute('href');
+          const scroll = {x:window.scrollX,y:window.scrollY};
+          records = result;
+          fingerprint = nextFingerprint;
+          render();
+          if (focusedId) Array.from(rows.querySelectorAll('a')).find(link => link.getAttribute('href') === focusedId)?.focus({preventScroll:true});
+          window.scrollTo?.(scroll.x,scroll.y);
+        }
         message.textContent = `${records.length} PCN record${records.length === 1 ? '' : 's'} available.`;
       } catch (error) {
+        if (!isCurrent()) return;
+        if ([401,403].includes(error.status)) {
+          accessible = false;
+          records = [];fingerprint = undefined;rows.replaceChildren();count.textContent = '0';
+          document.getElementById('recordsWorkspace').hidden = true;
+          const gateError = document.getElementById('recordsGateError');
+          gateError.textContent = 'Your access has changed. Reload the page to continue.';gateError.hidden = false;
+        }
         message.textContent = error.message;
+        if (quiet) throw error;
       } finally {
+        loading = false;
         refresh.disabled = false;
       }
     };
@@ -76,8 +100,10 @@
       document.getElementById('recordsWorkspace').hidden = false;
       document.getElementById('recordsAccessMessage').textContent = 'You have read-only access. Select a PCN code to view its details. An assigned role enables editing and Portal access.';
       search.addEventListener('input', render);
-      refresh.addEventListener('click', load);
+      refresh.addEventListener('click', () => load());
       await load();
+      window.PCN_AUTO_REFRESH?.start({refresh:context => load({...context,quiet:true}),
+        canRefresh:() => !loading && accessible,intervalMs:5000});
     } catch (error) {
       const gateError = document.getElementById('recordsGateError');
       gateError.textContent = error.message;

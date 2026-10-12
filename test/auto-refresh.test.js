@@ -90,3 +90,40 @@ test('hiding during a request makes its captured result stale even after returni
   resolve(); for (let i = 0; i < 6; i++) await Promise.resolve();
   await h.advance(5000); assert.equal(calls, 2); stop();
 });
+
+test('a request finishing while hidden leaves no timer until the tab returns', async () => {
+  const h = harness(); let calls = 0, resolve;
+  const stop = h.start({ refresh: () => { calls++; return new Promise(done => { resolve = done; }); } });
+  await h.advance(5000); await h.visible(false);
+  resolve(); for (let i = 0; i < 6; i++) await Promise.resolve();
+  await h.advance(60000); assert.equal(calls, 1); assert.equal(h.timers.size, 0);
+  await h.visible(true); assert.equal(calls, 2); stop();
+});
+
+test('repeated failures cap retry delay at thirty seconds', async () => {
+  const h = harness(); let calls = 0;
+  const stop = h.start({ refresh: async () => { calls++; throw new Error('offline'); }, onError() {} });
+  await h.advance(5000); assert.equal(calls, 1);
+  await h.advance(10000); assert.equal(calls, 2);
+  await h.advance(20000); assert.equal(calls, 3);
+  await h.advance(29999); assert.equal(calls, 3);
+  await h.advance(1); assert.equal(calls, 4);
+  await h.advance(30000); assert.equal(calls, 5); stop();
+});
+
+test('browser back-forward cache pauses polling and resumes after pageshow', async () => {
+  const h = harness(); let calls = 0;
+  const stop = h.start({ refresh: async () => { calls++; } });
+  h.listeners.get('pagehide')({ persisted: true });
+  await h.advance(30000); assert.equal(calls, 0);
+  h.listeners.get('pageshow')({ persisted: true });
+  await h.advance(0); assert.equal(calls, 1); stop();
+});
+
+test('invalid scheduler configuration fails before installing a timer', () => {
+  const h = harness();
+  for (const options of [{}, { refresh() {}, intervalMs: 0 }, { refresh() {}, intervalMs: Infinity }, { refresh() {}, canRefresh: false }]) {
+    assert.throws(() => h.start(options), /require/);
+  }
+  assert.equal(h.timers.size, 0);
+});

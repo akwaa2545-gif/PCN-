@@ -88,6 +88,8 @@
   let documentUI;
   let documentMutationBusy = false;
   let documentLoadGeneration = 0;
+  let workflowMutationBusy = false;
+  let remoteChangeNotice;
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -115,6 +117,8 @@
           onSavedFile:loadDocumentMutation,onStartRevision:loadDocumentMutation,focusField:focusDocumentField});
         documentUI.loaded();
       }
+      window.PCN_AUTO_REFRESH?.start({refresh:pollSavedRecord,canRefresh:canPollSavedRecord,intervalMs:5000,
+        onError:handleRemoteRefreshError});
     } catch (error) {
       showNotice("error", "Unable to load portal", error.message);
     } finally {
@@ -743,6 +747,105 @@
       exportPdf:() => documentUI?.exportPdf()};
   }
 
+  function canPollSavedRecord() {
+    return state.apiReady && /^PCN-\d{4}-\d{4}$/.test(String(state.activeRequest.id || '')) &&
+      !documentMutationBusy && !workflowMutationBusy && !discardDialogPending &&
+      !document.querySelector?.('dialog[open]') &&
+      !document.body?.classList.contains('is-saving');
+  }
+
+  async function pollSavedRecord({isCurrent = () => true} = {}) {
+    if (!canPollSavedRecord()) return;
+    const id = state.activeRequest.id;
+    const baseline = JSON.stringify(state.savedRecord);
+    const generation = documentLoadGeneration;
+    const current = () => isRemoteRequestCurrent(id,baseline,generation,isCurrent);
+    let saved;
+    try { saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`); }
+    catch (error) { if (current()) throw error; return; }
+    if (!current()) return;
+    if (!saved || saved.id !== id) throw new Error('The PCN is no longer available.');
+    if (els.appNoticeTitle?.textContent === 'Updates paused') els.appNotice.hidden = true;
+    if (JSON.stringify(saved) === baseline) {
+      if (remoteChangeNotice) remoteChangeNotice.hidden = true;
+      return;
+    }
+    if (hasUnsavedChanges()) { showRemoteChange(); return; }
+    applyRemoteRecord(saved);
+  }
+
+  function isRemoteRequestCurrent(id,baseline,generation,isCurrent) {
+    return isCurrent() && canPollSavedRecord() && state.activeRequest.id === id &&
+      documentLoadGeneration === generation && JSON.stringify(state.savedRecord) === baseline;
+  }
+
+  function applyRemoteRecord(saved) {
+    const focused = document.activeElement;
+    const focusKey = focused?.id;
+    const recoveryKey = focused?.dataset?.recoveryKey;
+    const selection = {start:focused?.selectionStart,end:focused?.selectionEnd,direction:focused?.selectionDirection};
+    const scroll = {x:window.scrollX,y:window.scrollY};
+    state.activeRequest = saved;
+    state.pcns = state.pcns.map(record => record.id === saved.id ? saved : record);
+    loadRequestToForm(saved);
+    renderAll();
+    if (remoteChangeNotice) remoteChangeNotice.hidden = true;
+    const replacement = focused?.isConnected ? focused : focusKey ? document.getElementById(focusKey) :
+      Array.from(document.querySelectorAll('[data-recovery-key]')).find(control => control.dataset.recoveryKey === recoveryKey);
+    replacement?.focus?.({preventScroll:true});
+    if (typeof selection.start === 'number') {
+      try {replacement?.setSelectionRange?.(selection.start,selection.end,selection.direction);} catch (_) { /* Some inputs cannot select text. */ }
+    }
+    window.scrollTo?.(scroll.x,scroll.y);
+  }
+
+  function showRemoteChange() {
+    if (!remoteChangeNotice) {
+      remoteChangeNotice = document.createElement('div');
+      remoteChangeNotice.className = 'app-notice app-notice-warning';
+      remoteChangeNotice.setAttribute('role','status');
+      const message = document.createElement('p');
+      message.textContent = 'This record changed. Reload to view latest changes.';
+      const reload = document.createElement('button');
+      reload.type = 'button';reload.className = 'button button-secondary';reload.textContent = 'Reload latest';
+      reload.addEventListener('click',async () => {
+        reload.disabled = true;
+        try {await reloadRemoteRecord();} finally {reload.disabled = false;}
+      });
+      remoteChangeNotice.append(message,reload);
+      els.appNotice.after(remoteChangeNotice);
+    }
+    remoteChangeNotice.hidden = false;
+  }
+
+  async function reloadRemoteRecord({isCurrent = () => !document.hidden} = {}) {
+    const id = state.activeRequest.id;
+    if (!canPollSavedRecord() || !await confirmDiscardChanges()) return;
+    if (state.activeRequest.id !== id || !canPollSavedRecord()) return;
+    const snapshot = getSubmissionSnapshot();
+    const baseline = JSON.stringify(state.savedRecord);
+    const generation = documentLoadGeneration;
+    const current = () => isRemoteRequestCurrent(id,baseline,generation,isCurrent);
+    try {
+      const saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`);
+      if (!current() || snapshot !== getSubmissionSnapshot()) return;
+      if (saved?.id !== id) throw new Error('The PCN is no longer available.');
+      applyRemoteRecord(saved);
+    } catch (error) {if (current()) handleRemoteRefreshError(error);}
+  }
+
+  function handleRemoteRefreshError(error) {
+    if ([401,403,404].includes(error.status)) {
+      state.apiReady = false;
+      document.getElementById('submissionView')?.setAttribute('hidden','');
+      document.getElementById('queueView')?.setAttribute('hidden','');
+      if (remoteChangeNotice) remoteChangeNotice.hidden = true;
+      showNotice('error','PCN unavailable','Your access to this PCN has changed. Reload the page to continue.');
+      return;
+    }
+    showNotice('warning','Updates paused','Automatic updates are temporarily unavailable. Your edits are kept; updates will retry.');
+  }
+
   async function loadDocumentMutation(result) {
     const beforeId=state.activeRequest.id;
     const beforeVersion=state.activeRequest.version;
@@ -1290,7 +1393,7 @@
   }
 
   async function advanceWorkflowStep(nextStatus) {
-    if (state.viewOnly) return;
+    if (state.viewOnly || workflowMutationBusy) return;
     if (!state.activeRequest.id || !nextStatus) {
       showNotice("warning", "Tracking unavailable", "Save the PCN before marking workflow steps complete.");
       return;
@@ -1302,6 +1405,7 @@
     }
 
     try {
+      workflowMutationBusy = true;
       showNotice("info", "Updating workflow", `Moving PCN to ${titleCase(nextStatus)}.`);
       state.activeRequest = await apiFetch(`/api/pcns/${encodeURIComponent(state.activeRequest.id)}`, {
         method: "PATCH",
@@ -1312,6 +1416,8 @@
       showNotice("success", "Workflow updated", `Current status is ${titleCase(state.activeRequest.status)}.${notificationStatus}`);
     } catch (error) {
       showNotice("error", "Workflow update failed", error.message);
+    } finally {
+      workflowMutationBusy = false;
     }
 
     renderAll();

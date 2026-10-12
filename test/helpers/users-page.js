@@ -11,6 +11,7 @@ async function usersPage(assignedUsers = [], options = {}) {
   const calls = [];
   const confirmations = [];
   const windowEvents = {};
+  let autoRefresh;
   const document = {
     activeElement: null,
     getElementById: element, createElement,
@@ -51,6 +52,7 @@ async function usersPage(assignedUsers = [], options = {}) {
     for (const id of ['employeeSearch', 'employeeCode', 'employeeRole', 'employeeDepartment', 'employeeMailSearch', 'employeeManualCode', 'employeeManualName']) element(id).value = '';
   };
   const window = {
+    PCN_AUTO_REFRESH: { start(options) { autoRefresh = options; return () => {}; } },
     location: { hash: '#users' }, addEventListener(name, handler) { windowEvents[name] = handler; }, confirm: (message) => { confirmations.push(message); return pageOptions.confirm !== false; },
     PCN_SESSION: {
       require: async () => pageOptions.unauthorized ? null : ({ authenticated: true, user: { roles: ['admin'] } }),
@@ -89,7 +91,7 @@ async function usersPage(assignedUsers = [], options = {}) {
     element('usersAddRoleButton').focus();
     element('usersAddRoleButton').events.click();
   }
-  return { firstUserRow() { return element('adminUsersRows').firstElementChild || element('pendingUsersRows').firstElementChild; },
+  return { get autoRefresh() { return autoRefresh; }, firstUserRow() { return element('adminUsersRows').firstElementChild || element('pendingUsersRows').firstElementChild; },
     openManual() { element('usersCreateButton').focus(); element('usersCreateButton').events.click(); }, element, calls, confirmations, select, openCreate, document,
     async changeHash(hash) { window.location.hash = hash; await windowEvents.hashchange(); },
     async runMailTimer() { await [...pendingTimers.values()].at(-1)?.(); } };
