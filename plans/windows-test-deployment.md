@@ -1,6 +1,6 @@
 # Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-12. Signed `pcn-test-15-1` is installed with automatic browser updates on the existing HTTP :8443 origin. CI, host readiness and live browser acceptance passed; the SYSTEM polling task is enabled / Ready / result 0 with a verified no-op repeat. Migrations 001–006 were already applied. Previous HTTP/HTTPS acceptance remains historical evidence below.
+Updated: 2026-10-14. Signed `pcn-test-17-1` is installed with the Portal timeline on the existing HTTP :8443 origin. CI, exact-release identity, SQL readiness and live browser acceptance passed. A repeat consumer returned `already_current` without restarting Node; the SYSTEM task is enabled / Ready / result 0. Migrations 001–006 were already applied. Previous HTTP/HTTPS acceptance remains historical evidence below.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-15-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-17-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -63,7 +63,7 @@ The earlier employee-code rollout completed this sequence. PCNTest has Windows A
 
 ## Internal HTTP conversion
 
-Automatic browser updates are deployed in runtime 15. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15 is installed, live browser acceptance passed and the SYSTEM deployment task is enabled / Ready / result 0.
+Automatic browser updates were introduced in runtime 15 and are retained in runtime 17. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
 
 The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
 
@@ -92,13 +92,13 @@ Retire the pilot trust/binding when replacing the test with an approved CA-issue
 
 Other employee computers report `NET::ERR_CERT_AUTHORITY_INVALID` for the pilot certificate. A replacement request was generated on `THCHA-WEBHOST01` with a non-exportable 3072-bit machine RSA key, Server Authentication purpose, subject `CN=THCHA-WEBHOST01.KEMET.com`, both host DNS names and IP SAN `172.30.77.137`. The IP SAN preserves the current portal URL.
 
-The host submitted this request as `KEMET\THCHA-WEBHOST01$` to `hq-cert2.KEMET.com\KEMET-HQ-CERT2-CA-1`, using the published `WebServerv2-new` template. **Request ID `1580097` is pending CA manager approval** (disposition 5, `Taken Under Submission`; observed host UTC timestamp `2026-10-12T06:33:52.7158578Z`). The template requires approval; do not change that policy or submit a duplicate. A CA administrator must review and issue this request from that CA's Pending Requests.
+The host submitted this request as `KEMET\THCHA-WEBHOST01$` to `hq-cert2.KEMET.com\KEMET-HQ-CERT2-CA-1`, using the published `WebServerv2-new` template. **Request ID `1580097` was pending CA manager approval when checked on 2026-10-12** (disposition 5, `Taken Under Submission`; observed host UTC timestamp `2026-10-12T06:33:52.7158578Z`). The template requires approval; do not change that policy or submit a duplicate. A CA administrator must review and issue this request from that CA's Pending Requests.
 
 Protected host artifacts are under `C:\SupplierPCN\deployment\certificate-requests\pcn-test-20261012`; the submission result is `hq-cert2-submission\result.json`. The public CSR SHA-256 is `AF7E8B7E3407671B4565D15D4A73E0496E8C6A818A961E060441B43B01DAF78E`; the requested public-key SHA-256 is `855FA80FCB54756F86C6B21E0907709526DC7C93E617C5D6A3F7293E2D4DAE9F`. No private key was exported.
 
 For an explicitly authorized future HTTPS return after issuance, retrieve request `1580097`, verify its key match, subject/SANs, Server Authentication purpose, validity and trusted company chain, then accept it into the host machine store. Restore only the `PCNTest` HTTPS binding on `172.30.77.137:8443`, set the matching HTTPS `PUBLIC_ORIGIN` and disable `ALLOW_INTERNAL_HTTP`, then verify normal certificate validation, Secure cookies and application readiness. Keep the former pilot thumbprint above for rollback. The discovered issuing CA chains to `KEMET-HQ-CERT1-CA` (root thumbprint `4815A950F4A2DD55E8C57F4584EE853638A6A562`), which is trusted on the host and this workstation; trust on the affected employee computer still needs verification.
 
-The certificate has **not** been issued or installed. Post-submission checks confirmed the original binding, service Running, readiness `ready`, and removal of the temporary submission task. This pending request does not block the explicitly authorized HTTP deployment. Returning to HTTPS requires issuance, certificate installation, restored HTTPS origin and Secure cookies, and client trust verification; HTTP itself uses no server certificate.
+At that check, the certificate had **not** been issued or installed. Post-submission checks confirmed the original binding, service Running, readiness `ready`, and removal of the temporary submission task. This request does not block the explicitly authorized HTTP deployment. Returning to HTTPS requires issuance, certificate installation, restored HTTPS origin and Secure cookies, and client trust verification; HTTP itself uses no server certificate.
 
 ## Historical release evidence
 
@@ -111,7 +111,22 @@ Earlier `pcn-test-8-1` from `9f23256` passed 243 unit/API integration tests and 
 The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser checks and deployed at `2026-10-06T04:13:57.8149751Z`. A repeat poll returned `already_current` without changing the service. Historical unauthenticated/source/proxy/origin checks passed in its password mode; they are not replacement acceptance evidence.
 
 ## Current acceptance and recovery
-### Current runtime — pcn-test-15-1; automatic updates
+
+Actions **View** opens a read-only PCN timeline. Each horizontal point shows recorded time, person and a department/signing action such as **GSC/TET — Checked** or **GSC/TET — Approved**; other events show their recorded workflow status, creation or baseline. Cleared signatures and unavailable earlier history are explicit. Selection reveals before/after form and signing changes, omitting internal storage metadata. Popup scrolling is contained at mobile widths, and the existing Portal auto-refresh gate pauses while the dialog is open. The timeline uses the existing history API and adds no database migration or host configuration change.
+
+The source passed 645 unit/API tests with 91.68% line / 90.87% branch / 93.83% function coverage, and six isolated timeline browser journeys covering 13 genuine events. Viewing made no live business changes or external integration calls.
+
+### Current runtime — pcn-test-17-1; Portal timeline
+
+[Actions 38526805589](https://github.com/akwaa2545-gif/PCN-/actions/runs/38526805589) passed 645 unit/API tests, the dependency audit, the existing isolated workflow browser suite, six automatic-update groups and six timeline groups. Signed [pcn-test-17-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-17-1), commit `6f3b7397139388b3d02a746fdd56cd2ae8349636`, was published at `2026-10-14T07:15:20Z` and installed at observed host time `2026-10-14T07:41:08.6651173Z`. ZIP SHA-256: `3322a8d92bbd480b915007e6cd00394d34bbd021c7ef8b65c93e58ef484a1cda` (15,562,084 bytes).
+
+Validate-only at observed host time `2026-10-14T07:39:11Z` preserved runtime 15 and Node PID 3400. Activation confirmed exact-release Node PID 9280, NetworkService / WinSW identity, sole `127.0.0.1:3000` listener and public HTTP :8443 SQL readiness. Private configuration and proxy hashes/ACLs, HTTP binding/firewall, protected consumer, pinned key and retained recovery certificate were unchanged. Public `admin.js`, `admin.html` and `admin.css` returned 200 and matched the deployed commit after CRLF-to-LF normalization.
+
+Live acceptance passed five groups and fifteen API GETs (all 200) at workstation UTC `2026-10-14T07:35:57.880Z`–`2026-10-14T07:36:19.549Z`; host timestamps are observed separately because its clock is about five minutes ahead. Existing `PCN-2026-0001` showed five genuine events: baseline, GSC/TET Approved, Submitted, GSC/TET Checked and GSC/TET Prepared, with recorded people. Desktop and 390-pixel mobile selection, contained scrolling, Escape/Close and restored View focus passed. Only login/logout POSTs were permitted; no PCN writes, mail, directory/external attempts, page errors or failed responses occurred. One automatic notification-health GET was blocked locally; profile reads were configured to be locally stubbed but none occurred. The ignored report is `test-results/timeline-live-acceptance.json`.
+
+At observed host time `2026-10-14T07:43:27.4776726Z`, a repeat consumer returned `already_current` for runtime 17 with Node PID 9280 unchanged, and the task was resumed Ready. Independent final checks at `2026-10-14T07:44:15.6339410Z` confirmed release 17 / commit `6f3b7397139388b3d02a746fdd56cd2ae8349636`, service Running, sole `127.0.0.1:3000` listener owned by PID 9280, sole PCNTest HTTP `172.30.77.137:8443:` binding, access SSL flags 0 with no SSL mapping, SQL readiness, unrelated Default Web Site HTTP :80 returning 200, and the SYSTEM task enabled / Ready / last result 0.
+
+### Historical runtime — pcn-test-15-1; automatic updates
 
 [Actions 38224241715](https://github.com/akwaa2545-gif/PCN-/actions/runs/38224241715) passed 635 unit/API tests, the dependency audit, existing isolated browser checks and six automatic-update browser groups. Signed [pcn-test-15-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-15-1), commit `73009ce7272cce6282658f52aeb3063cc08799ac`, was published at `2026-10-12T08:36:11Z` and installed at observed host time `2026-10-12T08:53:29.0786995Z`. ZIP SHA-256: `0717db2b8dcc7811373b04035513d1d7ed66042e7fc1e8bc475acb169601037e` (15,557,032 bytes).
 
