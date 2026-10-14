@@ -23,6 +23,7 @@ function portal(fetch) {
     body: { classList: { add() {}, remove() {} } } };
   const source = fs.readFileSync(require.resolve('../admin.js'), 'utf8')
     .replace(/\}\)\(\);\s*$/, `
+      render = () => {};
       loadDetail = async id => window.selections.push(id);
       window.TEST = { state, els, openTimeline, loadTimeline, closeTimeline, selectTimelineRevision,
         initializeTimeline, chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline,
@@ -101,7 +102,28 @@ test('empty, failed, retried and permission denied reads clear old history and e
   assert.equal(page.getTimeline().revisions.length, 3);
   result = Object.assign(new Error('Access denied'), { status: 403 }); await page.loadTimeline();
   assert.equal(page.getTimeline().revisions.length, 0);
-  assert.equal(page.element('pcnTimelineRefreshButton').hidden, true);
+  assert.equal(page.element('pcnTimelineDialog').open, false);
+  assert.equal(page.getTimeline().record, null);
+  assert.match(page.state.message, /Access unavailable/);
+  assert.equal(page.canAutoRefresh(), false);
+});
+
+test('timeline authorization loss clears all protected records and late sibling history cannot restore them', async () => {
+  const pending = [];
+  const page = portal(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
+  page.state.pcns = [{ id: 'private' }]; page.state.selected = { id: 'private' };
+  const first = page.openTimeline({ id: 'first' });
+  const second = page.openTimeline({ id: 'second' });
+  pending[0].reject(Object.assign(new Error('Not signed in'), { status: 401 }));
+  await first;
+  pending[1].resolve(revisions); await second;
+  assert.equal(page.state.pcns.length, 0); assert.equal(page.state.selected, null);
+  assert.equal(page.element('pcnTimelineDialog').open, false);
+  assert.equal(page.element('pcnTimelineTrack').innerHTML, '');
+  assert.equal(page.element('pcnTimelineDetails').innerHTML, '');
+  assert.equal(page.getTimeline().record, null);
+  assert.equal(page.canAutoRefresh(), false);
+  assert.match(page.state.message, /Access unavailable/);
 });
 
 test('history never invents an actor, timestamp or creation event for a baseline', () => {

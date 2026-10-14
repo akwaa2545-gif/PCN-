@@ -132,3 +132,20 @@ test('late selected progress in a manual list refresh cannot restore sidebar dat
   assert.equal(page.state.progress, null);
   assert.match(page.state.message, /Access unavailable/);
 });
+
+test('direct detail authorization denial clears the full overview and invalidates sibling detail reads', async () => {
+  const pending = new Map();
+  const page = portal(url => new Promise((resolve, reject) => pending.set(url, { resolve, reject })));
+  page.state.pcns = [{ id: 'protected' }]; page.state.selected = { id: 'protected' };
+  const denied = page.loadDetail('denied');
+  const sibling = page.loadDetail('sibling');
+  pending.get('/api/pcns/denied/progress').reject(Object.assign(new Error('Forbidden'), { status: 403 }));
+  await denied;
+  pending.get('/api/pcns/sibling').resolve({ id: 'sibling' });
+  pending.get('/api/pcns/sibling/progress').resolve({ status: 'private' });
+  await sibling;
+  assert.equal(page.controller.clears, 1);
+  assert.equal(page.state.pcns.length, 0); assert.equal(page.state.selected, null);
+  assert.equal(page.state.progress, null); assert.equal(page.canAutoRefresh(), false);
+  assert.match(page.state.message, /Access unavailable/);
+});
