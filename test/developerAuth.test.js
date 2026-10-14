@@ -129,3 +129,32 @@ test('ordinary remembered session cannot gain Developer access through an unstam
   state.user={...state.user,roles:['developer'],department:'developer'};
   assert.equal(await service.session(login.token),null);
 });
+
+test('legacy password user creation rejects unpaired Developer access and linking a privileged account is blocked',async()=>{
+  const {service,body}=fixture('password');
+  await assert.rejects(service.createUser({username:body.username,password,roles:['developer']}),error=>error.statusCode===400);
+  await assert.rejects(service.linkEmployee({userId:'dev-user',employeeCode:body.username}),error=>error.statusCode===409);
+});
+
+test('Developer lockout added during password verification fails closed',async()=>{
+  const {state,service,body}=fixture('pcn-local');
+  state.onVerify=async()=>{state.user={...state.user,lockoutUntil:new Date(Date.now()+900000).toISOString()};};
+  await assert.rejects(service.login({...body,developerPassword:secret}),error=>error.statusCode===401);
+  assert.equal(state.sessions.length,0);
+});
+
+test('ordinary account promoted during login failure reset must sign in with the Developer challenge',async()=>{
+  const {state,service,body}=fixture('password');state.user={...state.user,roles:['qa'],department:'qaTet'};
+  service.repository.resetLoginFailures=async()=>{state.user={...state.user,roles:['developer'],department:'developer'};};
+  await assert.rejects(service.login(body),error=>error.statusCode===401);
+  assert.equal(state.sessions.length,0);
+});
+
+test('Developer identity relinked while login completes cannot create a session for stale identity',async()=>{
+  for(const patch of [{identityProvider:'password'},{employeeCode:'7654321',normalizedEmployeeCode:'7654321'}]) {
+    const {state,service,body}=fixture('pcn-local');
+    service.repository.resetLoginFailures=async()=>{state.user={...state.user,...patch};};
+    await assert.rejects(service.login({...body,developerPassword:secret}),error=>error.statusCode===401);
+    assert.equal(state.sessions.length,0);
+  }
+});
