@@ -41,6 +41,32 @@ test('Create user automatically pairs Developer department and preserves verifie
   assert.deepEqual(JSON.parse(write.options.body), { employeeCode: '0012345', displayName: 'Developer User', roles: ['developer'], department: 'developer', signingStep: null });
 });
 
+test('Developer edits retain exact access, filters recognise the role, and switching away requires a new department', async () => {
+  const user = { id: 'developer-user', employeeCode: '0012345', username: '0012345', displayName: 'Developer User',
+    roles: ['developer'], department: 'developer', signingStep: null, mailProfile: verifiedMail, version: '0011223344556677', isActive: true, identityProvider: 'employee-code' };
+  const page = await usersPage([user]);
+  page.element('usersRoleFilter').value = 'developer'; page.element('usersRoleFilter').events.change();
+  assert.equal(page.element('adminUsersRows').children.length, 1);
+  const row = page.firstUserRow();
+  assert.equal(row.children[2].textContent, 'developer');
+  row.lastElementChild.firstElementChild.firstElementChild.events.click();
+  assert.equal(page.element('employeeRole').value, 'developer');
+  assert.equal(page.element('employeeDepartment').disabled, true);
+  assert.equal(page.element('employeeCreateButton').disabled, false);
+  page.element('employeeRole').value = 'admin'; page.element('employeeRole').events.change();
+  assert.equal(page.element('employeeDepartment').value, '');
+  assert.equal(page.element('employeeDepartment').disabled, false);
+  assert.equal(page.element('employeeCreateButton').disabled, true);
+  page.element('employeeDepartment').value = 'it'; page.element('employeeDepartment').events.change();
+  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
+  assert.match(page.confirmations[0], /Remove Developer access/);
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.options?.method === 'PATCH').options.body).roles, ['admin']);
+  const html = fs.readFileSync('admin.html', 'utf8');
+  for (const id of ['employeeRole', 'employeeDepartment', 'usersRoleFilter', 'usersDepartmentFilter']) {
+    assert.match(html.match(new RegExp(`<select id="${id}"[^>]*>[\\s\\S]*?<\\/select>`))[0], /<option value="developer">Developer<\/option>/);
+  }
+});
+
 async function loginPage(mode = 'employee-code', response) {
   const nodes = new Map();
   function element(id) {
@@ -49,15 +75,16 @@ async function loginPage(mode = 'employee-code', response) {
       querySelectorAll() { return [element(`${id}Submit`)]; }, focus() { this.focused = true; }, reset() {} });
     return nodes.get(id);
   }
-  const calls = [], redirects = [];
+  const calls = [], redirects = [], events = [];
+  const lifecycle = {};
   let initialize;
-  const window = { location: { search: '', origin: 'http://pcn.example', assign(url) { redirects.push(url); } },
-    PCN_SESSION: { safeReturnTo() { return '/admin'; }, load: async () => ({ authenticated: false }), logout: async () => {},
+  const window = { addEventListener(name, fn) { lifecycle[name] = fn; }, location: { search: '', origin: 'http://pcn.example', assign(url) { redirects.push(url); } },
+    PCN_SESSION: { safeReturnTo() { return '/admin'; }, load: async () => ({ authenticated: false }), logout: async () => { events.push('logout'); },
       async fetch(url, options) { if (url === '/api/auth/config') return { mode }; calls.push(JSON.parse(options.body)); return response(calls.at(-1), calls.length); } } };
   vm.runInNewContext(fs.readFileSync('login.js', 'utf8'), { window, URL, URLSearchParams,
     document: { getElementById: element, addEventListener(event, fn) { initialize = fn; } } });
   await initialize();
-  return { element, calls, redirects, async submit(id) { element(id).events.submit({ preventDefault() {} }); await new Promise(setImmediate); } };
+  return { element, calls, redirects, events: lifecycle, sessionEvents: events, async submit(id) { element(id).events.submit({ preventDefault() {} }); await new Promise(setImmediate); } };
 }
 function challenge() { return Object.assign(new Error('Developer password required'), { code: 'DEVELOPER_PASSWORD_REQUIRED' }); }
 
@@ -111,6 +138,63 @@ test('Password maintenance login includes the same server-requested Developer ch
   const html = fs.readFileSync('login.html', 'utf8');
   assert.match(html, /id="employeeDeveloperPassword"[^>]*type="password"/);
   assert.match(html, /id="passwordDeveloperPassword"[^>]*type="password"/);
+});
+
+test('Developer challenge clears on setup retry, username change and leaving the login page', async () => {
+  const page = await loginPage('password', () => { throw challenge(); });
+  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
+  await page.submit('loginForm');
+  page.element('passwordDeveloperPassword').value = 'fixture-value';
+  page.element('username').value = 'other-user'; page.element('username').events.input();
+  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
+  assert.equal(page.element('passwordDeveloperPassword').value, '');
+  await page.submit('loginForm');
+  page.element('passwordDeveloperPassword').value = 'fixture-value';
+  await page.element('authRetryButton').events.click();
+  await new Promise(setImmediate);
+  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
+  assert.equal(page.element('passwordDeveloperPassword').required, false);
+  assert.equal(page.element('passwordDeveloperPassword').value, '');
+  await page.submit('loginForm');
+  page.element('passwordDeveloperPassword').value = 'fixture-value';
+  page.events.pagehide();
+  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
+  assert.equal(page.element('passwordDeveloperPassword').value, '');
+});
+
+test('Pending maintenance login locks identity and discards a challenge for an identity that changed', async () => {
+  let rejectLogin;
+  const pending = new Promise((resolve, reject) => { rejectLogin = reject; });
+  const page = await loginPage('password', () => pending);
+  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
+  await page.submit('loginForm');
+  const identityLocked = page.element('username').disabled;
+  page.element('username').value = 'other-user';
+  page.element('username').events.input();
+  rejectLogin(challenge());
+  await new Promise(setImmediate);
+  assert.equal(page.element('passwordDeveloperChallenge').hidden, true, 'a delayed challenge must not apply to another identity');
+  assert.equal(page.element('passwordDeveloperPassword').required, false);
+  assert.equal(page.element('passwordDeveloperPassword').value, '');
+  assert.equal(identityLocked, true, 'the identity cannot be edited while its login is pending');
+  assert.equal(page.element('username').disabled, false);
+  assert.deepEqual(page.redirects, []);
+});
+
+test('Pending maintenance login discards a success for an identity that changed', async () => {
+  let resolveLogin;
+  const pending = new Promise(resolve => { resolveLogin = resolve; });
+  const page = await loginPage('password', () => pending);
+  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
+  await page.submit('loginForm');
+  page.element('username').value = 'other-user';
+  page.element('username').events.input();
+  resolveLogin({ authenticated: true, user: { username: 'first-user', roles: ['developer'] } });
+  await new Promise(setImmediate);
+  assert.deepEqual(page.redirects, [], 'a stale sign-in cannot open the Portal as a different identity');
+  assert.deepEqual(page.sessionEvents, ['logout'], 'the stale authenticated session is cleared');
+  assert.equal(page.element('passwordDeveloperPassword').value, '');
+  assert.equal(page.element('password').value, '');
 });
 
 test('Developer opens Administrator frontend pages and can sign every valid form step', async () => {
