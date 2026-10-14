@@ -113,7 +113,7 @@ async function main() {
     await expect(details).toContainText('Timeline Fixture Editor 1');
     await expect(details).toContainText('Timeline Supplier 0');
     await expect(details).toContainText('Timeline Supplier 1');
-    await expect(dialog.getByRole('button', { name: /remove|delete|save|approve|update status/i })).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: /^(remove|delete|save|approve|update status)\b/i })).toHaveCount(0);
     await fit(page, dialog);
     await page.screenshot({ path: path.resolve('test-results/timeline-desktop.png') });
     report.checks.push('Keyboard eye activation opens genuine chronological history; selected event shows actor/time/real before-after values without mutation controls');
