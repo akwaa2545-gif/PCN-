@@ -179,11 +179,13 @@ test('cleared signatures identify the clearing actor and never claim a completed
   const item = { revision: 6, actor: 'Clearing administrator', status: 'supplier_action', changes: [
     { path: 'internalReview.signoff.gscTet.approved', before: true, after: false },
     { path: 'internalReview.signoff.gscTet.approvedName', before: 'Former approver', after: '' },
+    { path: 'internalReview.signoff.prodEngTet.prepared', before: true, after: null },
     { path: 'internalReview.signoff.qaTet.checked', before: false, after: false },
     { path: 'internalReview.signoff.prodEngTet.preparedName', before: '', after: 'Name only' },
   ] };
   assert.deepEqual(JSON.parse(JSON.stringify(page.timelineEntries(item))), [
     { label: 'GSC/TET — Approved cleared', person: 'Clearing administrator', cleared: true },
+    { label: 'Prod.Eng/TET — Prepared cleared', person: 'Clearing administrator', cleared: true },
   ]);
 });
 
@@ -195,4 +197,32 @@ test('non-signing edits show the recorded current status and actor without inven
   const track = page.element('pcnTimelineTrack').innerHTML;
   assert.match(track, /Qa Review/); assert.match(track, /Actual editor/);
   assert.doesNotMatch(track, /fields changed|Event 8|Content revision|GSC\/TET/);
+});
+
+test('selected details show form and signing changes first while omitting technical storage metadata from the UI', async () => {
+  const changes = [
+    { path: 'documentControl.contentHash', before: 'old-hidden-hash', after: 'new-hidden-hash' },
+    { path: 'documentControl.signatureBindings.signoff.gscTet.checked.userId', before: null, after: 'hidden-user-id' },
+    { path: 'documentControl.signatureBindings.signoff.gscTet.checked.contentRevision', before: null, after: 42 },
+    { path: 'documentControl.signatureBindings.signoff.gscTet.checked.contentHash', before: null, after: 'hidden-signature-hash' },
+    { path: 'documentControl.revisionReason', before: '', after: 'Supplier correction' },
+    { path: 'documentControl.contentRevision', before: 1, after: 2 },
+    { path: 'version', before: 'hidden-version-old', after: 'hidden-version-new' },
+    { path: 'id', before: '', after: 'hidden-storage-id' },
+    { path: 'updatedAt', before: '', after: 'hidden-updated-at' },
+    { path: 'supplierName', before: 'Old supplier', after: 'New supplier' },
+    { path: 'internalReview.signoff.gscTet.checked', before: false, after: true },
+    { path: 'internalReview.signoff.gscTet.checkedName', before: '', after: 'Real signer' },
+    { path: 'internalReview.signoff.gscTet.checkedDate', before: '', after: '2026-10-12' },
+  ];
+  const page = portal(async () => [{ revision: 5, actor: 'Real signer', status: 'gsc_review', changes }]);
+  await page.openTimeline({ id: 'one' });
+  const details = page.element('pcnTimelineDetails').innerHTML;
+  assert.match(details, /Old supplier/); assert.match(details, /New supplier/);
+  assert.match(details, /Real signer/); assert.match(details, /Checked Name/); assert.match(details, /Checked Date/);
+  assert.match(details, /Supplier correction/);
+  assert.doesNotMatch(details, /hidden-|Content Hash|Signature Bindings|Content Revision|Updated At/);
+  assert.ok(details.indexOf('Checked Name') < details.indexOf('Revision Reason'));
+  assert.ok(details.indexOf('New supplier') < details.indexOf('Revision Reason'));
+  assert.equal(page.getTimeline().revisions[0].changes.length, changes.length, 'The stored API history is preserved');
 });

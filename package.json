@@ -14,6 +14,7 @@
     "test:profile": "node scripts/profile-e2e.js",
     "test:login": "node scripts/login-e2e.js",
     "test:auto-refresh": "node scripts/auto-refresh-e2e.js",
+    "test:timeline": "node scripts/timeline-e2e.js",
     "db:check": "node scripts/db-check.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import": "node scripts/db-import.js",

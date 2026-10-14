@@ -232,6 +232,19 @@
       </main>
     </div>
 
+    <dialog id="pcnTimelineDialog" class="pcn-timeline-dialog" aria-labelledby="pcnTimelineTitle" aria-describedby="pcnTimelineSubtitle">
+      <header class="pcn-timeline-heading">
+        <div><span class="section-label">Change history</span><h2 id="pcnTimelineTitle">PCN timeline</h2><p id="pcnTimelineSubtitle"></p></div>
+        <button id="pcnTimelineCloseButton" class="employee-dialog-close" type="button" aria-label="Close change history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button>
+      </header>
+      <div class="pcn-timeline-body">
+        <div class="pcn-timeline-toolbar"><p id="pcnTimelineMessage" role="status" aria-live="polite" aria-atomic="true"></p><div class="pcn-timeline-navigation"><button id="pcnTimelinePreviousButton" class="ghost-button" type="button" aria-label="Scroll to earlier changes" aria-controls="pcnTimelineTrack">&#8592;</button><button id="pcnTimelineNextButton" class="ghost-button" type="button" aria-label="Scroll to later changes" aria-controls="pcnTimelineTrack">&#8594;</button></div></div>
+        <ol id="pcnTimelineTrack" class="pcn-timeline-track" aria-label="PCN changes, oldest to latest" tabindex="0"></ol>
+        <section id="pcnTimelineDetails" class="pcn-timeline-details" aria-label="Selected change details" aria-live="polite"></section>
+      </div>
+      <footer class="pcn-timeline-actions"><button id="pcnTimelineRefreshButton" class="ghost-button" type="button">Refresh history</button><button id="pcnTimelineDoneButton" class="primary-button" type="button">Done</button></footer>
+    </dialog>
+
     <dialog id="employeeUserDialog" class="employee-user-dialog" aria-labelledby="employeeFormTitle" aria-describedby="employeeFormDescription">
       <form id="employeeUserForm" class="employee-user-form" aria-labelledby="employeeFormTitle">
         <div class="employee-form-intro employee-dialog-heading">

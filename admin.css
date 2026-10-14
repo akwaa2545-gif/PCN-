@@ -422,6 +422,68 @@ body.employee-dialog-open { overflow: hidden; }
 .employee-mail-spinner { position: absolute; inset: 0; border: 2px solid #caddeb; border-top-color: var(--mes-blue); border-right-color: var(--mes-blue); border-radius: 50%; animation: employee-mail-spin 0.9s linear infinite; }
 #employeeMailLoadingText { min-width: 0; overflow-wrap: anywhere; }
 body.admin-page .employee-dialog-body .employee-mail-loading { max-width: none; }
+
+/* A PCN's recorded changes stay in a contained, horizontally navigable timeline. */
+body.admin-page .pcn-timeline-dialog { width: min(1160px, calc(100% - 40px)); max-width: none; height: min(740px, calc(100vh - 40px)); height: min(740px, calc(100dvh - 40px)); max-height: calc(100dvh - 40px); padding: 0; border: 1px solid var(--portal-line); border-top: 4px solid var(--mes-blue); border-radius: 0; background: #fff; color: var(--portal-ink); box-shadow: 0 24px 70px rgba(5, 28, 51, .25); overflow: hidden; }
+.pcn-timeline-dialog[open] { display: flex; flex-direction: column; }
+.pcn-timeline-dialog:not([open]) { display: none; }
+.pcn-timeline-dialog::backdrop { background: rgba(5, 28, 51, .58); }
+body.pcn-timeline-open { overflow: hidden; }
+.pcn-timeline-heading { flex: 0 0 auto; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--portal-line); }
+.pcn-timeline-heading > div { min-width: 0; }
+body.admin-page .pcn-timeline-heading h2 { margin: 4px 0 6px; color: var(--mes-blue); font-size: 23px; overflow-wrap: anywhere; }
+.pcn-timeline-heading p { margin: 0; color: #52677b; font-size: 13px; overflow-wrap: anywhere; }
+.pcn-timeline-body { flex: 1 1 auto; min-height: 0; min-width: 0; padding: 18px 24px 24px; overflow-y: auto; overscroll-behavior: contain; }
+.pcn-timeline-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.pcn-timeline-toolbar p { margin: 0; color: #52677b; font-size: 13px; line-height: 1.5; }
+.pcn-timeline-navigation { display: flex; flex: 0 0 auto; gap: 6px; }
+body.admin-page .pcn-timeline-navigation button { min-height: 40px; width: 42px; padding: 6px; font-size: 20px; }
+.pcn-timeline-track { display: flex; position: relative; gap: 0; width: 100%; min-height: 220px; margin: 0 0 22px; padding: 14px 0 16px; list-style: none; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-gutter: stable; scroll-snap-type: x proximity; }
+.pcn-timeline-track:empty { min-height: 0; margin: 0; padding: 0; }
+.pcn-timeline-item { position: relative; flex: 0 0 220px; width: 220px; padding: 0 12px; scroll-snap-align: center; }
+.pcn-timeline-item::before { position: absolute; top: 72px; left: 0; right: 0; height: 2px; background: #bcc7d1; content: ''; }
+.pcn-timeline-item:first-child::before { left: 50%; }
+.pcn-timeline-item:last-child::before { right: 50%; }
+body.admin-page .pcn-timeline-event { position: relative; display: flex; align-items: center; flex-direction: column; gap: 7px; width: 100%; height: 100%; min-height: 205px; padding: 0 8px 12px; border: 0; border-radius: 0; background: transparent; color: var(--portal-ink); text-align: center; white-space: normal; }
+.pcn-timeline-event time, .pcn-timeline-time-unknown { display: flex; flex-direction: column; justify-content: center; gap: 3px; height: 41px; color: #52677b; font-size: 12px; font-weight: 500; }
+.pcn-timeline-event time span:first-child { color: var(--portal-ink); font-size: 17px; }
+.pcn-timeline-marker { position: relative; display: grid; place-items: center; width: 48px; height: 48px; margin: 0 0 5px; border: 3px solid var(--mes-blue); border-radius: 50%; background: #fff; color: var(--mes-blue); font-size: 32px; font-weight: 700; line-height: 1; }
+.pcn-timeline-event strong { font-size: 15px; line-height: 1.4; }
+.pcn-timeline-signoff { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pcn-timeline-actor { overflow-wrap: anywhere; font-size: 12px; line-height: 1.4; }
+body.admin-page .pcn-timeline-event:hover { background: #f2f6fa; }
+.pcn-timeline-event[aria-pressed="true"] .pcn-timeline-marker { box-shadow: 0 0 0 5px #ffedb3; }
+.pcn-timeline-event[aria-pressed="true"] strong { color: var(--mes-blue); }
+.pcn-timeline-success .pcn-timeline-marker { border-color: #26743b; color: #26743b; }
+.pcn-timeline-danger .pcn-timeline-marker { border-color: #b42335; color: #b42335; }
+.pcn-timeline-event.is-baseline .pcn-timeline-marker { border-color: #738190; color: #738190; }
+body.admin-page .pcn-timeline-event:focus-visible, .pcn-timeline-track:focus-visible { outline: 2px solid #0b69b2; outline-offset: -2px; }
+.pcn-timeline-details { border-top: 1px solid var(--portal-line); padding-top: 18px; }
+.pcn-timeline-details:empty { border: 0; padding: 0; }
+body.admin-page .pcn-timeline-details h3 { margin: 0 0 6px; color: var(--mes-blue); font-size: 17px; }
+.pcn-timeline-details > p { margin: 0 0 14px; color: #52677b; font-size: 12px; overflow-wrap: anywhere; }
+.pcn-timeline-change-scroll { max-height: 290px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--portal-line); }
+.pcn-timeline-change-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 12px; }
+.pcn-timeline-change-table th, .pcn-timeline-change-table td { padding: 12px; vertical-align: top; text-align: left; overflow-wrap: anywhere; border-bottom: 1px solid var(--portal-line); }
+.pcn-timeline-change-table thead th { position: sticky; top: 0; background: #edf3f8; color: var(--mes-blue); z-index: 1; }
+.pcn-timeline-change-table th:first-child { width: 24%; }
+.pcn-timeline-change-table td pre { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; box-shadow: none; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pcn-timeline-change-table tbody tr:nth-child(even) { background: #f7f9fb; }
+.pcn-timeline-details .pcn-timeline-empty { padding: 14px; background: #f3f5f6; border-left: 3px solid #738190; line-height: 1.6; }
+.pcn-timeline-actions { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; background: #f3f5f6; border-top: 1px solid var(--portal-line); }
+body.admin-page .pcn-timeline-actions button { min-height: 44px; min-width: 110px; }
+body.admin-page .pcn-timeline-actions .primary-button { color: #192c46; }
+@media (max-width: 600px) {
+  body.admin-page .pcn-timeline-dialog { width: calc(100% - 20px); height: calc(100vh - 24px); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); }
+  .pcn-timeline-heading { padding: 16px; gap: 8px; }
+  body.admin-page .pcn-timeline-heading h2 { font-size: 20px; }
+  .pcn-timeline-body { padding: 14px 16px 18px; }
+  .pcn-timeline-toolbar { align-items: flex-start; }
+  .pcn-timeline-item { flex-basis: 205px; width: 205px; }
+  .pcn-timeline-change-table th, .pcn-timeline-change-table td { padding: 9px 6px; }
+  .pcn-timeline-actions { padding: 12px 16px; }
+  body.admin-page .pcn-timeline-actions button { flex: 1; min-width: 0; }
+}
 body.admin-page .employee-user-form .employee-mail-result { width: 100%; min-width: 0; text-align: left; }
 #employeeMailResults .employee-user-identity { grid-template-columns: 40px minmax(0, 1fr); min-width: 0; }
 #employeeMailResults .notification-person-avatar { width: 40px; height: 40px; font-size: 15px; }

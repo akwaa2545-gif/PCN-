@@ -28,6 +28,7 @@
   const directorySelections = new WeakMap();
   let refreshGeneration = 0;
   let autoRefreshBlocked = false;
+  let timeline = { record: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -85,7 +86,10 @@
       "adminLoadingText",
       "adminOverviewRecords",
       "adminOverviewSelected",
-      "adminOverviewWorkflow"
+      "adminOverviewWorkflow",
+      "pcnTimelineDialog", "pcnTimelineTitle", "pcnTimelineSubtitle", "pcnTimelineMessage",
+      "pcnTimelineTrack", "pcnTimelineDetails", "pcnTimelineCloseButton", "pcnTimelineDoneButton",
+      "pcnTimelineRefreshButton", "pcnTimelinePreviousButton", "pcnTimelineNextButton"
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -98,6 +102,7 @@
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && !els.adminRemoveDialog.hidden) closeRemoveDialog();
     });
+    initializeTimeline();
     checkPortalSession();
   }
 
@@ -436,7 +441,8 @@
     }
   }
 
-  async function loadDetail(id) {
+  async function loadDetail(id, { preservePosition = false } = {}) {
+    const focusSession = timeline.session;
     startBusy(`detail:${id}`, `Loading ${id}...`);
 
     try {
@@ -458,7 +464,223 @@
       stopBusy();
     }
 
-    render();
+    if (preservePosition) preservePortalPosition(() => render());
+    else render();
+    // Closing while the selection read is pending leaves a disabled opener unfocusable.
+    // Restore it once enabled, unless another dialog or deliberate focus has taken over.
+    if (preservePosition && timeline.session === focusSession && !document.querySelector('dialog[open]')
+      && els.adminRemoveDialog.hidden !== false
+      && document.activeElement === document.body) {
+      const row = [...els.adminPcnRows.querySelectorAll('[data-pcn-id]')].find(item => item.dataset.pcnId === id);
+      row?.querySelector('.admin-view-button')?.focus({ preventScroll: true });
+    }
+  }
+
+  function initializeTimeline() {
+    els.pcnTimelineCloseButton.addEventListener('click', closeTimeline);
+    els.pcnTimelineDoneButton.addEventListener('click', closeTimeline);
+    els.pcnTimelineRefreshButton.addEventListener('click', loadTimeline);
+    els.pcnTimelineDialog.addEventListener('cancel', event => { event.preventDefault(); closeTimeline(); });
+    els.pcnTimelineDialog.addEventListener('close', finishTimeline);
+    els.pcnTimelineDialog.addEventListener('click', event => {
+      if (event.target !== els.pcnTimelineDialog) return;
+      const bounds = els.pcnTimelineDialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeTimeline();
+    });
+    els.pcnTimelinePreviousButton.addEventListener('click', () => scrollTimeline(-1));
+    els.pcnTimelineNextButton.addEventListener('click', () => scrollTimeline(1));
+    els.pcnTimelineTrack.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !timeline.revisions.length) return;
+      event.preventDefault();
+      const index = timeline.revisions.findIndex(item => item.revision === timeline.selectedRevision);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? timeline.revisions.length - 1
+        : Math.max(0, Math.min(timeline.revisions.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
+      selectTimelineRevision(timeline.revisions[next].revision, true);
+    });
+  }
+
+  async function openTimeline(record, opener = document.activeElement) {
+    refreshGeneration++;
+    timeline = { record, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session + 1, opener };
+    els.pcnTimelineTitle.textContent = `${record.id} timeline`;
+    els.pcnTimelineSubtitle.textContent = [record.supplierName, record.materialName].filter(Boolean).join(' / ');
+    els.pcnTimelineTrack.innerHTML = '';
+    els.pcnTimelineDetails.innerHTML = '';
+    if (!els.pcnTimelineDialog.open) els.pcnTimelineDialog.showModal();
+    document.body.classList.add('pcn-timeline-open');
+    els.pcnTimelineCloseButton.focus();
+    // Keep the existing workflow sidebar selection while history is read separately.
+    loadDetail(record.id, { preservePosition: true });
+    await loadTimeline();
+  }
+
+  async function loadTimeline() {
+    if (!timeline.record || !els.pcnTimelineDialog.open) return;
+    const id = timeline.record.id;
+    const request = timeline.request + 1;
+    const selectedRevision = timeline.selectedRevision;
+    timeline = { ...timeline, request, revisions: [] };
+    els.pcnTimelineTrack.innerHTML = '';
+    els.pcnTimelineDetails.innerHTML = '';
+    els.pcnTimelineMessage.textContent = 'Loading change history...';
+    els.pcnTimelineTrack.setAttribute('aria-busy', 'true');
+    els.pcnTimelineRefreshButton.hidden = false;
+    els.pcnTimelineRefreshButton.disabled = true;
+    els.pcnTimelineRefreshButton.textContent = 'Refresh history';
+    updateTimelineNavigation();
+    const current = () => timeline.request === request && timeline.record?.id === id && els.pcnTimelineDialog.open;
+    try {
+      const response = await apiFetch(`/api/pcns/${encodeURIComponent(id)}/revisions`);
+      if (!current()) return;
+      if (!Array.isArray(response?.items)) throw new Error('The change history returned an invalid response.');
+      const revisions = chronologicalTimeline(response.items);
+      timeline = { ...timeline, revisions, selectedRevision: revisions.some(item => item.revision === selectedRevision)
+        ? selectedRevision : revisions[revisions.length - 1]?.revision ?? null };
+      els.pcnTimelineMessage.textContent = revisions.length ? `${revisions.length} recorded ${revisions.length === 1 ? 'event' : 'events'}. Select a change to see details.` : 'No recorded changes are available for this PCN.';
+      renderTimeline();
+    } catch (error) {
+      if (!current()) return;
+      timeline = { ...timeline, revisions: [], selectedRevision: null };
+      els.pcnTimelineMessage.textContent = `Change history unavailable. ${error.message}`;
+      els.pcnTimelineRefreshButton.textContent = 'Retry';
+      els.pcnTimelineRefreshButton.hidden = error.status === 401 || error.status === 403;
+    } finally {
+      if (current()) {
+        els.pcnTimelineTrack.setAttribute('aria-busy', 'false');
+        els.pcnTimelineRefreshButton.disabled = false;
+        updateTimelineNavigation();
+      }
+    }
+  }
+
+  function closeTimeline() {
+    if (els.pcnTimelineDialog.open) els.pcnTimelineDialog.close();
+    finishTimeline();
+  }
+
+  function finishTimeline() {
+    if (!timeline.record) return;
+    const { opener, record } = timeline;
+    timeline = { record: null, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session, opener: null };
+    els.pcnTimelineTrack.innerHTML = '';
+    els.pcnTimelineDetails.innerHTML = '';
+    els.pcnTimelineMessage.textContent = '';
+    document.body.classList.remove('pcn-timeline-open');
+    const row = [...els.adminPcnRows.querySelectorAll('[data-pcn-id]')].find(item => item.dataset.pcnId === record.id);
+    const target = opener?.isConnected ? opener : row?.querySelector('.admin-view-button') || els.adminSearchInput;
+    target?.focus({ preventScroll: true });
+  }
+
+  function chronologicalTimeline(items) {
+    return [...items].sort((before, after) => Number(before.revision) - Number(after.revision));
+  }
+
+  function timelineSummary(item) {
+    if (item.isBaseline) return 'History baseline';
+    if (item.revision === 1) return 'PCN created';
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    if (changes.some(change => change.path === 'status')) return 'Workflow status changed';
+    return changes.length ? `${changes.length} ${changes.length === 1 ? 'field' : 'fields'} changed` : 'Revision recorded';
+  }
+
+  function timelineValue(value) {
+    if (value === null || value === undefined || value === '') return 'Not set';
+    return typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
+  }
+
+  function timelineFieldLabel(change) {
+    if (change.label) return change.label;
+    return String(change.path || 'Field').split('.').map(part => titleCase(part.replace(/([a-z0-9])([A-Z])/g, '$1 $2'))).join(' / ');
+  }
+
+  function timelineEntries(item) {
+    const changes = Array.isArray(item.changes) ? item.changes : [];
+    const departments = { 'signoff.gscTet': 'GSC/TET', 'signoff.prodEngTet': 'Prod.Eng/TET',
+      'signoff.qaTet': 'QA/TET', 'tapbu.gsc': 'GSC/TaPBU', 'tapbu.qa': 'QA/TaPBU',
+      'qateFinal.signoff': 'QA/TET Final Judgment' };
+    if (!item.isBaseline) {
+      const entries = changes.flatMap(change => {
+        const internal = /^internalReview\.(signoff\.(?:gscTet|prodEngTet|qaTet)|tapbu\.(?:gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)$/.exec(change.path);
+        const supplier = /^internalReview\.supplierSignoff\.(approved|checked|prepared)\.checked$/.exec(change.path);
+        const cleared = change.before === true && (change.after === false || change.after === null);
+        if ((!internal && !supplier) || (change.after !== true && !cleared)) return [];
+        const action = internal ? internal[2] : supplier[1];
+        const namePath = internal ? `${change.path}Name` : change.path.replace(/\.checked$/, '.name');
+        const name = changes.find(candidate => candidate.path === namePath)?.after;
+        const person = !cleared && typeof name === 'string' && name.trim() ? name : item.actor || 'Actor not recorded';
+        return [{ label: `${internal ? departments[internal[1]] : 'Supplier'} — ${titleCase(action)}${cleared ? ' cleared' : ''}`, person, cleared }];
+      });
+      if (entries.length) return entries;
+    }
+    return [{ label: item.isBaseline ? 'History baseline' : item.revision === 1 ? 'PCN created'
+      : titleCase(item.status || 'Status not recorded'), person: item.actor || 'Actor not recorded', cleared: false }];
+  }
+
+  function timelineTime(item) {
+    const date = item.createdAt ? new Date(item.createdAt) : null;
+    return date && Number.isFinite(date.getTime()) ? `<time datetime="${escapeHtml(item.createdAt)}"><span>${escapeHtml(date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span><span>${escapeHtml(date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }))}</span></time>` : '<span class="pcn-timeline-time-unknown">Time not recorded</span>';
+  }
+
+  function renderTimeline() {
+    els.pcnTimelineTrack.innerHTML = timeline.revisions.map(item => {
+      const selected = item.revision === timeline.selectedRevision;
+      const entries = timelineEntries(item);
+      const signing = entries.some(entry => entry.label.includes(' — '));
+      const cleared = entries.some(entry => entry.cleared);
+      const tone = signing ? cleared ? 'danger' : 'success' : item.status === 'closed' ? 'success' : getStatusTone(item.status);
+      const marker = item.isBaseline ? '&#8212;' : cleared || tone === 'danger' ? '!' : tone === 'success' ? '&#10003;' : '&#8226;';
+      const people = entries.map(entry => `<span class="pcn-timeline-signoff"><strong>${escapeHtml(entry.label)}</strong><span class="pcn-timeline-actor">${escapeHtml(entry.person)}</span></span>`).join('');
+      return `<li class="pcn-timeline-item"><button class="pcn-timeline-event pcn-timeline-${escapeHtml(tone)}${item.isBaseline ? ' is-baseline' : ''}" data-revision="${escapeHtml(item.revision)}" type="button" aria-pressed="${selected}" aria-controls="pcnTimelineDetails" aria-label="Change ${escapeHtml(item.revision)}: ${escapeHtml(entries.map(entry => `${entry.label}, ${entry.person}`).join('; '))}">${timelineTime(item)}<span class="pcn-timeline-marker" aria-hidden="true">${marker}</span>${people}</button></li>`;
+    }).join('');
+    els.pcnTimelineTrack.querySelectorAll('.pcn-timeline-event').forEach(button => button.addEventListener('click', () => selectTimelineRevision(Number(button.dataset.revision))));
+    renderTimelineDetails();
+    scrollSelectedTimeline();
+  }
+
+  function selectTimelineRevision(revision, focus = false) {
+    if (!timeline.revisions.some(item => item.revision === revision)) return;
+    timeline = { ...timeline, selectedRevision: revision };
+    els.pcnTimelineTrack.querySelectorAll('.pcn-timeline-event').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.revision) === revision)));
+    renderTimelineDetails();
+    scrollSelectedTimeline(focus);
+  }
+
+  function renderTimelineDetails() {
+    const item = timeline.revisions.find(revision => revision.revision === timeline.selectedRevision);
+    if (!item) { els.pcnTimelineDetails.innerHTML = ''; return; }
+    const changes = userFacingTimelineChanges(item.changes);
+    const rows = changes.map(change => `<tr><th scope="row">${escapeHtml(timelineFieldLabel(change))}</th><td><pre>${escapeHtml(timelineValue(change.before))}</pre></td><td><pre>${escapeHtml(timelineValue(change.after))}</pre></td></tr>`).join('');
+    els.pcnTimelineDetails.innerHTML = `<h3>Event ${escapeHtml(item.revision)}: ${escapeHtml(timelineSummary({ ...item, changes }))}</h3><p>${escapeHtml(item.actor || 'Actor not recorded')} &middot; ${escapeHtml(item.createdAt ? formatDate(item.createdAt) : 'Time not recorded')}</p>${rows ? `<div class="pcn-timeline-change-scroll"><table class="pcn-timeline-change-table"><thead><tr><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="pcn-timeline-empty">${item.isBaseline ? 'Earlier changes were not recorded. This is the first available history baseline.' : 'No form or signing field changes were recorded for this event.'}</p>`}`;
+  }
+
+  function userFacingTimelineChanges(changes) {
+    const visible = (Array.isArray(changes) ? changes : []).filter(change => {
+      if (['id', 'version', 'updatedAt'].includes(change.path)) return false;
+      return !String(change.path || '').startsWith('documentControl.')
+        || ['documentControl.revisionReason', 'documentControl.revisionStartedBy', 'documentControl.revisionStartedAt'].includes(change.path);
+    });
+    const priority = change => String(change.path || '').startsWith('internalReview.') ? 0
+      : String(change.path || '').startsWith('documentControl.') ? 2 : 1;
+    return visible.sort((before, after) => priority(before) - priority(after));
+  }
+
+  function scrollSelectedTimeline(focus = false) {
+    const track = els.pcnTimelineTrack;
+    const button = [...track.querySelectorAll('.pcn-timeline-event')].find(item => Number(item.dataset.revision) === timeline.selectedRevision);
+    if (!button) return;
+    if (focus) button.focus({ preventScroll: true });
+    // Scroll only the timeline, so selecting a revision cannot move the page or dialog.
+    track.scrollTo({ left: Math.max(0, button.parentElement.offsetLeft - track.offsetLeft - (track.clientWidth - button.clientWidth) / 2), behavior: 'auto' });
+  }
+
+  function scrollTimeline(direction) {
+    els.pcnTimelineTrack.scrollBy({ left: direction * els.pcnTimelineTrack.clientWidth * 0.8, behavior: 'auto' });
+  }
+
+  function updateTimelineNavigation() {
+    const disabled = timeline.revisions.length < 2;
+    els.pcnTimelinePreviousButton.disabled = disabled;
+    els.pcnTimelineNextButton.disabled = disabled;
   }
 
   async function updateSelectedStatus(forcedStatus) {
@@ -614,7 +836,9 @@
       const removeButton = row.querySelector(".danger-button");
       viewButton.disabled = isAnyBusy();
       if (removeButton) removeButton.disabled = isAnyBusy();
-      viewButton.addEventListener("click", () => loadDetail(record.id));
+      viewButton.setAttribute('aria-haspopup', 'dialog');
+      viewButton.setAttribute('aria-controls', 'pcnTimelineDialog');
+      viewButton.addEventListener("click", () => openTimeline(record, viewButton));
       if (removeButton) removeButton.addEventListener("click", () => requestRemovePcn(record));
       row.addEventListener("click", (event) => {
         if (event.target.closest("a, button")) {
@@ -624,6 +848,7 @@
         loadDetail(record.id);
       });
       row.addEventListener("keydown", (event) => {
+        if (event.target.closest("a, button")) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           loadDetail(record.id);
