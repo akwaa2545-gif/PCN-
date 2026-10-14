@@ -106,6 +106,18 @@ test('legacy SQL password account creation cannot grant an unpaired Developer ro
   assert.equal(state.calls.length, 0);
 });
 
+test('explicit password-maintenance Developer creation persists its paired department and non-signing assignment', async () => {
+  const { repository, state } = sqlFixture();
+  await repository.createUser({ username: 'maintenance', roles: ['developer'], department: 'developer',
+    signingStep: null, passwordHash: 'unusable-test-hash', mustChangePassword: false });
+  const accountInsert = state.calls.find(call => /INSERT pcn.Users/.test(call.query));
+  assert.equal(accountInsert.inputs.department, 'developer');
+  assert.equal(accountInsert.inputs.signingStep, null);
+  assert.match(accountInsert.query, /DepartmentKey/);
+  assert.match(accountInsert.query, /SigningStep/);
+  assert.deepEqual(state.calls.filter(call => /INSERT pcn.UserRoles/.test(call.query)).map(call => call.inputs.role), ['developer']);
+});
+
 test('changing the last actual Administrator into Developer remains prohibited', async () => {
   const { repository, state } = sqlFixture();
   repository.userQuery = async () => ({ ...developer, roles: ['admin'], department: 'it', version: '0011223344556677' });
