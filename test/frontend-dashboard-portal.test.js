@@ -12,13 +12,17 @@ function portal(fetch) {
     PCN_SESSION: { fetch: async url => { calls.push(url); return fetch(url); } },
     PCN_RECORDS_DASHBOARD: { create(options) { window.options = options; return controller; } } };
   const source = fs.readFileSync(require.resolve('../admin.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
+    const actualLoadDetail = loadDetail;
     render = () => { window.renders++; recordsDashboard?.setRecords(state.pcns); };
     showAdminNotice = () => {}; showAdminToast = () => {};
     renderLoadingState = () => {};
     loadDetail = async id => { window.selectedId = id; };
-    window.TEST = { state, els, initializeRecordsDashboard, loadPcns, refreshQuietly, canAutoRefresh };
+    openTimeline = (record, opener) => { window.timelineAction = { record, opener }; };
+    requestRemovePcn = record => { window.removeAction = record; };
+    window.TEST = { state, els, initializeRecordsDashboard, loadPcns, refreshQuietly, canAutoRefresh, loadDetail: actualLoadDetail };
   })();`);
-  vm.runInNewContext(source, { window, document: { addEventListener() {}, querySelector: () => null, activeElement: null } });
+  vm.runInNewContext(source, { window, document: { addEventListener() {}, querySelector: () => null, activeElement: null,
+    createElement() { return { events: {}, attributes: {}, addEventListener(name, handler) { this.events[name] = handler; }, setAttribute(name, value) { this.attributes[name] = value; } }; } } });
   const { state, els } = window.TEST;
   state.user = { id: 'reviewer', roles: ['qa'] }; state.isLoading = false;
   for (const id of ['pcnAdminView', 'adminPcnRows', 'adminSearchInput', 'adminStatusFilter', 'adminRiskFilter', 'adminCount', 'adminMessage']) els[id] = { id };
@@ -41,6 +45,16 @@ test('Portal dashboard uses batched authorized overview and preserves row select
   assert.equal(page.window.selectedId, 'PCN-1');
   assert.equal(typeof page.window.options.actions, 'function');
   assert.equal(typeof page.window.options.selectedId, 'function');
+  const actions = page.window.options.actions(items[0]);
+  assert.equal(actions.length, 1);
+  assert.match(actions[0].className, /admin-view-button/);
+  actions[0].events.click();
+  assert.equal(page.window.timelineAction.record, items[0]);
+  assert.equal(page.window.timelineAction.opener, actions[0]);
+  page.state.user = { id: 'admin', roles: ['admin'] };
+  const adminActions = page.window.options.actions(items[0]);
+  assert.equal(adminActions.length, 2);
+  adminActions[1].events.click(); assert.equal(page.window.removeAction, items[0]);
 });
 
 test('preview opening invalidates an in-flight overview even if it closes before the response returns', async () => {
@@ -64,6 +78,7 @@ test('permission failure clears dashboard preview and records and stops future p
   assert.equal(page.state.pcns.length, 0);
   assert.equal(page.canAutoRefresh(), false);
   await page.refreshQuietly(); assert.equal(page.calls.length, 1);
+  await page.loadPcns(); assert.equal(page.calls.length, 1);
 });
 
 test('malformed overview fails visibly without silently falling back to legacy data', async () => {
@@ -78,4 +93,42 @@ test('Portal loads the shared dashboard factory before its integration', () => {
   const html = fs.readFileSync(require.resolve('../admin.html'), 'utf8');
   assert.ok(html.indexOf('src="/records.js"') >= 0);
   assert.ok(html.indexOf('src="/records.js"') < html.indexOf('src="/admin.js"'));
+});
+
+test('late detail reads cannot restore protected sidebar data after preview detects access loss', async () => {
+  const pending = new Map();
+  const page = portal(url => new Promise(resolve => pending.set(url, resolve)));
+  const detail = page.loadDetail('protected');
+  page.window.options.onAccessLost(Object.assign(new Error('denied'), { status: 403 }));
+  pending.get('/api/pcns/protected')({ id: 'protected', supplierName: 'Secret' });
+  pending.get('/api/pcns/protected/progress')({ status: 'private' });
+  await detail;
+  assert.equal(page.state.selected, null); assert.equal(page.state.progress, null);
+  assert.match(page.state.message, /Access unavailable/);
+  assert.equal(page.canAutoRefresh(), false);
+});
+
+test('late manual list reads cannot restore protected records after preview detects access loss', async () => {
+  let resolve;
+  const page = portal(() => new Promise(done => { resolve = done; }));
+  const list = page.loadPcns();
+  page.window.options.onAccessLost(Object.assign(new Error('denied'), { status: 403 }));
+  resolve({ items: [{ id: 'protected' }] }); await list;
+  assert.equal(page.state.pcns.length, 0); assert.equal(page.state.selected, null);
+  assert.match(page.state.message, /Access unavailable/);
+  assert.equal(page.canAutoRefresh(), false);
+});
+
+test('late selected progress in a manual list refresh cannot restore sidebar data after access loss', async () => {
+  let resolveProgress;
+  const page = portal(url => url === '/api/pcns/overview' ? { items: [{ id: 'selected' }] }
+    : new Promise(done => { resolveProgress = done; }));
+  page.state.selected = { id: 'selected' };
+  const list = page.loadPcns();
+  await new Promise(setImmediate);
+  page.window.options.onAccessLost(Object.assign(new Error('denied'), { status: 403 }));
+  resolveProgress({ status: 'private' }); await list;
+  assert.equal(page.state.pcns.length, 0); assert.equal(page.state.selected, null);
+  assert.equal(page.state.progress, null);
+  assert.match(page.state.message, /Access unavailable/);
 });
