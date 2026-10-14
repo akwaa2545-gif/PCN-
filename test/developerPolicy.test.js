@@ -48,6 +48,12 @@ test('principal role gate accepts Developer for Administrator routes without exp
   assert.throws(() => requirePrincipal({ user: { ...developer, department: 'it' } }, { roles: ['admin'] }), { statusCode: 403 });
 });
 
+test('inactive Developer cannot acquire Administrator authority through the central principal gate', () => {
+  const inactive = { ...developer, isActive: false };
+  assert.equal(hasRole(inactive, 'admin'), false);
+  assert.throws(() => requirePrincipal({ user: inactive }, { roles: ['admin'] }), { statusCode: 403 });
+});
+
 test('Developer non-signing assignment never becomes an automatic signing mail recipient', () => {
   const profile = { id: 'mail-id', email: 'developer@example.com' };
   assert.equal(managedRecipient({ ...developer, email: profile.email, mailDirectoryId: profile.id,
