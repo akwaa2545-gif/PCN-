@@ -31,3 +31,27 @@ test('HTTP Developer challenge has typed code and no cookie; accepted challenge 
   assert.equal(text.includes('PasswordHash'),false);
   assert.deepEqual(JSON.parse(text).data.user.roles,['developer']);
 });
+
+test('maintenance Developer without an employee code retains department and Administrator authorization in the public session',async t=>{
+  const secret=crypto.randomBytes(24).toString('hex');
+  const accountPassword=crypto.randomBytes(24).toString('hex');
+  const user={id:crypto.randomUUID(),username:'maintenance-developer',identityProvider:'password',displayName:'Developer',roles:['developer'],department:'developer',signingStep:null,isActive:true,securityStamp:crypto.randomUUID(),passwordHash:`fixture:${accountPassword}`};
+  const sessions=[];
+  const repository={async getUserByLogin(){return user;},async getUserById(){return user;},async saveSession(s){sessions.push(s);},async getSession(hash){return sessions.find(s=>s.tokenHash===hash);},async recordLoginFailure(){},async resetLoginFailures(){},async listUsers(){return [user];}};
+  const authService=new AuthService(repository,{authMode:'password',developerPasswordHash:`fixture:${secret}`,passwordHasher:async value=>`fixture:${value}`,passwordVerifier:async(hash,value)=>hash===`fixture:${value}`});
+  const app=createApp({repository:memoryRepository(),authService,authMode:'password',publicOrigin:'http://localhost',secureCookies:false});
+  await new Promise(resolve=>app.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>{app.close(resolve);app.closeAllConnections();}));
+  const base=`http://127.0.0.1:${app.address().port}`;
+  const response=await fetch(`${base}/api/auth/login`,{method:'POST',headers:{origin:'http://localhost','content-type':'application/json'},body:JSON.stringify({username:user.username,password:accountPassword,developerPassword:secret})});
+  assert.equal(response.status,200);
+  const cookie=response.headers.get('set-cookie').split(';')[0];
+  const admin=await fetch(`${base}/api/admin/users`,{headers:{cookie}});
+  assert.equal(admin.status,200);
+  const session=await fetch(`${base}/api/session`,{headers:{cookie}});
+  const body=await session.json();
+  assert.equal(body.data.user.department,'developer');
+  assert.equal(body.data.user.employeeCode,undefined);
+  assert.deepEqual(body.data.user.roles,['developer']);
+  assert.equal(JSON.stringify(body).includes(secret),false);
+});
