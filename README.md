@@ -20,6 +20,8 @@ Migrations 001–006 are applied to the configured `Scn_DB` on SQL Server 2014 (
 
 Workbook-derived options come from `NSN-000244 Supplier Product and Process Change Notification Form.xlsx`. SQL saves the web form's PCN data, including ordered change rows and the complete nested internal review. This does not import or execute workbooks or macros.
 
+**Local development — Records dashboard (not deployed):** Portal and read-only Records now share summary cards, next responsibility and signing progress, combined filters and saved views, a read-only Overview/Timeline/Documents preview, document-readiness badges, sorting, selectable columns, client-side pagination and filtered CSV export. Pending time uses a recorded status transition when available and otherwise labels the saved-record age; overdue requires an explicit valid review deadline. The current schema has no review-deadline field or editor, so no deadline is inferred from the target start date. Saved preferences are scoped to the signed-in account in browser storage and contain no record payloads. The authenticated overview endpoint batches document/status metadata while preserving existing access scope. See [the implementation record](plans/records-dashboard.md). Runtime `pcn-test-17-1` remains the last deployed release; this work stays local until the user explicitly says **deploy**.
+
 ## Setup
 
 Use Node.js 22 or later:
@@ -155,7 +157,10 @@ npm run test:e2e
 npm run test:documents
 npm run test:auto-refresh
 npm run test:timeline
+npm run test:records-dashboard
 ```
+
+The local Records dashboard source passed 682/682 unit/API tests with 91.92% line / 91.09% branch / 93.80% function coverage and 12 isolated dashboard browser groups using 17 fixture records, with no browser errors, external calls or forbidden writes. The standalone full application browser smoke suite and existing Records, timeline and automatic-update regressions also passed. Its implementation and browser evidence are recorded in [the dashboard plan](plans/records-dashboard.md). This is local verification, not a new deployment.
 
 The timeline source passed 645 unit/API tests with 91.68% line / 90.87% branch / 93.83% function coverage. Its six isolated browser journeys covered 13 genuine events, signing department/person labels, before/after business fields, keyboard opening and closing, contained desktop/mobile scrolling, stale reads, empty/error/retry states and paused Portal refresh. These checks used isolated adapters and made no live business changes or external integration calls. Release CI and host acceptance are recorded separately in the deployment runbooks.
 
@@ -167,4 +172,4 @@ Browser smoke checks passed for forced password change, re-login, empty routing,
 
 See [API inventory](plans/sql-server-api-checklist.md), [table mapping](plans/sql-server-table-mapping.md), and [migration plan](plans/sql-server-migration.md). The migration plan includes future acceptance criteria, not a declaration that every proposed feature exists.
 
-Add role selects source employees or existing accounts; Create user creates PCN-local employees with explicit PCN grants. Remaining operational work includes live upload/scanning/save/signing acceptance, scanner provisioning, file retention, the user's Edge GUI observation, company membership/reviewer assignments, list pagination, historical-master rendering, mail status/retry operations and general command idempotency. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.
+Add role selects source employees or existing accounts; Create user creates PCN-local employees with explicit PCN grants. Remaining operational work includes live upload/scanning/save/signing acceptance, scanner provisioning, file retention, the user's Edge GUI observation, company membership/reviewer assignments, server-side list pagination, historical-master rendering, mail status/retry operations and general command idempotency. The local Records dashboard adds client-side pagination; it has not changed the live release. Source workbooks, prototype data, agent state and obsolete Firebase/JSON files remain local and are excluded from this SQL repository.

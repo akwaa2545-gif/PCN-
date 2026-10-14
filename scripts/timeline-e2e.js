@@ -71,7 +71,7 @@ async function main() {
       if (method === 'GET' && url.pathname === '/api/admin/notifications/health') return route.fulfill({ json: { success: true, data: { configuration: { status: 'not_configured' }, worker: { status: 'disabled' }, queue: {} } } });
       if (/\/notifications(?:\/|$)/.test(url.pathname) || ['/api/admin/directory-users', '/api/admin/employees'].includes(url.pathname)
         || !['GET', 'HEAD'].includes(method)) { report.forbidden.push({ method, path: url.pathname }); return route.abort(); }
-      if (url.pathname === '/api/pcns') reads++;
+      if (url.pathname === '/api/pcns/overview') reads++;
       if (url.pathname === `/api/pcns/${record.id}` && mode === 'detail-held') {
         await new Promise(resolve => { releaseHeld = resolve; detailEntered(); });
       }

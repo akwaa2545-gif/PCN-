@@ -28,6 +28,8 @@
   const directorySelections = new WeakMap();
   let refreshGeneration = 0;
   let autoRefreshBlocked = false;
+  let portalAccessEpoch = 0;
+  let recordsDashboard = null;
   let timeline = { record: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
 
   document.addEventListener("DOMContentLoaded", init);
@@ -121,6 +123,7 @@
       state.user = session.user;
       state.view = permittedView(state.view);
       window.PCN_SESSION.mountProfile(session.user, (error) => showAdminNotice("error", "Sign out failed", error.message));
+      initializeRecordsDashboard();
       initializeAdminControls();
       if (isAdmin()) refreshNotificationHealth();
       await loadPcns();
@@ -133,6 +136,7 @@
 
   function canAutoRefresh() {
     return Boolean(state.user) && !autoRefreshBlocked && !state.isLoading && !isAnyBusy()
+      && (!recordsDashboard || recordsDashboard.canRefresh())
       && !document.querySelector('dialog[open]') && els.adminRemoveDialog?.hidden !== false
       && (state.view === 'pcns' || (state.view === 'mail' && isAdmin()
         && !state.hasMailChanges && !state.recipientTargetKey && !els.notificationRecipientDialog?.open));
@@ -153,8 +157,7 @@
         preservePortalPosition(renderNotificationSettings);
         return;
       }
-      const pcns = await apiFetch('/api/pcns');
-      if (!Array.isArray(pcns)) throw new Error('The record list returned an invalid response.');
+      const pcns = await fetchRecords();
       if (!stillCurrent()) return;
       const selected = selectedId ? pcns.find(record => record.id === selectedId) || null : null;
       const progress = selected ? await apiFetch(`/api/pcns/${encodeURIComponent(selected.id)}/progress`) : null;
@@ -166,17 +169,66 @@
       preservePortalPosition(() => render({ routing: false }));
     } catch (error) {
       if (error.status === 401 || error.status === 403) {
-        autoRefreshBlocked = true;
-        refreshGeneration++;
-        state.pcns = []; state.selected = null; state.progress = null;
-        state.notificationSettings = { schemaVersion: 2, groups: [], legacyGroups: [] };
-        state.mailDraftRows = null; state.hasMailChanges = false;
-        state.message = 'Access unavailable. Reload to check your current permissions.';
-        state.routingMessage = state.message;
-        render();
+        clearProtectedPortal();
       }
       throw error;
     }
+  }
+
+  function initializeRecordsDashboard() {
+    if (recordsDashboard || !window.PCN_RECORDS_DASHBOARD?.create) return;
+    recordsDashboard = window.PCN_RECORDS_DASHBOARD.create({
+      root: els.pcnAdminView, rows: els.adminPcnRows, count: els.adminCount,
+      search: els.adminSearchInput, message: els.adminMessage, user: state.user,
+      statusFilter: els.adminStatusFilter, riskFilter: els.adminRiskFilter, fetch: apiFetch,
+      codeHref: record => `/${encodeURIComponent(record.id)}`,
+      selectedId: () => state.selected?.id, onRowSelect: record => loadDetail(record.id),
+      actions: dashboardActions, isBusy: isAnyBusy,
+      onOpen: () => { refreshGeneration++; }, onClose: () => {},
+      onAccessLost: clearProtectedPortal
+    });
+  }
+
+  async function fetchRecords() {
+    const response = await apiFetch(recordsDashboard ? '/api/pcns/overview' : '/api/pcns');
+    const records = recordsDashboard ? response?.items : response;
+    if (!Array.isArray(records)) throw new Error('The record list returned an invalid response.');
+    return records;
+  }
+
+  function clearProtectedPortal() {
+    autoRefreshBlocked = true;
+    portalAccessEpoch++;
+    refreshGeneration++;
+    recordsDashboard?.clear();
+    if (timeline.record) closeTimeline();
+    state.pcns = []; state.selected = null; state.progress = null;
+    state.notificationSettings = { schemaVersion: 2, groups: [], legacyGroups: [] };
+    state.mailDraftRows = null; state.hasMailChanges = false;
+    state.message = 'Access unavailable. Reload to check your current permissions.';
+    state.routingMessage = state.message;
+    stopBusy();
+    showAdminNotice('error', 'Access unavailable', state.message);
+    render();
+  }
+
+  function dashboardActions(record) {
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'admin-row-button admin-view-button';
+    view.setAttribute('aria-label', `View ${record.id}`);
+    view.setAttribute('aria-haspopup', 'dialog');
+    view.setAttribute('aria-controls', 'pcnTimelineDialog');
+    view.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>';
+    view.disabled = isAnyBusy() || autoRefreshBlocked;
+    view.addEventListener('click', () => openTimeline(record, view));
+    if (!isAdmin()) return [view];
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.className = 'danger-button';
+    remove.textContent = isBusy(`remove:${record.id}`) ? 'Removing...' : 'Remove';
+    remove.disabled = isAnyBusy() || autoRefreshBlocked;
+    remove.addEventListener('click', () => requestRemovePcn(record));
+    return [view, remove];
   }
 
   function preservePortalPosition(update) {
@@ -237,9 +289,11 @@
       }
     });
     els.notificationHealthRefreshButton.addEventListener("click", refreshNotificationHealth);
-    els.adminSearchInput.addEventListener("input", updateTableFilters);
-    els.adminStatusFilter.addEventListener("change", updateTableFilters);
-    els.adminRiskFilter.addEventListener("change", updateTableFilters);
+    if (!recordsDashboard) {
+      els.adminSearchInput.addEventListener("input", updateTableFilters);
+      els.adminStatusFilter.addEventListener("change", updateTableFilters);
+      els.adminRiskFilter.addEventListener("change", updateTableFilters);
+    }
     els.adminRecordsButton.addEventListener("click", () => setAdminView("pcns"));
     els.adminMailRoutingButton.addEventListener("click", () => setAdminView("mail"));
     els.adminUsersButton.addEventListener("click", () => setAdminView("users"));
@@ -259,28 +313,40 @@
   }
 
   async function loadPcns(successMessage, action = "load") {
+    if (autoRefreshBlocked) return;
     startBusy(action, action === "refresh" ? "Refreshing PCN records..." : "Loading portal data...");
+    const accessEpoch = portalAccessEpoch;
+    const current = () => !autoRefreshBlocked && accessEpoch === portalAccessEpoch;
 
     try {
       const [pcns, notificationSettings] = await Promise.all([
-        apiFetch("/api/pcns"),
+        fetchRecords(),
         isAdmin() ? apiFetch("/api/notification-settings") : Promise.resolve(state.notificationSettings)
       ]);
+      if (!current()) return;
+      const selected = state.selected ? pcns.find((record) => record.id === state.selected.id) || null : null;
+      const progress = selected ? await apiFetch(`/api/pcns/${encodeURIComponent(selected.id)}/progress`) : null;
+      if (!current()) return;
       state.pcns = pcns;
       if (!state.hasMailChanges) state.notificationSettings = notificationSettings;
       state.directoryLookupStatus = notificationSettings.directoryConfigured ? "Directory lookup ready" : "Directory lookup not configured";
-      state.selected = state.selected ? state.pcns.find((record) => record.id === state.selected.id) || null : null;
-      state.progress = state.selected ? await apiFetch(`/api/pcns/${encodeURIComponent(state.selected.id)}/progress`) : null;
+      state.selected = selected;
+      state.progress = progress;
       state.message = successMessage || (state.pcns.length ? "Records loaded from database." : "No PCNs saved.");
       if (!state.hasMailChanges) state.routingMessage = notificationSettings.groups.some((group) => String(group.emails || "").trim()) ? "Mail routing loaded." : "Step recipient lists are empty. Assign recipients and save routing.";
       showAdminNotice("success", action === "refresh" ? "Refresh complete" : "Portal ready", state.message);
     } catch (error) {
+      if (!current()) return;
       state.message = error.message;
       state.routingMessage = error.message;
       state.pcns = [];
       state.selected = null;
       state.progress = null;
-      showAdminNotice("error", "Load failed", error.message);
+      if (error.status === 401 || error.status === 403) clearProtectedPortal();
+      else {
+        recordsDashboard?.clear();
+        showAdminNotice("error", "Load failed", error.message);
+      }
     } finally {
       stopBusy();
     }
@@ -442,8 +508,11 @@
   }
 
   async function loadDetail(id, { preservePosition = false } = {}) {
+    if (autoRefreshBlocked) return;
     const focusSession = timeline.session;
     startBusy(`detail:${id}`, `Loading ${id}...`);
+    const accessEpoch = portalAccessEpoch;
+    const current = () => !autoRefreshBlocked && accessEpoch === portalAccessEpoch;
 
     try {
       const encodedId = encodeURIComponent(id);
@@ -451,15 +520,20 @@
         apiFetch(`/api/pcns/${encodedId}`),
         apiFetch(`/api/pcns/${encodedId}/progress`)
       ]);
+      if (!current()) return;
       state.selected = record;
       state.progress = progress;
       state.message = `Loaded ${id}.`;
       showAdminNotice("success", "PCN loaded", `${id} is selected for workflow review.`);
     } catch (error) {
-      state.message = error.message;
-      state.selected = null;
-      state.progress = null;
-      showAdminNotice("error", "PCN load failed", error.message);
+      if (!current()) return;
+      if (error.status === 401 || error.status === 403) clearProtectedPortal();
+      else {
+        state.message = error.message;
+        state.selected = null;
+        state.progress = null;
+        showAdminNotice("error", "PCN load failed", error.message);
+      }
     } finally {
       stopBusy();
     }
@@ -500,6 +574,7 @@
   }
 
   async function openTimeline(record, opener = document.activeElement) {
+    if (autoRefreshBlocked) return;
     refreshGeneration++;
     timeline = { record, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session + 1, opener };
     els.pcnTimelineTitle.textContent = `${record.id} timeline`;
@@ -515,7 +590,8 @@
   }
 
   async function loadTimeline() {
-    if (!timeline.record || !els.pcnTimelineDialog.open) return;
+    if (autoRefreshBlocked || !timeline.record || !els.pcnTimelineDialog.open) return;
+    const accessEpoch = portalAccessEpoch;
     const id = timeline.record.id;
     const request = timeline.request + 1;
     const selectedRevision = timeline.selectedRevision;
@@ -539,6 +615,10 @@
       els.pcnTimelineMessage.textContent = revisions.length ? `${revisions.length} recorded ${revisions.length === 1 ? 'event' : 'events'}. Select a change to see details.` : 'No recorded changes are available for this PCN.';
       renderTimeline();
     } catch (error) {
+      if ((error.status === 401 || error.status === 403) && !autoRefreshBlocked && accessEpoch === portalAccessEpoch) {
+        clearProtectedPortal();
+        return;
+      }
       if (!current()) return;
       timeline = { ...timeline, revisions: [], selectedRevision: null };
       els.pcnTimelineMessage.textContent = `Change history unavailable. ${error.message}`;
@@ -684,7 +764,7 @@
   }
 
   async function updateSelectedStatus(forcedStatus) {
-    if (!isAdmin()) return;
+    if (!isAdmin() || autoRefreshBlocked) return;
     const requestedStatus = typeof forcedStatus === "string" ? forcedStatus : els.adminStatusSelect.value;
 
     if (!state.selected || !requestedStatus) {
@@ -701,7 +781,7 @@
         body: JSON.stringify({ status: requestedStatus, version: state.selected.version })
       });
       state.progress = await apiFetch(`/api/pcns/${encodeURIComponent(id)}/progress`);
-      state.pcns = await apiFetch("/api/pcns");
+      state.pcns = await fetchRecords();
       state.message = `Moved ${id} to ${titleCase(requestedStatus)}.`;
       showAdminNotice("success", "Workflow updated", state.message);
     } catch (error) {
@@ -753,7 +833,7 @@
   }
 
   async function removePcn(record) {
-    if (!isAdmin()) return;
+    if (!isAdmin() || autoRefreshBlocked) return;
     startBusy(`remove:${record.id}`, `Removing ${record.id}...`);
     els.adminRemoveConfirmButton.disabled = true;
     els.adminRemoveConfirmButton.textContent = "Removing...";
@@ -783,11 +863,13 @@
     renderAdminView();
     renderLoadingState();
     renderOverview();
-    renderTableFilters();
+    if (!recordsDashboard) renderTableFilters();
     const visiblePcns = getFilteredPcns();
-    els.adminCount.textContent = String(visiblePcns.length);
+    if (!recordsDashboard) els.adminCount.textContent = String(visiblePcns.length);
     els.adminMessage.textContent = state.message;
     els.mailRoutingMessage.textContent = state.routingMessage;
+    if (recordsDashboard) recordsDashboard.setRecords(state.pcns);
+    else {
     els.adminPcnRows.innerHTML = "";
 
     if (state.isLoading && state.pcns.length === 0) {
@@ -856,6 +938,7 @@
       });
       els.adminPcnRows.appendChild(row);
     });
+    }
 
     els.adminDetailStatus.textContent = state.selected ? titleCase(state.selected.status || "draft") : "None";
     els.adminDetailPreview.textContent = state.selected ? JSON.stringify(toDetailPayload(state.selected), null, 2) : "Select a PCN row to view details.";

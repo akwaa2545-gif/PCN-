@@ -1,7 +1,33 @@
 const sql = require('mssql');
 const { fieldChanges, snapshot } = require('./documentControl');
+const { ApiError } = require('./apiError');
+const { versionHex } = require('./sqlPcnHydration');
 
 class SqlRevisions {
+  async statusTimings(source, codes) {
+    if (!Array.isArray(codes) || codes.some(code => typeof code !== 'string' || !/^PCN-\d{4}-\d{4}$/.test(code))) {
+      throw new ApiError(400, 'Invalid PCN ids');
+    }
+    const uniqueCodes = [...new Set(codes)];
+    let entries = [];
+    for (let offset = 0; offset < uniqueCodes.length; offset += 400) {
+      const batch = uniqueCodes.slice(offset, offset + 400);
+      const parameters = batch.map((_, index) => `@code${index}`).join(',');
+      const request = batch.reduce((current, code, index) => current.input(`code${index}`, sql.NVarChar(32), code), source.request());
+      const result = await request.query(`WITH history AS (
+        SELECT PcnCode,Revision,Status,CreatedAt,IsBaseline,LAG(Status) OVER(PARTITION BY PcnCode ORDER BY Revision) AS PreviousStatus
+        FROM pcn.PcnRevisions WHERE PcnCode IN (${parameters})
+      ) SELECT p.PcnCode,p.RowVersion,p.Status,t.CreatedAt AS Since FROM pcn.PcnRequests p
+        OUTER APPLY (SELECT TOP (1) h.CreatedAt FROM history h WHERE h.PcnCode=p.PcnCode AND h.Status=p.Status
+          AND h.IsBaseline=0 AND (h.PreviousStatus<>h.Status OR h.Revision=1)
+          AND NOT EXISTS (SELECT 1 FROM history newer WHERE newer.PcnCode=h.PcnCode AND newer.Revision>h.Revision AND newer.Status<>p.Status)
+          ORDER BY h.Revision DESC) t
+        WHERE p.DeletedAt IS NULL AND p.PcnCode IN (${parameters})`);
+      entries = [...entries, ...result.recordset.map(row => [row.PcnCode, { parentVersion: versionHex(row.RowVersion), status: row.Status,
+        since: row.Since instanceof Date ? row.Since.toISOString() : row.Since || null }])];
+    }
+    return new Map(entries);
+  }
   async append(tx, code, before, after, actor) {
     const result = await tx.request().input('code', sql.NVarChar(32), code)
       .query('SELECT COALESCE(MAX(Revision),0) AS Revision FROM pcn.PcnRevisions WITH (UPDLOCK,HOLDLOCK) WHERE PcnCode=@code');

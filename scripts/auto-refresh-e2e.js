@@ -204,8 +204,8 @@ async function main() {
     await setVisibility('hidden');
     await saveSupplier('Polling Supplier After Resume');
     // The writer save settles any previously dispatched read before measurement.
-    const frozenReads = viewer.count('/api/pcns');
-    await unchangedFor(5500, () => viewer.count('/api/pcns'), frozenReads, 'Synthetic hidden visibility stops list polling');
+    const frozenReads = viewer.count('/api/pcns/overview');
+    await unchangedFor(5500, () => viewer.count('/api/pcns/overview'), frozenReads, 'Synthetic hidden visibility stops list polling');
     await setVisibility('visible');
     await withinInterval('Visibility resumed Records', () => expect(viewer.page.locator('#recordsRows')).toContainText('Polling Supplier After Resume'));
     report.checks.push('Synthetic visibilitychange wiring pauses polling while hidden and immediately refreshes on return');

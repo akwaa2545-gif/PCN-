@@ -39,6 +39,27 @@ class SqlDocuments {
     assertCode(pcnCode);
     return this.listFrom(this.pool, pcnCode);
   }
+  async listForRecords(codes) {
+    if (!Array.isArray(codes)) throw new ApiError(400, 'Invalid PCN ids');
+    codes.forEach(assertCode);
+    const uniqueCodes = [...new Set(codes)];
+    let entries = [];
+    for (let offset = 0; offset < uniqueCodes.length; offset += 400) {
+      const batch = uniqueCodes.slice(offset, offset + 400);
+      const request = batch.reduce((current, code, index) => current.input(`code${index}`, sql.NVarChar(32), code), this.pool.request());
+      const result = await request.query(`SELECT p.PcnCode,p.RowVersion,f.Id,f.FileName,f.ContentType,f.SizeBytes,f.ScanStatus,
+        f.UploadedBy,f.UploadedAt,f.ContentRevision,f.RequirementName FROM pcn.PcnRequests p
+        LEFT JOIN pcn.PcnDocumentFiles f ON f.PcnCode=p.PcnCode AND f.DeletedAt IS NULL
+        WHERE p.DeletedAt IS NULL AND p.PcnCode IN (${batch.map((_, index) => `@code${index}`).join(',')}) ORDER BY p.PcnCode,f.UploadedAt,f.Id`);
+      const grouped = new Map();
+      for (const row of result.recordset) {
+        const previous = grouped.get(row.PcnCode) || { parentVersion: versionHex(row.RowVersion), attachments: [] };
+        grouped.set(row.PcnCode, { ...previous, attachments: row.Id ? [...previous.attachments, documentMetadata(row)] : previous.attachments });
+      }
+      entries = [...entries, ...grouped];
+    }
+    return new Map(entries);
+  }
   async listFrom(source, pcnCode) {
     const result = await source.request().input('pcnCode', sql.NVarChar(32), pcnCode)
       .query(`SELECT Id,FileName,ContentType,SizeBytes,ScanStatus,UploadedBy,UploadedAt,ContentRevision,RequirementName

@@ -51,6 +51,8 @@ test('overdue requires explicit valid review deadline and active record; desired
   assert.equal(buildRecordOverview({...record,status:'approved',reviewDueAt:'2026-10-01'},admin,[],[],now).dashboard.pending.overdue,false);
   const missing=buildRecordOverview({...record,createdAt:undefined,updatedAt:undefined},admin,[],[],now).dashboard.pending;
   assert.equal(missing.since,null); assert.equal(missing.ageDays,null); assert.equal(missing.source,'unknown');
+  assert.equal(buildRecordOverview({...record,reviewDueAt:'2026-02-31'},admin,[],[],now).dashboard.pending.reviewDueAt,null);
+  assert.equal(buildRecordOverview({...record,updatedAt:'2026-10-12T02:00:00+07:00'},admin,[],[],now).dashboard.pending.since,'2026-10-11T19:00:00.000Z');
 });
 
 test('supplier names remain restricted and active assignees require correct signing permission', () => {
@@ -64,9 +66,18 @@ test('loader reads scoped list first and batches documents and accounts once', a
   const calls=[];
   const result=await loadRecordOverview({service:{async list(filters,user){calls.push(['list',user.id]);return [record];}},
     authService:{repository:{async listUsers(){calls.push(['users']);return [assigned];}}},
-    documents:{async listForRecords(ids){calls.push(['documents',ids]);return new Map([[record.id,{parentVersion:record.version,attachments:[clean]}]]);}}},viewer,{},now);
-  assert.deepEqual(calls,[['list','viewer'],['users'],['documents',[record.id]]]);
+    documents:{async listForRecords(ids){calls.push(['documents',ids]);return new Map([[record.id,{parentVersion:record.version,attachments:[clean]}]]);}}},admin,{},now);
+  assert.deepEqual(calls,[['list','admin'],['users'],['documents',[record.id]]]);
   assert.equal(result.items[0].dashboard.documents.state,'ready'); assert.equal(result.generatedAt,now.toISOString());
+});
+
+test('roleless and supplier overview never reads privileged accounts',async()=>{
+  for(const user of [viewer,{id:'supplier',roles:['supplier'],isActive:true}]){
+    let calls=0;
+    const context={service:{async list(){return [record];}},authService:{repository:{async listUsers(){calls++;throw new Error('No account lookup allowed');}}}};
+    const result=await loadRecordOverview(context,user,{},now);
+    assert.equal(calls,0);assert.deepEqual(result.items[0].dashboard.action.people,[]);
+  }
 });
 
 test('loader marks storage failures unknown, but authorization failures propagate', async () => {
@@ -74,6 +85,7 @@ test('loader marks storage failures unknown, but authorization failures propagat
   assert.equal((await loadRecordOverview(context,admin,{},now)).items[0].dashboard.documents.state,'unknown');
   assert.equal((await loadRecordOverview({...context,documents:{async listForRecords(){throw new Error('offline');}}},admin,{},now)).items[0].dashboard.documents.state,'unknown');
   await assert.rejects(loadRecordOverview({...context,documents:{async listForRecords(){throw new ApiError(403,'Denied');}}},admin,{},now),{statusCode:403});
+  await assert.rejects(loadRecordOverview({...context,documents:{async listForRecords(){throw {status:401};}}},admin,{},now),{status:401});
 });
 
 test('SQL batch document lookup validates ids and binds chunks without bytes', async () => {
@@ -109,4 +121,19 @@ test('SQL status timing batch is parameterized metadata only, includes baseline 
   assert.deepEqual(calls[0].values,[record.id]);
   assert.match(calls[0].statement,/IsBaseline/); assert.match(calls[0].statement,/LAG\(/i);
   assert.match(calls[0].statement,/DeletedAt IS NULL/); assert.doesNotMatch(calls[0].statement,/SnapshotJson|ChangesJson/);
+});
+
+test('status batches are bounded, empty lists read nothing, and legacy baselines use honest fallback',async()=>{
+  const calls=[];
+  const source={request(){const ids=[];return {input(name,type,value){ids.push(value);return this;},async query(statement){calls.push(ids);return {recordset:[]};}};}};
+  const revisions=new SqlRevisions();
+  await revisions.statusTimings(source,[]);
+  assert.equal(calls.length,0);
+  await revisions.statusTimings(source,Array.from({length:401},(_,i)=>`PCN-2026-${String(i+1).padStart(4,'0')}`));
+  assert.deepEqual(calls.map(batch=>batch.length),[400,1]);
+  await assert.rejects(revisions.statusTimings(source,['invalid']),{statusCode:400});
+  const context={service:{async list(){return [record];}},authService:{repository:{async listUsers(){return [];}}},
+    repository:{async getStatusTimings(){return new Map([[record.id,{parentVersion:record.version,status:record.status,since:null}]]);}}};
+  assert.equal((await loadRecordOverview(context,admin,{},now)).items[0].dashboard.pending.source,'updatedAt');
+  await assert.rejects(loadRecordOverview({...context,repository:{async getStatusTimings(){throw new ApiError(403,'Denied');}}},admin,{},now),{statusCode:403});
 });

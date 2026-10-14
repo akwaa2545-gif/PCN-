@@ -5,6 +5,7 @@ const { hasRole, isInternal, isEmployeeViewer, assertRecordAccess } = require('.
 const { buildWorkflow } = require('./masterData');
 const { normalizeUserId } = require('./employeeAccounts');
 const { buildChecks, buildAction } = require('./documentChecks');
+const { loadRecordOverview } = require('./recordOverview');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -136,6 +137,10 @@ async function handleApi(req, res, url, context, requestId) {
     if (method === 'GET') return send(await service.getNotificationSettings());
     if (['PUT','PATCH'].includes(method)) return send(await service.updateNotificationSettings(await readJsonBody(req),actor,user));
   }
+  if (route === '/api/pcns/overview') {
+    if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
+    return send(await loadRecordOverview(context,user,{status:url.searchParams.get('status') || undefined}));
+  }
   if (route === '/api/pcns') {
     if (method === 'GET') return send(await service.list({status:url.searchParams.get('status') || undefined},user));
     if (method === 'POST') return send(await service.create(await readJsonBody(req),actor,user),201);
@@ -255,7 +260,7 @@ function assertDocumentEdit(record,user) {
   if (['approved','rejected','closed'].includes(record.status) || !isInternal(user) && !['draft','supplier_action'].includes(record.status)) throw new ApiError(403,'Document edits are not allowed at this stage');
 }
 function isViewerReadRoute(route) {
-  if (['/api/pcns', '/api/master-data'].includes(route)) return true;
+  if (['/api/pcns', '/api/pcns/overview', '/api/master-data'].includes(route)) return true;
   return /^\/api\/pcns\/PCN-\d{4}-\d{4}(?:\/(?:progress|workflow|checks|action|revisions(?:\/[1-9]\d*)?|documents(?:\/[0-9a-f-]{36}(?:\/preview)?)?))?$/i.test(route);
 }
 module.exports = { handleApi, requireVersion };

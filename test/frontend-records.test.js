@@ -6,9 +6,13 @@ const vm = require('node:vm');
 
 function element(tag = 'div') {
   return {
-    tag, hidden: true, disabled: false, value: '', textContent: '', children: [], events: {},
+    tag, hidden: true, disabled: false, value: '', textContent: '', children: [], events: {}, dataset: {}, attributes: {},
     append(child) { this.children.push(child); },
-    replaceChildren() { this.children = []; },
+    prepend(child) { this.children.unshift(child); },
+    replaceChildren(...children) { this.children = children; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name]; },
+    querySelectorAll() { return []; },
     addEventListener(name, callback) { this.events[name] = callback; }
   };
 }
@@ -38,7 +42,7 @@ async function recordsPage(session, result = []) {
       fetch: async (url) => {
         requests.push(url);
         if (result instanceof Error) throw result;
-        return typeof result === 'function' ? result() : result;
+        return {items: typeof result === 'function' ? result() : result};
       }
     }
   };
@@ -75,7 +79,7 @@ test('roleless employee can list records and open read-only details', async () =
   const page = await recordsPage({ user: { identityProvider: 'employee-code', employeeCode: 'EMP001', roles: [] } }, [
     { id: 'PCN-2026-0001', status: 'Submitted', riskLevel: 'Low', supplierName: 'Supplier', materialName: 'Material' }
   ]);
-  assert.deepEqual(page.requests, ['/api/pcns']);
+  assert.deepEqual(page.requests, ['/api/pcns/overview']);
   assert.equal(page.elements.get('recordsWorkspace').hidden, false);
   assert.equal(page.elements.get('recordsCount').textContent, '1');
   assert.match(page.elements.get('recordsAccessMessage').textContent, /read.only/i);
@@ -96,7 +100,7 @@ test('any assigned role redirects Records visitors to the Portal without request
 test('PCN-only employees follow the same roleless Records gate and assigned-role Portal route', async () => {
   const user = { identityProvider: 'pcn-local', employeeCode: '0098765', roles: [], isActive: true };
   const viewer = await recordsPage({ user });
-  assert.deepEqual(viewer.requests, ['/api/pcns']);
+  assert.deepEqual(viewer.requests, ['/api/pcns/overview']);
   assert.equal(viewer.elements.get('recordsWorkspace').hidden, false);
   const assigned = await recordsPage({ user: { ...user, roles: ['qa'] } });
   assert.deepEqual(assigned.redirects, ['/admin']);
@@ -155,7 +159,7 @@ test('roleless employee can search and refresh the read-only list', async () => 
   assert.equal(page.elements.get('recordsCount').textContent, '1');
   assert.equal(page.elements.get('recordsRows').children.length, 1);
   await page.elements.get('recordsRefreshButton').events.click();
-  assert.deepEqual(page.requests, ['/api/pcns', '/api/pcns']);
+  assert.deepEqual(page.requests, ['/api/pcns/overview', '/api/pcns/overview']);
 });
 
 test('records load failures are visible and refresh becomes available again', async () => {

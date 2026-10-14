@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
@@ -29,6 +29,7 @@ test('counts use backend attention and approved evidence, never make missing rea
   const api = dashboard();
   assert.deepEqual(JSON.parse(JSON.stringify(api.summaryCounts([...records, { id: 'legacy', status: 'draft' }]))), { all: 3, review: 1, approved: 1, attention: 1 });
   assert.equal(api.documentLabel({}), 'Not available');
+  assert.equal(api.documentLabel({dashboard:{documents:{}}}), 'Not available');
   assert.equal(api.pendingLabel({ updatedAt: '2026-10-12T00:00:00Z' }, Date.parse('2026-10-14T00:00:00Z')), 'Updated 2 days ago');
   assert.doesNotMatch(api.pendingLabel({ dashboard: { dueAt: 'invalid' } }), /overdue/i);
 });
@@ -67,8 +68,139 @@ test('timeline signing points show department, action and signer from stored cha
     { path: 'internalReview.signoff.gscTet.checked', before: false, after: true },
     { path: 'internalReview.signoff.gscTet.checkedName', after: 'Alice' },
   ] }]);
-  assert.equal(points[0].label, 'GSC/TET â€” Checked'); assert.equal(points[0].person, 'Alice');
+  assert.equal(points[0].label, 'GSC/TET — Checked'); assert.equal(points[0].person, 'Alice');
   assert.equal(api.timelinePoints([{ revision: 1, isBaseline: true }])[0].label, 'History baseline');
 });
 
+test('preview markers never imply approval for rejected, draft or unknown baseline events', () => {
+  const api = dashboard();
+  assert.equal(api.timelineTone({ isBaseline: true, status: 'approved' }).tone, 'neutral');
+  assert.equal(api.timelineTone({ status: 'rejected' }).marker, '!');
+  assert.equal(api.timelineTone({ status: 'draft' }).tone, 'active');
+  assert.equal(api.timelineTone({ signed: true, status: 'gsc_review' }).marker, '✓');
+});
 
+test('preview does not combine a newer record with stale assignee or readiness metadata', () => {
+  const api = dashboard();
+  const old = {version:1, dashboard:{action:{label:'QA checked'}}};
+  const newer = {version:2,status:'approved'};
+  assert.equal(api.currentSummary(newer, old), newer);
+  assert.equal(api.currentSummary({...newer,version:1}, old), old);
+});
+
+function controllerPage(fetch, options = {}) {
+  const all = [];
+  const document = { activeElement: null, addEventListener() {} };
+  const createElement = tag => {
+    const element = { tag, children: [], events: {}, attributes: {}, dataset: {}, value: '', textContent: '', open: false, isConnected: true,
+      append(...children) { this.children.push(...children); }, prepend(child) { this.children.unshift(child); },
+      replaceChildren(...children) { this.children = children; }, setAttribute(key, value) { this.attributes[key] = value; },
+      addEventListener(event, listener) { this.events[event] = [...(this.events[event] || []), listener]; },
+      async emit(event, value = {}) { for (const listener of this.events[event] || []) await listener({target:this, preventDefault(){}, ...value}); },
+      querySelectorAll() { return this.children.flatMap(child => [child, ...child.querySelectorAll()]); },
+      focus() { document.activeElement = this; }, showModal() { this.open = true; }, close() { this.open = false; }, remove() {},
+    };
+    all.push(element); return element;
+  };
+  document.createElement = createElement; document.body = createElement('body');
+  const window = { localStorage: {getItem(){return null;},setItem(){} } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../records.js'), 'utf8'), {window, document, Date, Blob, URL});
+  const root = createElement('main'); const rows = createElement('tbody'); root.append(rows);
+  const search = createElement('input'); root.append(search);
+  const count = createElement('span'); const message = createElement('p'); let accessLost = 0;
+  const controller = window.PCN_RECORDS_DASHBOARD.create({root,rows,search,count,message,user:{id:'viewer'},fetch,onAccessLost(){accessLost++;}, ...options});
+  return { controller, document, rows, root, count, message, all, find:id => all.find(item => item.id === id),
+    button: (text, inside = root) => inside.querySelectorAll().find(item => item.tag === 'button' && item.textContent === text),
+    lost:()=>accessLost };
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('shared controller preserves focus after changed records and pauses polling while preview is open', async () => {
+  const page = controllerPage(async url => url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1',version:1});
+  page.controller.setRecords([{id:'PCN-1',version:1}]);
+  const preview = page.button('Preview'); preview.focus();
+  page.controller.setRecords([{id:'PCN-1',version:1,supplierName:'Changed'}]);
+  assert.equal(page.document.activeElement.dataset.rdFocus, 'preview:PCN-1');
+  assert.notEqual(page.document.activeElement, preview);
+  await page.button('Preview').emit('click');
+  assert.equal(page.controller.canRefresh(),false);
+  await page.find('rdPreviewDialog').emit('cancel');
+  assert.equal(page.controller.canRefresh(),true);
+  assert.equal(page.document.activeElement.dataset.rdFocus,'preview:PCN-1');
+});
+
+test('malformed timeline response is not cached and Retry issues a new authorized read', async () => {
+  let revisionCalls = 0;
+  const page = controllerPage(async url => {
+    if(url.endsWith('/revisions')) return ++revisionCalls === 1 ? {items:null} : {items:[{revision:1,actor:'Actual signer'}]};
+    return url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1'};
+  });
+  page.controller.setRecords([{id:'PCN-1'}]); await page.button('Preview').emit('click');
+  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  const content = page.find('rdPreviewContent');
+  assert.match(content.children[0].textContent,/invalid response/);
+  await page.button('Retry',content).emit('click');
+  assert.equal(revisionCalls,2); assert.ok(content.querySelectorAll().some(item=>item.textContent==='Actual signer'));
+});
+
+test('permission loss in preview clears record options and stops future preview reads', async () => {
+  let calls = 0;
+  const page = controllerPage(async()=>{calls++;throw Object.assign(new Error('Forbidden'),{status:403});});
+  page.controller.setRecords([{id:'PCN-1',supplierName:'Protected supplier',status:'submitted'}]);
+  const preview = page.button('Preview'); await preview.emit('click');
+  assert.equal(page.rows.children.length,0); assert.equal(page.count.textContent,'0');
+  assert.equal(page.find('rdFilter-supplier').children.length,1);
+  assert.equal(page.controller.canRefresh(),false); assert.equal(page.find('rdPreviewDialog').open,false); assert.equal(page.lost(),1);
+  await preview.emit('click'); assert.equal(calls,2); // Two parallel overview GETs; no subsequent reads.
+});
+
+test('a closed or superseded preview cannot render late responses', async () => {
+  let resolveRead;
+  const late = new Promise(resolve=>{resolveRead=resolve;});
+  const page = controllerPage(()=>late);
+  page.controller.setRecords([{id:'PCN-1'}]);
+  const opened = page.button('Preview').emit('click');
+  await page.find('rdPreviewDialog').emit('cancel');
+  resolveRead({id:'PCN-1',supplierName:'Late private data',steps:[]}); await opened;
+  assert.equal(page.find('rdPreviewContent').children.length,0);
+  assert.equal(page.controller.getState().preview,null);
+});
+
+test('Portal selection retains its existing highlight and accessible selection state', () => {
+  const page = controllerPage(async()=>({}),{selectedId:()=> 'PCN-2'});
+  page.controller.setRecords([{id:'PCN-1'},{id:'PCN-2'}]);
+  const selected = page.rows.children.find(row=>row.dataset.pcnId==='PCN-2');
+  assert.equal(selected.className,'is-selected'); assert.equal(selected.attributes['aria-selected'],'true');
+  assert.equal(page.rows.children.find(row=>row.dataset.pcnId==='PCN-1').attributes['aria-selected'],'false');
+});
+
+test('overview never mixes a fresh record with independently fetched old progress', async () => {
+  const page = controllerPage(async url => url.endsWith('/progress') ? {status:'submitted',currentStepTitle:'Old GSC review',steps:[{title:'Old pending stage',state:'active'}]} : {id:'PCN-1',version:2,status:'approved'});
+  page.controller.setRecords([{id:'PCN-1',version:1,status:'submitted',dashboard:{progress:{status:'submitted',currentStepTitle:'Old GSC review'},action:{label:'Old pending approver'}}}]);
+  await page.button('Preview').emit('click');
+  const content = page.find('rdPreviewContent'); const text = content.querySelectorAll().map(item=>item.textContent).join(' ');
+  assert.match(text,/Approved/); assert.match(text,/Refresh the records list/);
+  assert.doesNotMatch(text,/Old GSC review|Old pending stage|Old pending approver/);
+  const api = dashboard(); const record={version:3,status:'qa_review'};
+  const summary={...record,dashboard:{progress:{status:'qa_review',currentStepTitle:'Verified snapshot'}}};
+  assert.equal(api.currentProgress(record,summary,{status:'approved',currentStepTitle:'Racing independent read'}).currentStepTitle,'Verified snapshot');
+  assert.equal(api.currentProgress(record,{...record},{status:'qa_review',currentStepTitle:'Stale same-status signing stage'}),null);
+});
+
+test('Rejected displays its actual signing count without a false 100 percent completed workflow', async () => {
+  const progress = {status:'rejected',terminal:true,progressPercent:100,totalSignatures:18,completedSignatures:2,steps:[{title:'Stage never signed',state:'completed'}]};
+  const record = {id:'PCN-1',version:1,status:'rejected',dashboard:{progress}};
+  const page = controllerPage(async url => url.endsWith('/progress') ? progress : record);
+  page.controller.setRecords([record]);
+  assert.equal(page.rows.querySelectorAll().filter(item=>item.tag==='progress').length,0);
+  assert.ok(page.rows.querySelectorAll().some(item=>item.textContent==='2/18 signing steps'));
+  await page.button('Preview').emit('click');
+  const content = page.find('rdPreviewContent'); const displayed=content.querySelectorAll().map(item=>item.textContent).join(' ');
+  assert.match(displayed,/Rejected/); assert.match(displayed,/Review ended with rejection/);
+  assert.doesNotMatch(displayed,/Stage never signed|100%/);
+  assert.equal(content.querySelectorAll().filter(item=>item.className==='rd-step-completed').length,0);
+  const approved = {...record,status:'approved',dashboard:{progress:{...progress,status:'approved'}}};
+  const normal = controllerPage(async()=>({})); normal.controller.setRecords([approved]);
+  assert.equal(normal.rows.querySelectorAll().filter(item=>item.tag==='progress').length,1);
+});

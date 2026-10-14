@@ -1114,12 +1114,12 @@ async function main() {
     assert.equal(await supplier.locator('#pcnCreateIntro').isVisible(),false,'Reopened records retain the update interface');
     assert.equal((await repository.findById(record.id)).ownerUserId,'supplier-id');
     healthError=true;
-    const adminListResponse=page.waitForResponse(response=>response.url().endsWith('/api/pcns') && response.request().method()==='GET');
+    const adminListResponse=page.waitForResponse(response=>response.url().endsWith('/api/pcns/overview') && response.request().method()==='GET');
     await page.goto('http://127.0.0.1:3099/admin#records');
     await page.reload();
     const listResponse=await adminListResponse;
     assert.equal(listResponse.status(),200);
-    assert.equal((await listResponse.json()).data.length,1);
+    assert.equal((await listResponse.json()).data.items.length,1);
     await page.locator('#adminPcnRows tr').filter({hasText:record.id}).waitFor();
     await page.locator('#notificationHealthStatus').filter({hasText:'Unavailable'}).waitFor({state:'attached'});
     const viewButton=page.getByRole('button',{name:`View ${record.id}`,exact:true});

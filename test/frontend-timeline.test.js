@@ -24,6 +24,7 @@ function portal(fetch) {
   const source = fs.readFileSync(require.resolve('../admin.js'), 'utf8')
     .replace(/\}\)\(\);\s*$/, `
       render = () => {};
+      showAdminToast = () => {};
       loadDetail = async id => window.selections.push(id);
       window.TEST = { state, els, openTimeline, loadTimeline, closeTimeline, selectTimelineRevision,
         initializeTimeline, chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline,

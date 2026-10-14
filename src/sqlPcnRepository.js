@@ -203,6 +203,8 @@ class SqlPcnRepository {
 
   async getRevisions(code) { return this.revisions.list(this.pool, code); }
 
+  async getStatusTimings(codes) { return this.revisions.statusTimings(this.pool, codes); }
+
   async getRevision(code, revision) { return this.revisions.get(this.pool, code, revision); }
 
   async saveNotificationSettings(settings, actor = 'system', expectedVersion, user) {
