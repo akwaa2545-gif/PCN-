@@ -79,7 +79,8 @@
       window.location.assign('/records');
       return null;
     }
-    if (role && !roles.some((value) => String(value).toLowerCase() === role.toLowerCase())) throw new Error('Your account does not have access to this page.');
+    if (role && !roles.some((value) => String(value).toLowerCase() === role.toLowerCase()
+      || (role.toLowerCase() === 'admin' && String(value).toLowerCase() === 'developer'))) throw new Error('Your account does not have access to this page.');
     return current;
   }
 
@@ -103,19 +104,19 @@
     const fullName = String(user.displayName || user.fullName || '').trim();
     const email = String(user.email || user.mailProfile?.email || '').trim();
     const roleNames = {
-      admin: 'Administrator', reviewer: 'Reviewer', supplier: 'Supplier',
+      admin: 'Administrator', developer: 'Developer', reviewer: 'Reviewer', supplier: 'Supplier',
       gsc: 'GSC/TET', productionengineering: 'Prod. Eng./TET',
       qa: 'QA/TET', tapbu: 'TaPBU'
     };
     const departmentNames = {
       gscTet: 'GSC/TET', prodEngTet: 'Prod. Eng./TET', qaTet: 'QA/TET',
-      gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', it: 'IT', other: 'Other'
+      gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', it: 'IT', other: 'Other', developer: 'Developer'
     };
     const roles = (Array.isArray(user.roles) ? user.roles : []).map(role => roleNames[String(role).toLowerCase()] || String(role));
     const noPcnRole = ['employee-code', 'pcn-local'].includes(user.identityProvider) && roles.length === 0;
     const roleText = roles.join(', ') || 'Not assigned';
     const signingSteps = { approved: 'Approved', checked: 'Checked', prepared: 'Prepared' };
-    const pcnStepText = roles.includes('Administrator') ? 'All signing steps' : signingSteps[user.signingStep] || 'Not assigned';
+    const pcnStepText = roles.some(role => ['Administrator', 'Developer'].includes(role)) ? 'All signing steps' : signingSteps[user.signingStep] || 'Not assigned';
     const departmentText = departmentNames[user.department] || 'Not assigned';
     const nameParts = (fullName || username).split(/[\s._-]+/).filter(Boolean);
     const initials = (nameParts.length > 1 ? nameParts[0][0] + nameParts[nameParts.length - 1][0] : (nameParts[0] || 'U').slice(0, 2)).toUpperCase();

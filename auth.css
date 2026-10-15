@@ -354,6 +354,23 @@ body.auth-page {
   position: relative;
 }
 
+.developer-auth-challenge {
+  width: 100%;
+  min-width: 0;
+  padding-top: 12px;
+  text-align: left;
+}
+
+.developer-auth-challenge p {
+  margin: 0 0 14px;
+  color: #52657b;
+  font-size: 13px;
+}
+
+.developer-auth-challenge .ghost-button {
+  margin-top: 12px;
+}
+
 .auth-field-icon {
   position: absolute;
   z-index: 2;

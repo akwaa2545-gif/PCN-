@@ -24,7 +24,7 @@ async function handleApi(req, res, url, context, requestId) {
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     const body = await readJsonBody(req);
-    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
+    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember','developerPassword'] : ['username','password','remember','developerPassword']);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
     if (route === '/api/admin/login' && !hasRole(session.user, 'admin')) {
       await authService.logout(session.token);

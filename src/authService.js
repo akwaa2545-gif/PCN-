@@ -2,12 +2,15 @@ const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
 const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
 const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode, normalizeUserId, validateUserAssignment, validateVerifiedMail, validateLocalEmployeeAccount } = require('./employeeAccounts');
+const { isDeveloperAssignment } = require('./signingPermissions');
+const { hasRole } = require('./workflowAccess');
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const providerOf = user => user?.identityProvider || (user?.directoryId ? 'retired-windows' : 'password');
 const isEmployeeProvider = user => ['employee-code', 'pcn-local'].includes(providerOf(user));
 const safeUser = user => ({ id: user.id, username: user.username, email: user.email || null, roles: [...user.roles], isActive: user.isActive,
   signingStep:user.signingStep || null,mailProfile:user.mailProfile || null,version:user.version || null,
   mustChangePassword: isEmployeeProvider(user) ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
+  ...(isDeveloperAssignment(user) ? { department:user.department } : {}),
   ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null } : {}) });
 function sessionPrincipal(user, session, tokenHash) {
   const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
@@ -19,6 +22,8 @@ function assertFields(body, allowed) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !allowed.includes(key))) throw new ApiError(400, 'Unexpected request fields');
 }
 class AuthService {
+  #developerVerifications = new WeakSet();
+  #developerSessions = new Map();
   constructor(repository, options = {}) {
     this.repository = repository;
     this.clock = options.clock || (() => new Date());
@@ -30,6 +35,7 @@ class AuthService {
     if (!['employee-code', 'password'].includes(this.authMode)) throw new Error('Invalid authentication mode');
     this.employeeDirectory = options.employeeDirectory;
     this.integrationService = options.integrationService;
+    this.developerPasswordHash = options.developerPasswordHash;
   }
   now() { return new Date(this.clock()); }
   throttle(address) {
@@ -44,18 +50,20 @@ class AuthService {
     }
     if (next.count > 15) throw new ApiError(429, 'Too many sign-in attempts. Try again shortly');
   }
-  async createUser({ username, email = null, password, roles = ['supplier'], mustChangePassword = false, bootstrap = false }) {
+  async createUser({ username, email = null, password, roles = ['supplier'], department = null, signingStep = null, mustChangePassword = false, bootstrap = false }) {
     if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,100}$/.test(username)) throw new ApiError(400, 'Username must contain 3 to 100 letters, numbers, dots, underscores or hyphens');
     if (email !== null && (typeof email !== 'string' || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) throw new ApiError(400, 'Invalid email address');
     if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
+    validateUserAssignment({roles,department,signingStep});
     if (bootstrap && !mustChangePassword) throw new ApiError(400, 'Bootstrap users must change their password');
     validatePassword(password);
-    return safeUser(await this.repository.createUser({ username, email, passwordHash: await this.hashPassword(password), roles: [...new Set(roles)], mustChangePassword }));
+    return safeUser(await this.repository.createUser({ username, email, passwordHash: await this.hashPassword(password), roles: [...new Set(roles)], department, signingStep, mustChangePassword }));
   }
   async login(body = {}, requestInfo = {}) {
     this.throttle(requestInfo.ip);
     if (this.authMode === 'employee-code') return this.loginEmployee(body);
-    assertFields(body, ['username','password','remember']);
+    assertFields(body, ['username','password','remember','developerPassword']);
+    this.validateDeveloperPassword(body);
     const {username,password,remember=false}=body;
     if (typeof username !== 'string' || username.length > 320 || typeof password !== 'string' || password.length > 128) throw new ApiError(401, 'Invalid username or password');
     const user = await this.repository.getUserByLogin(username.trim().toLowerCase());
@@ -66,8 +74,9 @@ class AuthService {
       if (user && user.isActive && !locked) await this.repository.recordLoginFailure(user.id, this.now());
       throw new ApiError(401, 'Invalid username or password');
     }
+    const proof = await this.#verifyDeveloperLogin(user, body);
     await this.repository.resetLoginFailures(user.id);
-    return this.issueSession(user, remember === true);
+    return this.issueSession(user, remember === true, proof);
   }
   async lookupEmployee(employeeCode, directory = this.employeeDirectory) {
     if (!directory) throw new ApiError(503, 'Employee service is unavailable');
@@ -80,7 +89,8 @@ class AuthService {
     } catch { throw new ApiError(503, 'Employee service is unavailable'); }
   }
   async loginEmployee(body) {
-    assertFields(body, ['employeeCode','remember']);
+    assertFields(body, ['employeeCode','remember','developerPassword']);
+    this.validateDeveloperPassword(body);
     if (body.remember !== undefined && typeof body.remember !== 'boolean') throw new ApiError(400, 'Invalid remember option');
     let code;
     try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Employee access could not be verified'); }
@@ -89,7 +99,8 @@ class AuthService {
       if (!this.matchesLocalEmployee(user, code)) throw new ApiError(401, 'Employee access could not be verified');
       const latest = await this.repository.getUserById(user.id);
       if (!this.matchesLocalEmployee(latest, code) || latest.securityStamp !== user.securityStamp) throw new ApiError(401, 'Employee access could not be verified');
-      return this.issueSession(latest, body.remember === true);
+      const proof = await this.#verifyDeveloperLogin(latest, body);
+      return this.issueSession(latest, body.remember === true, proof);
     }
     if (user && providerOf(user) !== 'employee-code') throw new ApiError(401, 'Employee access could not be verified');
     const profile = await this.lookupEmployee(code);
@@ -105,7 +116,8 @@ class AuthService {
       }
     }
     if (!this.matchesEmployee(user, profile)) throw new ApiError(401, 'Employee access could not be verified');
-    return this.issueSession(user, body.remember === true);
+    const proof = await this.#verifyDeveloperLogin(user, body);
+    return this.issueSession(user, body.remember === true, proof);
   }
   matchesEmployee(user, profile) {
     if (!user?.isActive || providerOf(user) !== 'employee-code') return false;
@@ -119,12 +131,79 @@ class AuthService {
     return typeof user.employeeCode === 'string' && /^\d{7}$/.test(user.employeeCode)
       && user.normalizedEmployeeCode === user.employeeCode && user.employeeCode === expectedCode;
   }
-  async issueSession(user, remember = false) {
+  validateDeveloperPassword(body) {
+    if (body.developerPassword !== undefined && (typeof body.developerPassword !== 'string' || body.developerPassword.length > 128)) {
+      throw new ApiError(400, 'Invalid Developer password');
+    }
+  }
+  isDeveloper(user) {
+    return (user?.roles || []).some(role => String(role).replace(/[^a-z]/gi,'').toLowerCase() === 'developer');
+  }
+  developerCredentialVersion() {
+    return typeof this.developerPasswordHash === 'string' && this.developerPasswordHash
+      ? hashToken(this.developerPasswordHash) : null;
+  }
+  async #verifyDeveloperLogin(user, body) {
+    if (!this.isDeveloper(user)) return undefined;
+    if (!isDeveloperAssignment(user) || (user.lockoutUntil && new Date(user.lockoutUntil) > this.now())) throw new ApiError(401,'Employee access could not be verified');
+    const credentialVersion = this.developerCredentialVersion();
+    if (!credentialVersion) {
+      const error = new ApiError(503, 'Developer sign-in is unavailable');
+      error.code = 'DEVELOPER_SIGN_IN_UNAVAILABLE'; throw error;
+    }
+    if (!body.developerPassword) {
+      const error = new ApiError(401,'Developer password required');
+      error.code = 'DEVELOPER_PASSWORD_REQUIRED'; throw error;
+    }
+    let valid = false;
+    try { valid = await this.verifyPassword(this.developerPasswordHash, body.developerPassword); }
+    catch { throw new ApiError(503,'Developer sign-in is unavailable'); }
+    const latest = await this.repository.getUserById(user.id);
+    if (!latest?.isActive || latest.securityStamp !== user.securityStamp || !isDeveloperAssignment(latest)
+      || (latest.lockoutUntil && new Date(latest.lockoutUntil) > this.now())
+      || providerOf(latest) !== providerOf(user) || latest.employeeCode !== user.employeeCode
+      || latest.normalizedEmployeeCode !== user.normalizedEmployeeCode
+      || this.developerCredentialVersion() !== credentialVersion) throw new ApiError(401,'Employee access could not be verified');
+    if (!valid) {
+      await this.repository.recordLoginFailure(user.id,this.now());
+      throw new ApiError(401,'Employee access could not be verified');
+    }
+    if (this.authMode !== 'password') await this.repository.resetLoginFailures(user.id);
+    const proof = Object.freeze({userId:user.id,securityStamp:user.securityStamp,credentialVersion});
+    this.#developerVerifications.add(proof);
+    return proof;
+  }
+  validDeveloperSession(user, session, tokenHash) {
+    if (!this.isDeveloper(user)) return true;
+    const proof = this.#developerSessions.get(tokenHash);
+    return Boolean(isDeveloperAssignment(user) && proof && proof.userId === user.id && proof.securityStamp === user.securityStamp
+      && proof.expiresAt > this.now().getTime() && proof.credentialVersion === this.developerCredentialVersion());
+  }
+  async issueSession(user, remember = false, proof) {
+    const latest = await this.repository.getUserById(user.id);
+    if (!latest?.isActive || latest.securityStamp !== user.securityStamp || providerOf(latest) !== providerOf(user)
+      || latest.employeeCode !== user.employeeCode || latest.normalizedEmployeeCode !== user.normalizedEmployeeCode
+      || this.isDeveloper(latest) !== this.isDeveloper(user)
+      || (latest.lockoutUntil && new Date(latest.lockoutUntil) > this.now())) throw new ApiError(401,'Employee access could not be verified');
+    user = latest;
+    const developer = this.isDeveloper(user);
+    if (developer) {
+      if (!proof || !this.#developerVerifications.has(proof)) throw new ApiError(401,'Developer password required');
+      this.#developerVerifications.delete(proof);
+      if (!latest?.isActive || !isDeveloperAssignment(latest) || latest.securityStamp !== proof.securityStamp
+        || latest.id !== proof.userId || proof.credentialVersion !== this.developerCredentialVersion()) throw new ApiError(401,'Employee access could not be verified');
+      user = latest;
+    }
     const token = crypto.randomBytes(32).toString('hex');
     const csrfToken = crypto.randomBytes(32).toString('hex');
     const ttl = remember === true ? 30 * 86400000 : 8 * 3600000;
     const expiresAt = new Date(this.now().getTime() + ttl).toISOString();
     await this.repository.saveSession({ id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt });
+    if (developer) {
+      for (const [key,value] of this.#developerSessions) if (value.expiresAt <= this.now().getTime()) this.#developerSessions.delete(key);
+      if (this.#developerSessions.size >= 10000) this.#developerSessions.delete(this.#developerSessions.keys().next().value);
+      this.#developerSessions.set(hashToken(token),{...proof,expiresAt:new Date(expiresAt).getTime()});
+    }
     return { user: safeUser(user), token, csrfToken, expiresAt };
   }
   async resolveEmployee(employeeCode, directory = this.employeeDirectory) {
@@ -216,7 +295,7 @@ class AuthService {
     const prior=await this.repository.getUserById(userId);
     if(!prior)throw new ApiError(404,'User not found');
     if(!prior.isActive)throw new ApiError(400,'Only active users can be linked to an employee');
-    if(this.authMode === 'password' && prior.roles.includes('admin')) throw new ApiError(409,'Switch to employee-code mode before linking an administrator');
+    if(this.authMode === 'password' && hasRole(prior,'admin')) throw new ApiError(409,'Switch to employee-code mode before linking an administrator');
     const profile=await this.resolveEmployee(employeeCode,directory);
     return safeUser(await this.repository.linkEmployeeIdentity(userId,profile,actor,user));
   }
@@ -228,13 +307,15 @@ class AuthService {
     const user = await this.repository.getUserById(session.userId);
     if (!user?.isActive || session.securityStamp !== user.securityStamp
       || (this.authMode === 'employee-code' ? !isEmployeeProvider(user) : providerOf(user) !== 'password')) return null;
+    if (!this.validDeveloperSession(user,session,tokenHash)) return null;
     if (providerOf(user) === 'pcn-local') {
       if (!this.matchesLocalEmployee(user)) return null;
       const latestSession = await this.repository.getSession(tokenHash);
       if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
-      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesLocalEmployee(latestUser, user.employeeCode)) return null;
+      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesLocalEmployee(latestUser, user.employeeCode)
+        || !this.validDeveloperSession(latestUser,latestSession,tokenHash)) return null;
       return sessionPrincipal(latestUser, latestSession, tokenHash);
     }
     if (this.authMode === 'employee-code' && !skipEmployeeLookup) {
@@ -248,13 +329,17 @@ class AuthService {
       if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
-      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesEmployee(latestUser, profile)) return null;
+      if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesEmployee(latestUser, profile)
+        || !this.validDeveloperSession(latestUser,latestSession,tokenHash)) return null;
       return sessionPrincipal(latestUser, latestSession, tokenHash);
     }
     return sessionPrincipal(user, session, tokenHash);
   }
   async logout(token) {
-    if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) await this.repository.revokeSession(hashToken(token));
+    if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
+      this.#developerSessions.delete(hashToken(token));
+      await this.repository.revokeSession(hashToken(token));
+    }
   }
   async changePassword(token, { currentPassword, newPassword } = {}) {
     if (this.authMode !== 'password') throw new ApiError(403, 'Employee-code sign-in does not use a password');

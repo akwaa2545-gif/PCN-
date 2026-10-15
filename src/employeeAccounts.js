@@ -3,9 +3,10 @@ const { validateSigningAssignment } = require('./signingPermissions');
 const employeeDepartments = Object.freeze([
   { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
   { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' },
-  { key: 'qaTapbu', label: 'QA/TaPBU' }, { key: 'it', label: 'IT' }, { key: 'other', label: 'Other' }
+  { key: 'qaTapbu', label: 'QA/TaPBU' }, { key: 'it', label: 'IT' }, { key: 'other', label: 'Other' },
+  { key: 'developer', label: 'Developer' }
 ].map(Object.freeze));
-const employeeRoles = Object.freeze(['admin', 'reviewer', 'supplier', 'gsc', 'productionengineering', 'qa', 'tapbu']);
+const employeeRoles = Object.freeze(['admin', 'reviewer', 'supplier', 'gsc', 'productionengineering', 'qa', 'tapbu', 'developer']);
 const EMPLOYEE_CODE_PATTERN = /^[A-Za-z0-9._-]{1,10}$/;
 function normalizeUserId(value) {
   if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)) throw new ApiError(400, 'Invalid user identity');

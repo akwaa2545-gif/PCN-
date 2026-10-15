@@ -109,7 +109,7 @@
   }
 
   function isAdmin() {
-    return (state.user?.roles || []).some(role => String(role).toLowerCase() === 'admin');
+    return (state.user?.roles || []).some(role => ['admin', 'developer'].includes(String(role).toLowerCase()));
   }
 
   function permittedView(view) {

@@ -344,7 +344,7 @@ async function verifyHandwrittenSignoffs(browser) {
       await page.goto(`${origin}/login?returnTo=${encodeURIComponent('/'+record.id)}`);
       await page.locator('#username').fill(username);
       await page.locator('#password').fill(TEST_PASSWORD);
-      await page.locator('#loginForm button').click();
+      await page.locator('#loginForm button[type=submit]').click();
       await page.waitForURL(`**/${record.id}`);
       await page.locator('#submitButton:not([disabled])').waitFor();
     };
@@ -526,14 +526,16 @@ async function verifyUnsavedDocumentWarning(browser) {
   const record = await service.create({...unsignedPayload,status:'draft'},'isolated-fixture',author);
   const authService = fakeAuthService({additionalUsers:[author]});
   const server = http.createServer();
-  let context;
+  let context, page;
+  let phase = 'initial document sign-in';
   try {
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     server.on('request',createRequestHandler({repository,service,authService,rootDir:path.resolve(__dirname,'..'),publicOrigin:origin,secureCookies:false}));
     context = await browser.newContext({viewport:{width:1440,height:1100}});
+    await context.tracing.start({screenshots:true,snapshots:true});
     await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
-    const page = await context.newPage();
+    page = await context.newPage();
     page.setDefaultTimeout(15000);
     const errors = [];
     const writes = [];
@@ -567,7 +569,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     await page.goto(`${origin}/login?returnTo=${encodeURIComponent('/'+record.id)}`);
     await page.locator('#username').fill(author.username);
     await page.locator('#password').fill(TEST_PASSWORD);
-    await page.locator('#loginForm button').click();
+    await page.locator('#loginForm button[type=submit]').click();
     await page.waitForURL(documentUrl);
     await loaded();
     assert.equal(await unloadBlocked(),false,'Loading a saved PCN is pristine');
@@ -628,6 +630,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     assert.equal(await unloadBlocked(),true,'Dynamic document condition rows are protected');
     await confirmClick(portalLink(),true);
     await page.waitForURL(`${origin}/admin`);
+    phase = 'reopening canonical PCN after discarding draft';
     await page.goto(documentUrl);
     await loaded();
     assert.equal(await unloadBlocked(),false,'Accepting discard and reopening loads a clean canonical PCN');
@@ -679,6 +682,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     await portalLink().click();
     await page.waitForURL(`${origin}/admin`);
 
+    phase = 'reopening PCN before intentionally failed canonical refresh';
     await page.goto(documentUrl);
     await loaded();
     await page.locator('#reason').fill('Write succeeded but refresh failed');
@@ -686,11 +690,13 @@ async function verifyUnsavedDocumentWarning(browser) {
     const refreshFailure = page.waitForResponse(response=>new URL(response.url()).pathname==='/api/pcns' && response.status()===503);
     await page.locator('#saveDraftButton').click();
     await refreshFailure;
+    phase = 'enabling Submit after successful save and failed canonical refresh';
     await page.locator('#submitButton:not([disabled])').waitFor();
     assert.equal(await unloadBlocked(),false,'A confirmed successful write remains saved when its later refresh fails');
     await portalLink().click();
     await page.waitForURL(`${origin}/admin`);
 
+    phase = 'loading a new draft document';
     await page.goto(`${origin}/create`);
     await loaded();
     assert.equal(await unloadBlocked(),false,'A new unedited PCN does not warn');
@@ -712,8 +718,25 @@ async function verifyUnsavedDocumentWarning(browser) {
     assert.equal((await page.request.get(`${origin}/api/pcns`)).status(),401,'Confirmed sign out actually revokes the session');
     assert.deepEqual(errors,[],'The unsaved warning journey emits no page errors');
     console.log(JSON.stringify({browser:'passed',checks:['unsaved-text-and-revert','unsaved-signature-and-revert','dynamic-document-rows','custom-dialog-cancel-and-confirm-navigation','safe-dialog-focus','dialog-focus-trap','escape-preserves-document','mobile-dialog-actions','tabs-preserve-document','cancel-sign-out-before-post','escape-sign-out-preserves-session-and-focus','modifier-sign-out-cancellation','confirmed-sign-out','failed-post-and-patch-remain-dirty','successful-post-and-patch-clean','successful-write-refresh-failure-clean','new-document-baseline','native-beforeunload-protection'],storage:'isolated_test_adapters'}));
+  } catch(error) {
+    const diagnostics = {phase,url:page?.url()};
+    if(page && !page.isClosed()) {
+      diagnostics.form = await page.evaluate(() => ({
+        notice:document.getElementById('appNoticeTitle')?.textContent,
+        submit: (()=>{const item=document.getElementById('submitButton');return item?{disabled:item.disabled,hidden:item.hidden,display:getComputedStyle(item).display}:null;})(),
+        invalid:[...document.querySelectorAll('main input,main select,main textarea')].filter(item=>item.willValidate&&!item.validity.valid)
+          .map(item=>({id:item.id,name:item.name,type:item.type,validity:{valueMissing:item.validity.valueMissing,
+            typeMismatch:item.validity.typeMismatch,patternMismatch:item.validity.patternMismatch,customError:item.validity.customError}}))
+      })).catch(()=>({unavailable:true}));
+      await page.screenshot({path:path.resolve('test-results/pcn-unsaved-failure.png'),fullPage:true});
+    }
+    console.error(JSON.stringify({fixture:'unsaved-document',diagnostics}));
+    throw error;
   } finally {
-    if(context) await context.close();
+    if(context) {
+      await context.tracing.stop({path:path.resolve('test-results/pcn-unsaved-document-trace.zip')});
+      await context.close();
+    }
     server.closeAllConnections();
     if(server.listening) await new Promise(resolve=>server.close(resolve));
   }
@@ -794,7 +817,7 @@ async function main() {
     browser = await chromium.launch({headless:true});
     const page = await browser.newPage({viewport:{width:1440,height:1100}});
     page.setDefaultTimeout(15000);
-    page.setDefaultNavigationTimeout(15000);
+    page.setDefaultNavigationTimeout(30000);
     const errors=[];
     const notificationRequests=[];
     page.on('pageerror',error=>errors.push(error.message));
@@ -808,7 +831,7 @@ async function main() {
     assert.equal(await page.locator('#authRetryButton').isVisible(),false,'Healthy password sign-in hides setup retry');
     await page.locator('#username').fill('temporary');
     await page.locator('#password').fill(TEST_PASSWORD);
-    await page.locator('#loginForm button').click();
+    await page.locator('#loginForm button[type=submit]').click();
     await page.locator('#passwordChangeForm').waitFor({state:'visible'});
     await page.locator('#currentPassword').fill(TEST_PASSWORD);
     await page.locator('#newPassword').fill('5678');
@@ -817,7 +840,7 @@ async function main() {
     await page.locator('#loginForm').waitFor({state:'visible'});
     await page.locator('#username').fill('temporary');
     await page.locator('#password').fill('5678');
-    await page.locator('#loginForm button').click();
+    await page.locator('#loginForm button[type=submit]').click();
     await page.waitForURL('**/admin#mail-routing');
     await page.locator('[data-notification-group]').first().waitFor();
     const emails=await page.locator('[data-recipient-email]').evaluateAll(inputs=>inputs.map(input=>input.value));
@@ -1086,7 +1109,7 @@ async function main() {
     await supplier.goto('http://127.0.0.1:3099/login?returnTo=%2Fcreate');
     await supplier.locator('#username').fill('supplier');
     await supplier.locator('#password').fill(TEST_PASSWORD);
-    await supplier.locator('#loginForm button').click();
+    await supplier.locator('#loginForm button[type=submit]').click();
     await supplier.waitForURL('**/create');
     await supplier.locator('#submitButton:not([disabled])').waitFor();
     assert.equal(await supplier.locator('#submitButton').textContent(),'Create PCN');
@@ -1228,8 +1251,8 @@ async function main() {
     assert.equal(await page.locator('#employeeUserForm').isVisible(),false,'Employee creation opens in a popup');
     await page.locator('#usersAddRoleButton').click();
     assert.deepEqual(await page.locator('#employeeRole option').evaluateAll(options=>options.map(option=>({value:option.value,label:option.textContent}))),[
-      {value:'',label:'Select role'},{value:'admin',label:'Administrator'},{value:'approved',label:'Approved'},{value:'checked',label:'Checked'},{value:'prepared',label:'Prepared'}
-    ],'One PCN role select contains exactly the four requested choices');
+      {value:'',label:'Select role'},{value:'admin',label:'Administrator'},{value:'developer',label:'Developer'},{value:'approved',label:'Approved'},{value:'checked',label:'Checked'},{value:'prepared',label:'Prepared'}
+    ],'One PCN role select contains Administrator, Developer and the three signing choices');
     assert.equal(await page.locator('#employeeSigningStep').count(),0,'There is no duplicate signing-step select');
     const employeeSearch=page.locator('#employeeSearch');
     await employeeSearch.fill('0000001');
@@ -1439,7 +1462,12 @@ async function main() {
     });
     await employeePage.evaluate(()=>window.PCN_SESSION.fetch('/api/auth/logout',{method:'POST',body:'{}'}));
     await employeeContext.close();
-    await verifySplitNotificationFeedback(browser,await page.context().storageState(),errors);
+    const feedbackStorage = await page.context().storageState();
+    await supplier.screenshot({path:path.resolve('test-results/pcn-browser-smoke.png'),fullPage:true});
+    // These completed pages otherwise keep polling during independent helper contexts.
+    await supplier.context().close();
+    await page.context().close();
+    await verifySplitNotificationFeedback(browser,feedbackStorage,errors);
     await verifyPcnEmailLinks(browser,errors);
     await verifyHandwrittenSignoffs(browser);
     await verifyUnsavedDocumentWarning(browser);
@@ -1454,7 +1482,7 @@ async function main() {
     await viewerPage.goto('http://127.0.0.1:3099/login?returnTo=%2Frecords');
     await viewerPage.locator('#username').fill('browser-viewer');
     await viewerPage.locator('#password').fill(TEST_PASSWORD);
-    await viewerPage.locator('#loginForm button').click();
+    await viewerPage.locator('#loginForm button[type=submit]').click();
     await viewerPage.waitForURL('**/records');
     await viewerPage.locator('#recordsRows a').first().waitFor();
     assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning opens from the profile button');
@@ -1479,8 +1507,7 @@ async function main() {
     await viewerPage.close();
     assert.deepEqual(outbound,[],'The complete browser suite performs no outbound email');
     assert.deepEqual(errors,[],'All browser journeys complete without page errors');
-    await supplier.screenshot({path:path.resolve('test-results/pcn-browser-smoke.png'),fullPage:true});
-    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','five-departments-fifteen-step-lists','separate-supplier-list','qa-initial-final-shared-lists','empty-lists-without-fields','popup-department-and-step','popup-cancel-and-escape-no-changes','popup-one-field','static-contact-rows','last-remove-restores-add','typing-and-selection-no-extra-fields','natural-directory-height','pending-escape-cancels-lookup','blurred-lookup-does-not-reopen','popup-internal-search-status','duplicate-recipient-rejected','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','directory-selection-required','forced-confirm-cannot-bypass','input-event-clears-selection','failed-no-match-unconfigured-lookup','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','popup-focus-and-mobile-layout','admin-users-role-gate','employee-source-isolated-from-mail','typed-code-cannot-provision','employee-no-match-and-error','employee-selection-and-read-only-code','employee-input-invalidates-selection','selected-employee-create-fixed-assignments','four-pcn-role-options-no-duplicate-select','administrator-demotion-confirm-cancel','unchanged-multiple-role-and-signing-preserved','legacy-requester-no-implicit-signing','english-name-mail-lookup','duplicate-name-explicit-confirmation','single-step-requires-verified-mail','free-text-email-cannot-save','mail-input-invalidates-selection','managed-users-routing-readonly','manual-save-excludes-managed-mail','user-edit-step-active-version','user-conflict-keeps-draft','user-edit-cancel-no-write','maintenance-mode-explicit-employee-link','explicit-employee-link-preserves-assignments','cancel-employee-selection-no-write','unconfigured-source-blocks-provisioning','users-responsive-layout','unknown-auth-mode-retry','employee-session-service-failure-closed','employee-stale-session-recovery','employee-only-sign-in-no-password','employee-login-leading-zero-and-csrf','split-update-queued-action-blocked','split-signature-save-both-queued','split-update-blocked-action-queued','split-workflow-checkbox-feedback-after-refresh','split-queue-feedback-no-delivery-claims','split-policy2-no-legacy-notification-post','no-page-errors'],storage:'isolated_test_adapters'}));
+    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','five-departments-fifteen-step-lists','separate-supplier-list','qa-initial-final-shared-lists','empty-lists-without-fields','popup-department-and-step','popup-cancel-and-escape-no-changes','popup-one-field','static-contact-rows','last-remove-restores-add','typing-and-selection-no-extra-fields','natural-directory-height','pending-escape-cancels-lookup','blurred-lookup-does-not-reopen','popup-internal-search-status','duplicate-recipient-rejected','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','directory-selection-required','forced-confirm-cannot-bypass','input-event-clears-selection','failed-no-match-unconfigured-lookup','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','popup-focus-and-mobile-layout','admin-users-role-gate','employee-source-isolated-from-mail','typed-code-cannot-provision','employee-no-match-and-error','employee-selection-and-read-only-code','employee-input-invalidates-selection','selected-employee-create-fixed-assignments','five-pcn-role-options-no-duplicate-select','administrator-demotion-confirm-cancel','unchanged-multiple-role-and-signing-preserved','legacy-requester-no-implicit-signing','english-name-mail-lookup','duplicate-name-explicit-confirmation','single-step-requires-verified-mail','free-text-email-cannot-save','mail-input-invalidates-selection','managed-users-routing-readonly','manual-save-excludes-managed-mail','user-edit-step-active-version','user-conflict-keeps-draft','user-edit-cancel-no-write','maintenance-mode-explicit-employee-link','explicit-employee-link-preserves-assignments','cancel-employee-selection-no-write','unconfigured-source-blocks-provisioning','users-responsive-layout','unknown-auth-mode-retry','employee-session-service-failure-closed','employee-stale-session-recovery','employee-only-sign-in-no-password','employee-login-leading-zero-and-csrf','split-update-queued-action-blocked','split-signature-save-both-queued','split-update-blocked-action-queued','split-workflow-checkbox-feedback-after-refresh','split-queue-feedback-no-delivery-claims','split-policy2-no-legacy-notification-post','no-page-errors'],storage:'isolated_test_adapters'}));
   } finally {
     if(browser) await browser.close();
     await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});

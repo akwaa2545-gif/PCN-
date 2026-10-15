@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
+const { hasRole } = require('./workflowAccess');
 const COOKIE_NAME = 'pcn_session';
 const HTTP_COOKIE_NAME = 'pcn_session_http';
 
@@ -45,7 +46,7 @@ function requirePrincipal(principal, { roles = [], allowPasswordChange = false }
     error.code = 'PASSWORD_CHANGE_REQUIRED';
     throw error;
   }
-  if (roles.length && !roles.some(role => principal.user.roles.includes(role))) throw new ApiError(403, 'You do not have permission for this action');
+  if (roles.length && !hasRole(principal.user, ...roles)) throw new ApiError(403, 'You do not have permission for this action');
   return principal.user;
 }
 

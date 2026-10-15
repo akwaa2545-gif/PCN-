@@ -16,7 +16,18 @@ const departmentRoles = Object.freeze({
 });
 const rolesOf = user => (Array.isArray(user?.roles) ? user.roles : []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
 
+function isDeveloperAssignment(user) {
+  const roles = rolesOf(user);
+  return roles.length === 1 && roles[0] === 'developer' && user.department === 'developer' && user.signingStep == null;
+}
+
 function validateSigningAssignment({ roles, department, signingStep }) {
+  if (rolesOf({ roles }).includes('developer') || department === 'developer') {
+    if (!isDeveloperAssignment({ roles, department, signingStep })) {
+      throw new ApiError(400, 'Developer requires the Developer department with no signing step or other roles');
+    }
+    return;
+  }
   if (signingStep === null || signingStep === undefined) return;
   if (!actions.includes(signingStep) || !Object.hasOwn(departmentRoles, department)) {
     throw new ApiError(400, 'Choose one signing step within a signing department');
@@ -29,7 +40,7 @@ function validateSigningAssignment({ roles, department, signingStep }) {
 
 function canSign(user, department, action) {
   if (!user || user.isActive === false || !Object.hasOwn(departmentRoles, department) || !actions.includes(action)) return false;
-  if (rolesOf(user).includes('admin')) return true;
+  if (rolesOf(user).includes('admin') || isDeveloperAssignment(user)) return true;
   if (user.department !== department || user.signingStep !== action) return false;
   try { validateSigningAssignment(user); return true; } catch { return false; }
 }
@@ -44,4 +55,4 @@ function signaturePath(path) {
   return null;
 }
 
-module.exports = { actions, departments, stageDepartments, validateSigningAssignment, canSign, signaturePath };
+module.exports = { actions, departments, stageDepartments, validateSigningAssignment, canSign, signaturePath, isDeveloperAssignment };

@@ -1,7 +1,7 @@
 const sql = require('mssql');
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
-const { normalizeEmployeeCode, validateEmployeeAccount, validateLocalEmployeeAccount, validateEmployeeIdentity, validateVerifiedMail } = require('./employeeAccounts');
+const { employeeRoles, normalizeEmployeeCode, validateEmployeeAccount, validateLocalEmployeeAccount, validateEmployeeIdentity, validateVerifiedMail, validateUserAssignment } = require('./employeeAccounts');
 const {lockUserMailRouting,readUserMailAssignments,applyUserMailRouting,assertCurrentUser}=require('./userMailRouting');
 const {normalizeMailRouting}=require('./mailRouting');
 function mapProfile(row) {
@@ -222,7 +222,9 @@ class SqlAuthRepository {
     return this.getUserById(id);
   }
 
-  async createUser({ username, email, passwordHash, roles, mustChangePassword }) {
+  async createUser({ username, email, passwordHash, roles, mustChangePassword, department = null, signingStep = null }) {
+    if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
+    validateUserAssignment({ roles, department, signingStep });
     const transaction = this.pool.transaction();
     await transaction.begin();
     const id = crypto.randomUUID();
@@ -230,10 +232,11 @@ class SqlAuthRepository {
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('username', sql.NVarChar(100), username).input('normalizedUsername', sql.NVarChar(100), username.toLowerCase())
         .input('email', sql.NVarChar(320), email).input('normalizedEmail', sql.NVarChar(320), email?.toLowerCase() || null)
+        .input('department', sql.NVarChar(80), department).input('signingStep', sql.NVarChar(16), signingStep)
         .input('hash', sql.NVarChar(512), passwordHash).input('change', sql.Bit, mustChangePassword)
         .input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
-        .query('INSERT pcn.Users (Id,Username,NormalizedUsername,Email,NormalizedEmail,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@email,@normalizedEmail,@hash,1,@change,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())');
-      for (const role of roles) {
+        .query('INSERT pcn.Users (Id,Username,NormalizedUsername,Email,NormalizedEmail,DepartmentKey,SigningStep,PasswordHash,IsActive,MustChangePassword,SecurityStamp,FailedLoginCount,CreatedAt,UpdatedAt) VALUES (@id,@username,@normalizedUsername,@email,@normalizedEmail,@department,@signingStep,@hash,1,@change,@stamp,0,SYSUTCDATETIME(),SYSUTCDATETIME())');
+      for (const role of new Set(roles)) {
         const result = await transaction.request().input('id', sql.UniqueIdentifier, id).input('role', sql.NVarChar(40), role)
           .query('INSERT pcn.UserRoles (UserId,RoleId) SELECT @id,Id FROM pcn.Roles WHERE Name=@role');
         if (result.rowsAffected[0] !== 1) throw new ApiError(400, 'Invalid user role');
@@ -308,7 +311,7 @@ class SqlAuthRepository {
   }
 
   async setUserRoles(id, roles) {
-    if (!Array.isArray(roles) || !roles.length || roles.some(role => !['admin', 'reviewer', 'supplier', 'gsc', 'productionengineering', 'qa', 'tapbu'].includes(role))) throw new ApiError(400, 'Invalid user roles');
+    if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
     const prior=await this.getUserById(id);
     if(!prior)throw new ApiError(404,'User not found');
     return this.updateEmployeeAccount(id,{...prior,roles:[...new Set(roles)],signingStep:null});

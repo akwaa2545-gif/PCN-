@@ -95,7 +95,7 @@ test('selecting an unassigned employee opens role assignment instead of creating
 });
 
 
-test('four PCN roles derive department authority and require a verified recipient for signing', () => {
+test('PCN roles derive department authority and require a verified recipient for signing', () => {
   const api = users();
   for (const [department, expectedRole] of Object.entries({gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu'})) {
     for (const role of ['approved', 'checked', 'prepared']) {

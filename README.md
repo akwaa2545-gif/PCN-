@@ -1,6 +1,6 @@
 # Supplier PCN workflow — SQL Server
 
-Updated: 2026-10-14.
+Updated: 2026-10-15.
 
 The Node API stores PCN form data, internal review, comments, approvals, audit history, routing settings and application accounts in SQL Server. The browser calls the API; the active application does not use Firebase Authentication or Firestore. The existing target is `svr120a / Scn_DB`.
 
@@ -22,6 +22,8 @@ Workbook-derived options come from `NSN-000244 Supplier Product and Process Chan
 
 **Local development — Records dashboard (not deployed):** Portal and read-only Records now share summary cards, next responsibility and signing progress, combined filters and saved views, a read-only Overview/Timeline/Documents preview, document-readiness badges, sorting, selectable columns, client-side pagination and filtered CSV export. Pending time uses a recorded status transition when available and otherwise labels the saved-record age; overdue requires an explicit valid review deadline. The current schema has no review-deadline field or editor, so no deadline is inferred from the target start date. Saved preferences are scoped to the signed-in account in browser storage and contain no record payloads. The authenticated overview endpoint batches document/status metadata while preserving existing access scope. See [the implementation record](plans/records-dashboard.md). Runtime `pcn-test-17-1` remains the last deployed release; this work stays local until the user explicitly says **deploy**.
 
+**Local development — Developer access (not deployed):** Developer is a separate exclusive role with the same application permissions as Administrator, the Developer department and no assigned signing step. Every Developer sign-in also requires the privately configured Developer password. Only its Argon2id hash is configured as `PCN_DEVELOPER_PASSWORD_HASH`; missing or invalid configuration disables Developer sign-in without disabling other accounts. Developer does not count toward the last-Administrator safeguard or automatic signing-mail recipients. Migration 007 seeds the role and is required before starting this source against SQL; it is prepared but has not been applied. See [Developer access](plans/developer-access.md). This feature and the Records dashboard remain local; runtime `pcn-test-17-1` is unchanged.
+
 ## Setup
 
 Use Node.js 22 or later:
@@ -32,6 +34,10 @@ Copy-Item .env.example .env
 ```
 
 Set `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PORT`, `PORT` and `PUBLIC_ORIGIN` for the installation. Supply `SQL_PASSWORD` through the process environment or a protected credential. Keep `.env` private; it is excluded from source control. The SQL login is the API connection account, separate from application users.
+
+To enable Developer sign-in, configure `PCN_DEVELOPER_PASSWORD_HASH` privately using the format and lifecycle described in [Developer access](plans/developer-access.md#private-configuration). Keep the committed template blank. Developer sessions require sign-in again after a server restart or credential-hash rotation; this does not change ordinary employee sign-in.
+
+The Developer hash has been configured in the ignored local environment file and verified through the production password/configuration helpers and a fresh process load. No credential value is published. This configures local authentication only: migration 007 is still unapplied, and no host or deployment change has been made.
 
 Production requires HTTPS by default. An explicitly configured internal HTTP installation can keep `NODE_ENV=production` and set `ALLOW_INTERNAL_HTTP=true`, with an exact RFC1918 IPv4 `PUBLIC_ORIGIN` such as `http://172.30.77.137:8443`, loopback `HOST`, and `TRUST_PROXY=loopback`. The reverse proxy must replace the client-IP header and restrict access to the employee networks. HTTP uses a separate `pcn_session_http` cookie to avoid collisions with existing Secure HTTPS cookies; HttpOnly, SameSite Strict, exact-origin and CSRF checks remain enabled. HTTP traffic is unencrypted.
 
@@ -73,7 +79,7 @@ finally {
 }
 ```
 
-`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Maintenance bootstrap creates the password administrator only if that username is absent. Passwords are stored as Argon2id hashes; first password login requires changing the password, and changes revoke sessions. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Employee-code accounts have no PCN password. First sign-in creates a roleless account with read-only Records access; PCN actions require administrator-assigned permissions.
+`db:migrate` applies checksummed migrations and seeds workbook-derived master data. Maintenance bootstrap creates the password administrator only if that username is absent. Passwords are stored as Argon2id hashes; first password login requires changing the password, and changes revoke sessions. Email is optional (`PCN_BOOTSTRAP_EMAIL`). Ordinary employee-code accounts have no PCN password; the local Developer feature adds its separate password check only to Developer accounts. First sign-in creates a roleless account with read-only Records access; PCN actions require administrator-assigned permissions.
 
 `AUTH_MODE=employee-code` is the normal default; `AUTH_MODE=password` is an explicit maintenance choice for eligible unlinked legacy accounts. Employee codes remain text, including leading zeros. The source provides English/Thai names, job title and department hints but no email or active flag. Current source presence and an active PCN account allow read-only access for roleless employees. Protected requests still revalidate the current source, account and session; source outages fail closed with 503. First sign-in creates an account with no role or department, visible in Admin → Users for assignment. AD, Windows SSO, its proof headers/module/helper and its sign-in route are removed from the replacement runtime. Existing PCN signing/ownership rules and mail-directory lookup are preserved.
 
@@ -158,9 +164,12 @@ npm run test:documents
 npm run test:auto-refresh
 npm run test:timeline
 npm run test:records-dashboard
+npm run test:developer-role
 ```
 
 The local Records dashboard source passed 682/682 unit/API tests with 91.92% line / 91.09% branch / 93.80% function coverage and 12 isolated dashboard browser groups using 17 fixture records, with no browser errors, external calls or forbidden writes. The standalone full application browser smoke suite and existing Records, timeline and automatic-update regressions also passed. Its implementation and browser evidence are recorded in [the dashboard plan](plans/records-dashboard.md). This is local verification, not a new deployment.
+
+The later local Developer source passed 733/733 tests with 92.08% line / 91.33% branch / 93.87% function coverage using `npm run test:coverage -- --test-concurrency=4` on Windows. All seven isolated Developer browser groups passed, with no browser errors, external calls or forbidden writes; the full application browser smoke suite passed all 120 original checks, and ordinary-login regression passed all eight groups. See [Developer verification](plans/developer-access.md#verification) for the completed local evidence. Migration 007 remains unapplied and no deployment has occurred.
 
 The timeline source passed 645 unit/API tests with 91.68% line / 90.87% branch / 93.83% function coverage. Its six isolated browser journeys covered 13 genuine events, signing department/person labels, before/after business fields, keyboard opening and closing, contained desktop/mobile scrolling, stale reads, empty/error/retry states and paused Portal refresh. These checks used isolated adapters and made no live business changes or external integration calls. Release CI and host acceptance are recorded separately in the deployment runbooks.
 

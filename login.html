@@ -56,6 +56,14 @@
             </div>
             <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeEntryHelp employeeAuthMessage" required />
           </div>
+          <div id="employeeDeveloperChallenge" class="developer-auth-challenge" hidden>
+            <p>Enter your Developer password to continue.</p>
+            <div class="auth-field">
+              <label for="employeeDeveloperPassword">Developer password</label>
+              <input id="employeeDeveloperPassword" name="developerPassword" type="password" autocomplete="off" maxlength="128" placeholder=" " aria-describedby="employeeAuthMessage" />
+            </div>
+            <button id="employeeDeveloperCancel" class="ghost-button" type="button">Cancel Developer sign-in</button>
+          </div>
           <p id="employeeAuthMessage" role="alert"></p>
         </div>
         <button class="primary-button auth-submit" type="submit">
@@ -70,6 +78,14 @@
         <div class="auth-field">
           <label for="password">Password</label>
           <input id="password" name="password" type="password" autocomplete="current-password" placeholder=" " required />
+        </div>
+        <div id="passwordDeveloperChallenge" class="developer-auth-challenge" hidden>
+          <p>Enter your Developer password and account password to continue.</p>
+          <div class="auth-field">
+            <label for="passwordDeveloperPassword">Developer password</label>
+            <input id="passwordDeveloperPassword" name="developerPassword" type="password" autocomplete="off" maxlength="128" placeholder=" " aria-describedby="authMessage" />
+          </div>
+          <button id="passwordDeveloperCancel" class="ghost-button" type="button">Cancel Developer sign-in</button>
         </div>
         <button class="primary-button auth-submit" type="submit">Sign in</button>
       </form>

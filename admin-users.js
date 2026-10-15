@@ -1,7 +1,7 @@
 (function () {
   const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
-  const accessLabels = { admin: 'Administrator', reviewer: 'Reviewer', supplier: 'Requester', gsc: 'GSC', productionengineering: 'Production engineering', qa: 'QA', tapbu: 'TaPBU' };
-  const departments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu', 'it', 'other'];
+  const accessLabels = { admin: 'Administrator', developer: 'Developer', reviewer: 'Reviewer', supplier: 'Requester', gsc: 'GSC', productionengineering: 'Production engineering', qa: 'QA', tapbu: 'TaPBU' };
+  const departments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu', 'it', 'other', 'developer'];
   const signingDepartments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu'];
   const signingSteps = ['approved', 'checked', 'prepared'];
   document.addEventListener('DOMContentLoaded', init);
@@ -23,11 +23,12 @@
     return mail ? { mailSelection: { id: mail.id, email: mail.email } } : {};
   }
   function assignmentBody(role, department, mail = null, retainedMail = null) {
-    if (role !== 'admin' && !signingSteps.includes(role)) throw new Error('Select a PCN role.');
+    if (!['admin', 'developer'].includes(role) && !signingSteps.includes(role)) throw new Error('Select a PCN role.');
     if (!departments.includes(department)) throw new Error('Select a PCN department.');
-    const step = role === 'admin' ? null : role;
+    if ((role === 'developer') !== (department === 'developer')) throw new Error('Developer access requires the Developer role and department.');
+    const step = ['admin', 'developer'].includes(role) ? null : role;
     if (step && !signingDepartments.includes(department)) throw new Error('Select a signing department.');
-    return { roles: [step ? departmentRoles[department] : 'admin'], department, signingStep: step, ...mailFields(step, mail, retainedMail) };
+    return { roles: [step ? departmentRoles[department] : role], department, signingStep: step, ...mailFields(step, mail, retainedMail) };
   }
   function provisioningBody(employee, role, department, mail) {
     return { ...directoryBody(employee), ...assignmentBody(role, department, mail) };
@@ -52,7 +53,7 @@
         ...mailFields(user.signingStep, mail, retainMail ? user.mailProfile : null) };
     return { ...assignment, isActive: active === true, version: user.version };
   }
-  function pcnRole(user) { return user.roles.includes('admin') ? 'admin' : signingSteps.includes(user.signingStep) ? user.signingStep : ''; }
+  function pcnRole(user) { return user.roles.includes('developer') ? 'developer' : user.roles.includes('admin') ? 'admin' : signingSteps.includes(user.signingStep) ? user.signingStep : ''; }
 
   function userIdentity(user) {
     const identity = document.createElement('div'); identity.className = 'employee-user-identity';
@@ -190,7 +191,7 @@
       const assignment = bodyForSelection();
       const step = assignment.signingStep;
       const email = state.mail?.email || (state.retainMail ? state.editUser?.mailProfile?.email : '');
-      const scope = `${optionLabel(els.employeeDepartment, assignment.department)} / ${step ? optionLabel(els.employeeRole, step) : assignment.roles.includes('admin') ? 'Administrator' : 'No signing assignment'}`;
+      const scope = `${optionLabel(els.employeeDepartment, assignment.department)} / ${step ? optionLabel(els.employeeRole, step) : assignment.roles.includes('developer') ? 'Developer' : assignment.roles.includes('admin') ? 'Administrator' : 'No signing assignment'}`;
       const authority = state.editUser && !state.assignmentChanged ? 'Existing permissions are preserved.' : `Access: ${assignment.roles.map(role => accessLabels[role] || role).join(', ')}.`;
       els.employeeRoutePreview.textContent = `${scope}. ${authority} ${!step ? 'This account is not added to a signing mail list.' : `${email || 'Confirm an email recipient.'}${state.editUser && !els.employeeActive.checked ? ' Inactive users receive no automatic mail.' : ' Mail routing is managed from this user assignment.'}`}`;
     }
@@ -207,7 +208,8 @@
       els.employeeManualCode.disabled = state.busy || !state.manual;
       els.employeeManualName.disabled = state.busy || !state.manual;
       els.employeeRole.disabled = state.busy;
-      els.employeeDepartment.disabled = state.busy;
+      els.employeeDepartment.disabled = state.busy || els.employeeRole.value === 'developer';
+      [...els.employeeDepartment.options].forEach(option => { if (option.value === 'developer') option.disabled = els.employeeRole.value !== 'developer'; });
       els.employeeRole.required = !state.linkUser && (!state.editUser || !state.editUser.roles.length || state.assignmentChanged);
       els.employeeActive.disabled = state.busy;
       els.employeeMailSearch.disabled = state.busy || !hasMailIdentity();
@@ -577,7 +579,13 @@
         event.preventDefault(); buttons[(index + (event.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length]?.focus();
       } else if (event.key === 'Escape') { event.preventDefault(); cancelLookup(); hideResults(); els.employeeSearch.focus(); }
     });
-    [els.employeeRole, els.employeeDepartment].forEach((input) => input.addEventListener('change', () => { state = { ...state, assignmentChanged: true }; updateControls(); }));
+    [els.employeeRole, els.employeeDepartment].forEach((input) => input.addEventListener('change', () => {
+      if (input === els.employeeRole) {
+        if (input.value === 'developer') els.employeeDepartment.value = 'developer';
+        else if (els.employeeDepartment.value === 'developer') els.employeeDepartment.value = '';
+      }
+      state = { ...state, assignmentChanged: true }; updateControls();
+    }));
     els.employeeActive.addEventListener('change', updateControls);
     els.employeeMailSearch.addEventListener('input', () => {
       cancelMailLookup(); state = { ...state, mail: null, retainMail: false };
@@ -672,6 +680,8 @@
         const body = bodyForSelection();
         if (editedUser?.roles.includes('admin') && !body.roles.includes('admin')
           && !window.confirm('Remove Administrator access from this user and replace it with the selected PCN role and department?')) return;
+        if (editedUser?.roles.includes('developer') && !body.roles.includes('developer')
+          && !window.confirm('Remove Developer access from this user and replace it with the selected PCN role and department?')) return;
         if (linkedUser && !window.confirm(`Link ${linkedUser.username} to ${state.selected.employeeCode}? The employee code becomes this account's sign-in code and existing sessions will be signed out. Its permissions and records will be preserved.`)) return;
         state = { ...state, busy: true }; cancelLookup(); cancelMailLookup(); updateControls(); renderUsers(); message('Saving employee access...');
         const target = linkedUser || editedUser;

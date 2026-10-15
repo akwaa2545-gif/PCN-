@@ -743,7 +743,7 @@
 
   function documentContext() {
     return {record:state.activeRequest,savedRecord:state.savedRecord,user:state.user,dirty:hasUnsavedChanges(),ready:state.apiReady,
-      viewOnly:state.viewOnly,canStartRevision:(state.user?.roles || []).some(role => String(role).toLowerCase() === 'admin') && Boolean(state.activeRequest.id) && !['approved','rejected','closed'].includes(state.activeRequest.status),
+      viewOnly:state.viewOnly,canStartRevision:(state.user?.roles || []).some(role => ['admin', 'developer'].includes(String(role).toLowerCase())) && Boolean(state.activeRequest.id) && !['approved','rejected','closed'].includes(state.activeRequest.status),
       exportPdf:() => documentUI?.exportPdf()};
   }
 
@@ -1841,7 +1841,7 @@
     if (!Object.hasOwn(departments, group)) return false;
     const department = departments[group];
     if (!department || !['approved', 'checked', 'prepared'].includes(action) || state.user?.isActive === false) return false;
-    if (roles.includes('admin')) return true;
+    if (roles.some(role => ['admin', 'developer'].includes(role))) return true;
     return Boolean(state.user?.department === department && state.user?.signingStep === action &&
       !roles.includes('supplier') && ['reviewer', departmentRoles[department]].some(role => roles.includes(role)));
   }
