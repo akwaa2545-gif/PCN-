@@ -115,6 +115,8 @@ The server checks schema and master data before listening. Use `NODE_ENV=product
 
 ### Guided PCN creation (local development)
 
+The Portal's **Create PCN** dropdown opens on hover, click or keyboard activation and links directly to **Blank PCN**, **Common change starter**, **Copy existing PCN** or **Resume draft**. Opening these entry choices does not create a record or queue mail. Users table role and department badges show Developer in yellow, Administrator in green and other assigned values in black; unassigned values keep a yellow pending indicator.
+
 `/create` opens **Details → Changes → Documents → Review & Submit**, with shared readiness checks, inline errors, document upload cards and a compact bottom-right error checklist. Draft edits save to the current user's account and can be resumed on another computer. Opening the page does not create a record; submission is an explicit final action. Concurrent edits use rowversions and draft creation retries reuse the same identity.
 
 Blank documents, common change starters and safe copies of existing PCNs are available. **Test document** fills sample values and permanently marks the resulting document **TESTING DOC**, including Records, the official sheet, printed copies and workflow mail. Copying a test document retains its marker. Test documents use normal validation, attachment scanning and workflow rules; submitting one can queue ordinary workflow notifications.

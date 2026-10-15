@@ -55,6 +55,16 @@
   }
   function pcnRole(user) { return user.roles.includes('developer') ? 'developer' : user.roles.includes('admin') ? 'admin' : signingSteps.includes(user.signingStep) ? user.signingStep : ''; }
 
+  function userAccessBadge(label, value, column, assigned) {
+    const names = [value, label].map(name => String(name || '').trim().toLowerCase());
+    const kind = !assigned ? 'pending' : names.includes('developer') ? 'developer'
+      : column === 'role' && names.some(name => ['admin', 'administrator'].includes(name)) ? 'admin' : 'assigned';
+    const badge = document.createElement('span');
+    badge.className = `user-access-badge user-access-badge--${kind}`;
+    badge.textContent = label || '\u2014';
+    return badge;
+  }
+
   function userIdentity(user) {
     const identity = document.createElement('div'); identity.className = 'employee-user-identity';
     const name = String(user.displayName || user.mailProfile?.displayName || user.username || user.employeeCode || '').trim();
@@ -477,6 +487,9 @@
         values.forEach((value, index) => {
           const cell = document.createElement('td');
           if (index === 1) cell.appendChild(userIdentity(user));
+          else if (index === 2) cell.appendChild(userAccessBadge(value, pcnRole(user), 'role', user.roles.length > 0));
+          else if (index === 3) cell.appendChild(userAccessBadge(value, user.department, 'department',
+            Boolean(user.department) && String(user.department).toLowerCase() !== 'unassigned'));
           else cell.textContent = value || '—';
           row.appendChild(cell);
         });

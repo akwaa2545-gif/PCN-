@@ -1,4 +1,36 @@
 /* Keep the records action beside the list it updates. */
+.create-start-dropdown { position: relative; }
+.user-access-badge {
+  display: inline-flex; align-items: center; min-height: 28px; max-width: 100%;
+  padding: 5px 10px; border: 1px solid transparent; border-radius: 5px;
+  font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: anywhere;
+}
+.user-access-badge--assigned { background: #20252b; color: #fff; border-color: #20252b; }
+.user-access-badge--developer { background: #ffcd38; color: #302400; border-color: #d8a412; }
+.user-access-badge--admin { background: #18733e; color: #fff; border-color: #126332; }
+.user-access-badge--pending { background: #fff3cd; color: #704f00; border-color: #e5c35d; }
+body.admin-page .topbar-actions .create-start-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  min-width: 144px; border-color: #c58c00; background: var(--mes-gold); color: #172b3d; font-weight: 700;
+}
+body.admin-page .topbar-actions .create-start-toggle:hover:not(:disabled),
+body.admin-page .topbar-actions .create-start-toggle[aria-expanded="true"] { background: #ffc32c; border-color: #a57900; color: #172b3d; }
+body.admin-page .topbar-actions .create-start-toggle:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.create-start-options {
+  position: absolute; top: 100%; right: 0; z-index: 150;
+  width: 280px; max-width: calc(100vw - 32px); padding: 8px;
+  border: 1px solid #cbd8e5; border-top: 3px solid var(--mes-gold);
+  background: #fff; box-shadow: 0 12px 28px rgba(13, 42, 72, .2);
+}
+.create-start-options[hidden] { display: none; }
+body.admin-page .create-start-options a {
+  display: flex; align-items: center; min-height: 46px; padding: 10px 14px;
+  color: #143c64; font-size: 14px; font-weight: 700; text-decoration: none;
+}
+body.admin-page .create-start-options a:hover,
+body.admin-page .create-start-options a:focus-visible { background: #edf4fb; color: #003f7d; outline: 2px solid #136db5; outline-offset: -2px; }
+@media (max-width: 720px) { .create-start-options { right: auto; left: 0; } }
+
 .admin-records-header-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 body.admin-page .admin-records-refresh {
   min-height: 38px;

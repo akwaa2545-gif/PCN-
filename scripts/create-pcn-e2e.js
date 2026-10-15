@@ -27,7 +27,9 @@ function isolatedSystem(origin) {
   const repository = memoryRepository();
   repository.getMasterData = async () => ({ ...masterData, versionId: 1 });
   const users = [{ username: 'create-admin', displayName: 'Creation Administrator', roles: ['admin'] },
-    { username: 'create-preparer', displayName: 'Assigned GSC Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' }];
+    { username: 'create-preparer', displayName: 'Assigned GSC Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' },
+    ...(entryMenuOnly ? [{ username: 'badge-developer', displayName: 'Developer badge fixture', roles: ['developer'], department: 'developer' },
+      { username: 'badge-checker', displayName: 'Checked badge fixture', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' }] : [])];
   const authService = fakeAuthService({ additionalUsers: users });
   const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'prepared@example.test' }] };
   let files = [], scanState = 'pendingScan', jobState = 'pending';
@@ -177,6 +179,17 @@ async function main() {
       await menu.getByRole('link',{name:'Copy existing PCN',exact:true}).click();await expect(page.locator('#templatePcnId')).toBeFocused();
       await page.goto(`${origin}/create?start=unrecognized`);await expect(page.locator('#createEntry')).toBeVisible();await expect(page.locator('#createEditor')).toBeHidden();
       checked('Small-screen click navigation fits the viewport and unknown start choices safely keep the entry chooser');
+      await page.setViewportSize({width:1440,height:1000});await page.goto(`${origin}/admin#users`);
+      const assignedRows=page.locator('#adminUsersRows tr');
+      const developerRow=assignedRows.filter({hasText:'Developer badge fixture'}),checkerRow=assignedRows.filter({hasText:'Checked badge fixture'});
+      await expect(developerRow.locator('td').nth(2).locator('span')).toHaveCSS('background-color','rgb(255, 205, 56)');
+      await expect(developerRow.locator('td').nth(3).locator('span')).toHaveCSS('background-color','rgb(255, 205, 56)');
+      const adminRow=assignedRows.filter({hasText:'Creation Administrator'});
+      await expect(adminRow.locator('td').nth(2).locator('span')).toHaveCSS('background-color','rgb(24, 115, 62)');
+      await expect(checkerRow.locator('td').nth(2).locator('span')).toHaveCSS('background-color','rgb(32, 37, 43)');
+      await expect(checkerRow.locator('td').nth(3).locator('span')).toHaveCSS('background-color','rgb(32, 37, 43)');
+      await page.screenshot({path:path.resolve('test-results/user-access-badges-desktop.png'),fullPage:true});
+      checked('Users table renders Developer yellow, Administrator green, and other assigned role and department badges black');
       assert.deepEqual(report.errors,[]);assert.deepEqual(report.external,[]);report.status='passed';return;
     }
     const response = await page.goto(`${origin}/create`);

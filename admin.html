@@ -22,7 +22,15 @@
           <button class="ghost-button admin-nav-button" id="adminRecordsButton" type="button">PCN Records</button>
           <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button" hidden>Mail Routing</button>
           <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button" hidden>Users</button>
-          <a class="ghost-link" href="/create">Create PCN</a>
+          <div class="create-start-dropdown" id="createStartDropdown">
+            <button class="ghost-button create-start-toggle" id="createStartToggle" type="button" aria-expanded="false" aria-controls="createStartOptions">Create PCN <span aria-hidden="true">⌄</span></button>
+            <nav class="create-start-options" id="createStartOptions" aria-label="Start a PCN" hidden>
+              <a href="/create?start=blank">Blank PCN</a>
+              <a href="/create?start=starter">Common change starter</a>
+              <a href="/create?start=copy">Copy existing PCN</a>
+              <a href="/create?start=resume">Resume draft</a>
+            </nav>
+          </div>
           <div class="account-menu" id="accountMenu"></div>
         </div>
       </header>

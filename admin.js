@@ -35,6 +35,7 @@
   document.addEventListener("DOMContentLoaded", init);
 
   function init() {
+    initializeCreateDropdown();
     [
       "adminRefreshButton",
       "adminCount",
@@ -110,6 +111,41 @@
 
   function isAdmin() {
     return (state.user?.roles || []).some(role => ['admin', 'developer'].includes(String(role).toLowerCase()));
+  }
+
+  function initializeCreateDropdown() {
+    const container = document.getElementById('createStartDropdown');
+    const trigger = document.getElementById('createStartToggle');
+    const panel = document.getElementById('createStartOptions');
+    const links = [...panel.querySelectorAll('a')];
+    let openedByHover = false;
+    const setOpen = (open, returnFocus = false) => {
+      panel.hidden = !open;
+      trigger.setAttribute('aria-expanded', String(open));
+      if (!open) openedByHover = false;
+      if (returnFocus) trigger.focus();
+    };
+    container.addEventListener('pointerenter', event => {
+      if (event.pointerType === 'mouse' && panel.hidden) { setOpen(true);openedByHover = true; }
+    });
+    container.addEventListener('pointerleave', event => {
+      if (event.pointerType === 'mouse' && !container.contains(document.activeElement)) setOpen(false);
+    });
+    trigger.addEventListener('click', () => { const open = panel.hidden || openedByHover;openedByHover = false;setOpen(open); });
+    trigger.addEventListener('keydown', event => {
+      if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+      event.preventDefault();setOpen(true);
+      (event.key === 'ArrowDown' ? links[0] : links.at(-1)).focus();
+    });
+    container.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !panel.hidden) { event.preventDefault();setOpen(false, true); }
+    });
+    container.addEventListener('focusout', event => {
+      if (!container.contains(event.relatedTarget)) setOpen(false);
+    });
+    document.addEventListener('pointerdown', event => {
+      if (!container.contains(event.target)) setOpen(false);
+    });
   }
 
   function permittedView(view) {

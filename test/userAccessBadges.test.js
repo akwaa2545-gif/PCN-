@@ -67,3 +67,16 @@ test('Pending and missing department badges keep unassigned state and labels can
   const malicious = badge(rows[1], 3, maliciousDepartment, 'assigned');
   assert.equal(malicious.innerHTML, '', 'textContent handles untrusted labels without HTML interpolation');
 });
+
+test('Badge colors match exact case-insensitive labels without treating ordinary departments as roles', async () => {
+  const page = await usersPage([
+    account('mixed-labels', ['admin'], 'administrator'),
+    account('developer-team', ['admin'], 'developer team')
+  ]);
+  page.element('employeeRole').options = [{ value: 'admin', textContent: 'ADMINISTRATOR' }];
+  page.element('usersStatusFilter').events.change();
+  const rows = page.element('adminUsersRows').children;
+  badge(rows[0], 2, 'ADMINISTRATOR', 'admin');
+  badge(rows[0], 3, 'administrator', 'assigned');
+  badge(rows[1], 3, 'developer team', 'assigned');
+});

@@ -6,6 +6,11 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const stages = ['details','changes','documents','review'];
+  function entryIntent(search) {
+    const query=new URLSearchParams(search),choices=query.getAll('start');
+    if(query.has('draft')||choices.length!==1)return null;
+    return ['blank','starter','copy','resume'].includes(choices[0])?choices[0]:null;
+  }
   const labels = {details:'Details',changes:'Changes',documents:'Documents',review:'Review & submit'};
   function completion(checks) {
     const items = (checks?.items || []).filter(item => item.blocking);
@@ -505,12 +510,17 @@
         $('changeForm').replaceChildren(...Object.values(state.master.formDefinitions).map(form=>{const option=node('option',form.label);option.value=form.id;return option;}));
         const draft=new URLSearchParams(root.location.search).get('draft');
         if(draft){const result=await api(`/api/pcn-drafts/${encodeURIComponent(draft)}`);await begin(result.record,result.record,result);}
-        else{$('createLoading').hidden=true;$('draftSaveStatus').textContent='Choose how to begin';}
+        else{
+          $('createLoading').hidden=true;$('draftSaveStatus').textContent='Choose how to begin';
+          const intent=entryIntent(root.location.search);
+          if(intent==='blank')await begin(model.blank(state.master),null,{freshIdentity:true});
+          else if(intent)await entryChoices(intent);
+        }
       }catch(error){report(error);$('createLoading').textContent='The workspace could not be loaded. Refresh to try again.';}
       finally{doc.querySelectorAll('#createEntry button').forEach(control=>control.disabled=!state.master);}
     }
     void init();
     return {getState:()=>state,destroy(){entryGuard.next();receiptGuard.next();previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);root.removeEventListener('message',receivePreviewMessage);closePreview();$('documentPreviewFrame').removeAttribute('src');autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);}};
   }
-  return Object.freeze({completion,stageForIssue,testFillMode,retryMode,isPreviewMessage,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,savedDocument,notificationLabel,createSubmission,mount});
+  return Object.freeze({entryIntent,completion,stageForIssue,testFillMode,retryMode,isPreviewMessage,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,savedDocument,notificationLabel,createSubmission,mount});
 });
