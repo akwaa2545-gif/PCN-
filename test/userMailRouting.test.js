@@ -7,10 +7,10 @@ const { NotificationService } = require('../src/notificationService');
 const { SqlPcnRepository } = require('../src/sqlPcnRepository');
 
 const user = { id: '11111111-1111-1111-1111-111111111111', employeeCode: '2205529', isActive: true,
-  identityProvider: 'employee-code', roles: ['gsc'], department: 'gscTet', signingStep: 'approved',
+  identityProvider: 'employee-code', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared',
   email: 'Person@example.test', mailDirectoryId: 'directory-1', mailVerifiedAt: new Date(),
   mailProfile: { id: 'directory-1', email: 'Person@example.test', displayName: 'Employee Name' } };
-const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.approved', emails: 'manual@example.test', recipients: [] }] };
+const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'manual@example.test', recipients: [] }] };
 
 test('verified one-step assignments add managed contacts without changing manual version or stored lists', () => {
   const before = normalizeMailRouting(settings);
@@ -44,7 +44,7 @@ test('disabled, unverified, wrong-role and retired identities are excluded; manu
 
 test('pending snapshot drops revoked automatic contacts and preserves manual addresses without adding new contacts', () => {
   const payload = { to: 'manual@example.test; Person@example.test', subject: 'test', routingSnapshot: {
-    groupKey: 'department.gscTet.approved', manualEmails: 'manual@example.test', automaticRecipients: [{ userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }] } };
+    groupKey: 'department.gscTet.prepared', manualEmails: 'manual@example.test', automaticRecipients: [{ userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }] } };
   assert.equal(filterPendingRecipients(payload, [user]).to, payload.to);
   assert.equal(filterPendingRecipients(payload, [{ ...user, signingStep: 'checked' }]).to, 'manual@example.test');
   assert.equal(filterPendingRecipients({ ...payload, routingSnapshot: { ...payload.routingSnapshot, manualEmails: '' } }, []).to, '');
@@ -53,7 +53,7 @@ test('pending snapshot drops revoked automatic contacts and preserves manual add
 
 test('worker cancels a revoked managed-only pending job inside the claim transaction without mailing', async () => {
   const calls = [];
-  const payload = { to: user.email, routingSnapshot: { groupKey: 'department.gscTet.approved', manualEmails: '',
+  const payload = { to: user.email, routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: '',
     automaticRecipients: [{ userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }] } };
   const tx = { begin: async () => calls.push('begin'), commit: async () => calls.push('commit'), rollback: async () => calls.push('rollback'),
     request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; }, async query(query) {
@@ -140,7 +140,7 @@ test('revoked SQL principal cannot run an aggregate updater after authority chan
 test('effective routing rejects overflow and pending email rebinding rather than truncating recipients', async () => {
   const manual = Array.from({ length: 30 }, (_, index) => `user${index}@example.test`).join('; ');
   assert.throws(() => normalizeMailRouting(applyUserMailRouting({ ...settings, groups: [{ ...settings.groups[0], emails: manual }] }, [user])), { statusCode: 400 });
-  const payload = { to: user.email, routingSnapshot: { groupKey: 'department.gscTet.approved', manualEmails: '', automaticRecipients: [
+  const payload = { to: user.email, routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: '', automaticRecipients: [
     { userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }
   ] } };
   assert.equal(filterPendingRecipients(payload, [{ ...user, mailDirectoryId: 'new-id', mailProfile: { ...user.mailProfile, id: 'new-id' } }]).to, '');
@@ -151,7 +151,7 @@ test('effective routing rejects overflow and pending email rebinding rather than
 test('worker retains manual snapshot, commits claim before mailing, and excludes routing metadata from external payload', async () => {
   const tx = routingTransaction([]);
   const payload = { to: 'manual@example.test; Person@example.test', subject: 'test', message: 'message', senderName: 'PCN',
-    routingSnapshot: { groupKey: 'department.gscTet.approved', manualEmails: 'manual@example.test', automaticRecipients: [
+    routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: 'manual@example.test', automaticRecipients: [
       { userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }
     ] } };
   const originalRequest = tx.request;

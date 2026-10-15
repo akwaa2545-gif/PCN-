@@ -2,6 +2,25 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startApi, validPayload, unsignedPayload, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
 
+test('historical Approved identity survives saving and Prepared then Checked backfill through HTTP', async t => {
+  const api = await startApi(t);
+  const admin = await api.login('admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  let record = await api.repository.seedHistoricalReview(created.body.data.id, {
+    signoff: { gscTet: { approved: true, approvedName: 'Historical Approver', approvedDate: '2026-10-01' } }
+  });
+  const patch = review => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, internalReview: review } });
+  assert.equal((await patch({ signoff: { gscTet: { checked: true } } })).status, 400, 'new Checked requires Prepared despite historic Approved');
+  for (const review of [{}, { signoff: { gscTet: { prepared: true } } }, { signoff: { gscTet: { checked: true } } }]) {
+    const response = await patch(review);
+    assert.equal(response.status, 200, response.text);
+    record = response.body.data;
+    assert.equal(record.internalReview.signoff.gscTet.approvedName, 'Historical Approver');
+    assert.equal(record.internalReview.signoff.gscTet.approvedDate, '2026-10-01');
+  }
+  assert.equal((await patch({ signoff: { gscTet: { prepared: false } } })).status, 400, 'cannot clear a prerequisite under a retained signature');
+});
+
 test('reviewer and department role alone cannot sign, and administrators cannot forge permission fields', async t => {
   const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
     { username: 'reviewer', roles: ['reviewer'], department: 'gscTet' },

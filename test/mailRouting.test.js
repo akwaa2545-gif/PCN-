@@ -17,19 +17,19 @@ function input(settings) { return { schemaVersion: 2, version: settings.version,
 test('five departments have three separate fixed lists and QA final reuses QA lists', () => {
   assert.equal(mailGroups.length, 16);
   assert.equal(new Set(mailGroups.map(group => group.key)).size, 16);
-  assert.deepEqual(mailGroups.slice(0, 3).map(group => group.action), ['approved', 'checked', 'prepared']);
+  assert.deepEqual(mailGroups.slice(0, 3).map(group => group.action), ['prepared', 'checked', 'approved']);
   const review = { signoff: Object.fromEntries(['gscTet', 'prodEngTet', 'qaTet'].map(key => [key, { approved: true, checked: true, prepared: true }])) };
-  assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'submitted', internalReview: review }).groupKey, 'department.qaTet.approved');
-  assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'submitted', internalReview: review }).label, 'QA/TET Final Judgment Approved');
+  assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'submitted', internalReview: review }).groupKey, 'department.qaTet.prepared');
+  assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'submitted', internalReview: review }).label, 'QA/TET Final Judgment Prepared');
   assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'draft', internalReview: review }), null);
   assert.equal(resolveNextMailTarget({ riskLevel: 'RL1', status: 'submitted', internalReview: review }).blockedReason, 'tapbu_requirement_not_selected');
-  assert.equal(resolveNextMailTarget({ riskLevel: 'RL1', status: 'submitted', internalReview: { ...review, tapbu: { need: true } } }).groupKey, 'department.gscTapbu.approved');
+  assert.equal(resolveNextMailTarget({ riskLevel: 'RL1', status: 'submitted', internalReview: { ...review, tapbu: { need: true } } }).groupKey, 'department.gscTapbu.prepared');
 });
 
-test('next target follows Approved Checked Prepared and supplier handoff after final', () => {
-  const record = { riskLevel: 'RL0', status: 'submitted', internalReview: { signoff: { gscTet: { approved: true } } } };
+test('next target follows Prepared Checked Approved and supplier handoff after final', () => {
+  const record = { riskLevel: 'RL0', status: 'submitted', internalReview: { signoff: { gscTet: { prepared: true } } } };
   assert.equal(resolveNextMailTarget(record).action, 'checked');
-  assert.equal(resolveNextMailTarget({ ...record, internalReview: { signoff: { gscTet: { approved: true, checked: true } } } }).action, 'prepared');
+  assert.equal(resolveNextMailTarget({ ...record, internalReview: { signoff: { gscTet: { prepared: true, checked: true } } } }).action, 'approved');
   const completed = { approved: true, checked: true, prepared: true };
   const done = { ...record, internalReview: { signoff: { gscTet: completed, prodEngTet: completed, qaTet: completed }, qateFinal: { signoff: completed } } };
   assert.equal(resolveNextMailTarget(done).groupKey, 'supplierNotification');
@@ -39,7 +39,7 @@ test('explicit TaPBU no-need routes action mail directly to final QA signing', (
   const review={signoff:Object.fromEntries(['gscTet','prodEngTet','qaTet'].map(key=>[key,{approved:true,checked:true,prepared:true}])),tapbu:{noNeed:true}};
   const target=resolveNextMailTarget({riskLevel:'RL1',status:'submitted',internalReview:review});
   assert.equal(target.stageKey,'qateFinal.signoff');
-  assert.equal(target.groupKey,'department.qaTet.approved');
+  assert.equal(target.groupKey,'department.qaTet.prepared');
   assert.equal(target.blockedReason,undefined);
 });
 
@@ -94,14 +94,14 @@ test('all three actions and all department paths resolve independently', () => {
   const completed = { approved: true, checked: true, prepared: true };
   const stages = Object.keys(stageDepartments);
   for (const [index, stageKey] of stages.entries()) {
-    for (const [actionIndex, action] of ['approved', 'checked', 'prepared'].entries()) {
+    for (const [actionIndex, action] of ['prepared', 'checked', 'approved'].entries()) {
       const review = { tapbu: { need: true } };
       for (const [stageIndex, stage] of stages.entries()) {
         const [parent, key] = stage.split('.');
         review[parent] = { ...review[parent], [key]: stageIndex < index ? completed : {} };
       }
       const [parent, key] = stageKey.split('.');
-      review[parent][key] = Object.fromEntries(['approved', 'checked', 'prepared'].slice(0, actionIndex).map(flag => [flag, true]));
+      review[parent][key] = Object.fromEntries(['prepared', 'checked', 'approved'].slice(0, actionIndex).map(flag => [flag, true]));
       const target = resolveNextMailTarget({ status: 'submitted', riskLevel: 'RL1', internalReview: review });
       assert.equal(target.stageKey, stageKey);
       assert.equal(target.groupKey, `department.${stageDepartments[stageKey]}.${action}`);

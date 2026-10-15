@@ -12,7 +12,7 @@ test('meaningful updates ignore server metadata and drafts but include domain ch
   assert.deepEqual(meaningfulUpdate(record, { ...record, version: '2', updatedAt: 'later', mailRoutingState: { status: 'pending' } }), []);
   assert.deepEqual(meaningfulUpdate(null, { ...record, status: 'draft' }), []);
   assert.deepEqual(meaningfulUpdate(record, { ...record, status: 'draft' }), ['Status']);
-  assert.deepEqual(meaningfulUpdate(record, { ...record, comments: [{ body: 'new' }], internalReview: { signoff: { gscTet: { approved: true } } } }), ['Comments', 'Internal review']);
+  assert.deepEqual(meaningfulUpdate(record, { ...record, comments: [{ body: 'new' }], internalReview: { signoff: { gscTet: { prepared: true } } } }), ['Comments', 'Internal review']);
   assert.deepEqual(meaningfulUpdate(null, { ...record, status: 'submitted' }), ['PCN submitted']);
 });
 
@@ -103,9 +103,9 @@ test('default normalization preserves real clears, zero, array order and array i
 });
 
 test('general update and action mail have distinct content; action recipients are excluded case-insensitively', async () => {
-  const target = { ...user, id: 'gsc', roles: ['gsc'], department: 'gscTet', signingStep: 'approved', email: 'Actor@example.test',
+  const target = { ...user, id: 'gsc', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared', email: 'Actor@example.test',
     mailProfile: { id: user.mailDirectoryId, email: 'actor@example.test' } };
-  const tx = transaction({ users: [user, target], settings: { schemaVersion: 2, groups: [{ key: 'department.gscTet.approved', emails: 'ACTOR@example.test', recipients: [] }] } });
+  const tx = transaction({ users: [user, target], settings: { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'ACTOR@example.test', recipients: [] }] } });
   const notifications = service();
   const prepared = await notifications.prepare(tx, null, { ...base, status: 'submitted' });
   assert.equal(prepared.plan.queued, true);
@@ -113,8 +113,8 @@ test('general update and action mail have distinct content; action recipients ar
   assert.equal(prepared.plan.update.batches[0].to, user.email);
   assert.match(prepared.plan.payload.subject, /^\[Action Required\]/);
   assert.match(prepared.plan.payload.message, />GSC\/TET<\/td>/);
-  assert.match(prepared.plan.payload.message, />Approved<\/td>/);
-  assert.doesNotMatch(prepared.plan.payload.message, />gscTet<\/td>|>approved<\/td>/);
+  assert.match(prepared.plan.payload.message, />Prepared<\/td>/);
+  assert.doesNotMatch(prepared.plan.payload.message, />gscTet<\/td>|>prepared<\/td>/);
   assert.match(prepared.plan.update.batches[0].subject, /PCN Update/);
   assert.notEqual(prepared.plan.payload.message, prepared.plan.update.batches[0].message);
   const saved = await notifications.persisted(tx, prepared.record, prepared.plan);
@@ -140,7 +140,7 @@ test('blocked handoff does not prevent general update or exclude eligible action
 });
 
 test('invalid action recipient configuration blocks action without suppressing general update', async () => {
-  const tx = transaction({ settings: { schemaVersion: 2, groups: [{ key: 'department.gscTet.approved', emails: 'invalid address', recipients: [] }] } });
+  const tx = transaction({ settings: { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'invalid address', recipients: [] }] } });
   const prepared = await service().prepare(tx, null, { ...base, status: 'submitted' });
   assert.equal(prepared.plan.reason, 'notification_configuration_invalid');
   assert.equal(prepared.record.mailRoutingState.status, 'blocked');
@@ -237,7 +237,7 @@ test('failure on later general batch rolls back PCN and preceding action/update 
     { key: 'department.gscTet.checked', emails: 'actor@example.test', recipients: [] }
   ] } });
   const repository = new SavedRepository({ transaction: () => tx }, { notifications: service() });
-  await assert.rejects(repository.update(base.id, current => ({ ...current, internalReview: { signoff: { gscTet: { approved: true } } } }), 'reviewer', base.version), /outbox insert failed/);
+  await assert.rejects(repository.update(base.id, current => ({ ...current, internalReview: { signoff: { gscTet: { prepared: true } } } }), 'reviewer', base.version), /outbox insert failed/);
   assert.equal(outbox(tx).length, 3);
   assert.equal(tx.calls.at(-1), 'rollback');
   assert(!tx.calls.includes('commit'));

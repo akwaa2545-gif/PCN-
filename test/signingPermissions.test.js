@@ -2,6 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { actions, departments, validateSigningAssignment, canSign, signaturePath } = require('../src/signingPermissions');
 
+test('canonical signing sequence is Prepared, Checked, Approved without renaming stored actions', () => {
+  assert.deepEqual(actions, ['prepared', 'checked', 'approved']);
+});
+
 test('one signing step requires a matching department and role', () => {
   assert.doesNotThrow(() => validateSigningAssignment({ roles: ['qa'], department: 'qaTet', signingStep: 'checked' }));
   assert.doesNotThrow(() => validateSigningAssignment({ roles: ['admin'], department: 'it', signingStep: null }));

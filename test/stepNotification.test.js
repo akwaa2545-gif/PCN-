@@ -27,11 +27,11 @@ function transaction(settings = configured, failInsert = false) {
 const service = () => new NotificationService(null, { mailUrl: 'https://mail.example.test/send', publicOrigin: 'https://pcn.example.test' });
 const writes = tx => tx.calls.filter(call => call.query?.includes('INSERT pcn.NotificationJobs'));
 
-test('submitted creation targets GSC Approved; draft creation generates no handoff', async () => {
+test('submitted creation targets GSC Prepared; draft creation generates no handoff', async () => {
   const notifications = service();
   const tx = transaction();
   const prepared = await notifications.prepare(tx, null, { ...base, status: 'submitted' }, 'user:reviewer');
-  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.approved');
+  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.prepared');
   const result = await notifications.persisted(tx, prepared.record, prepared.plan);
   assert.equal(result.queued, true);
   assert.equal(writes(tx).length, 1);
@@ -43,9 +43,9 @@ test('submitted creation targets GSC Approved; draft creation generates no hando
 
 test('each saved action targets only the next pending list, including multi-action saves', async () => {
   for (const [flags, groupKey] of [
-    [{ approved: true }, 'department.gscTet.checked'],
-    [{ approved: true, checked: true }, 'department.gscTet.prepared'],
-    [done, 'department.prodEngTet.approved']
+    [{ prepared: true }, 'department.gscTet.checked'],
+    [{ prepared: true, checked: true }, 'department.gscTet.approved'],
+    [done, 'department.prodEngTet.prepared']
   ]) {
     const tx = transaction();
     const prepared = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: flags } } });
@@ -57,18 +57,18 @@ test('each saved action targets only the next pending list, including multi-acti
 });
 
 test('QA final aliases the QA list and identifies final judgment in message', async () => {
-  const before = { ...base, internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { approved: true, checked: true } } } };
+  const before = { ...base, internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true, checked: true } } } };
   const after = { ...before, internalReview: { signoff: { ...before.internalReview.signoff, qaTet: done } } };
   const tx = transaction();
   const prepared = await service().prepare(tx, before, after);
   assert.equal(prepared.record.mailRoutingState.stageKey, 'qateFinal.signoff');
-  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.qaTet.approved');
+  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.qaTet.prepared');
   await service().persisted(tx, prepared.record, prepared.plan);
   assert.match(JSON.parse(writes(tx)[0].inputs.payload).message, /Final Judgment/);
 });
 
 test('non-RL0 keeps TaPBU requirements and persists an unsent prerequisite warning', async () => {
-  const before = { ...base, riskLevel: 'RL2', internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { approved: true, checked: true } } } };
+  const before = { ...base, riskLevel: 'RL2', internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true, checked: true } } } };
   const tx = transaction();
   const after = { ...before, internalReview: { signoff: { ...before.internalReview.signoff, qaTet: done } } };
   const prepared = await service().prepare(tx, before, after);
@@ -78,7 +78,7 @@ test('non-RL0 keeps TaPBU requirements and persists an unsent prerequisite warni
   const selected = await service().prepare(tx, prepared.record, { ...prepared.record,
     internalReview: { ...prepared.record.internalReview, tapbu: { need: true } } });
   assert.equal(selected.plan.queued, true);
-  assert.equal(selected.record.mailRoutingState.groupKey, 'department.gscTapbu.approved');
+  assert.equal(selected.record.mailRoutingState.groupKey, 'department.gscTapbu.prepared');
   await service().persisted(tx, selected.record, selected.plan);
   assert.equal(writes(tx).length, 1, 'Saving the prerequisite queues the now-actionable next step');
 });
@@ -100,7 +100,7 @@ test('clearing and reselecting TaPBU Need cancels the pending job and starts one
   const notifications = service();
   const tx = transaction();
   const before = { ...base, riskLevel: 'RL2', internalReview: { tapbu: { need: true },
-    signoff: { gscTet: done, prodEngTet: done, qaTet: { approved: true, checked: true } } } };
+    signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true, checked: true } } } };
   const first = await notifications.prepare(tx, before, { ...before,
     internalReview: { ...before.internalReview, signoff: { ...before.internalReview.signoff, qaTet: done } } });
   await notifications.persisted(tx, first.record, first.plan);
@@ -121,7 +121,7 @@ test('clearing and reselecting TaPBU Need cancels the pending job and starts one
 test('combined final signoff and terminal-status save still queues supplier handoff once', async () => {
   const before = { ...base, status: 'qa_review', internalReview: {
     signoff: { gscTet: done, prodEngTet: done, qaTet: done },
-    qateFinal: { approve: true, signoff: { approved: true, checked: true } }
+    qateFinal: { approve: true, signoff: { prepared: true, checked: true } }
   } };
   for (const status of ['approved', 'rejected', 'closed']) {
     const tx = transaction();
@@ -137,7 +137,7 @@ test('combined final signoff and terminal-status save still queues supplier hand
 
 test('status-only closure preserves the previously queued final supplier notice', async () => {
   const before = { ...base, status: 'qa_review', internalReview: {
-    signoff: { gscTet: done, prodEngTet: done, qaTet: done }, qateFinal: { signoff: { approved: true, checked: true } }
+    signoff: { gscTet: done, prodEngTet: done, qaTet: done }, qateFinal: { signoff: { prepared: true, checked: true } }
   } };
   const tx = transaction();
   const prepared = await service().prepare(tx, before, { ...before, internalReview: { ...before.internalReview, qateFinal: { signoff: done } } });
@@ -151,7 +151,7 @@ test('status-only closure preserves the previously queued final supplier notice'
 
 test('unrelated saves retain activation identity without a second email', async () => {
   const tx = transaction();
-  const first = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { approved: true } } } });
+  const first = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { prepared: true } } } });
   const current = first.record;
   const unchanged = await service().prepare(tx, current, { ...current, updatedAt: '2026-10-06T10:00:00Z' });
   assert.equal(unchanged.record.mailRoutingState.activationId, current.mailRoutingState.activationId);
@@ -163,7 +163,7 @@ test('unrelated saves retain activation identity without a second email', async 
 test('reset cancels only unclaimed jobs; valid recompletion gets a new identity', async () => {
   const notifications = service();
   const tx = transaction();
-  const first = await notifications.prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { approved: true } } } });
+  const first = await notifications.prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { prepared: true } } } });
   const reset = await notifications.prepare(tx, first.record, { ...first.record, internalReview: {} });
   assert.equal(reset.plan.queued, false);
   const cancellation = tx.calls.find(call => call.query.includes("Status=N'cancelled'"));
@@ -175,7 +175,7 @@ test('reset cancels only unclaimed jobs; valid recompletion gets a new identity'
 });
 
 test('empty lists and missing mail save a blocked outcome and never enqueue', async () => {
-  const next = { ...base, internalReview: { signoff: { gscTet: { approved: true } } } };
+  const next = { ...base, internalReview: { signoff: { gscTet: { prepared: true } } } };
   for (const [notifications, settings, reason] of [
     [service(), { schemaVersion: 2, groups: [] }, 'recipient_not_configured'],
     [new NotificationService(null), configured, 'mail_not_configured']
@@ -202,8 +202,8 @@ test('existing submitted and review PCNs adopt current routing and queue the pen
   const { mailRoutingPolicyVersion: omitted, ...unversioned } = base;
   for (const legacy of [unversioned, { ...base, mailRoutingPolicyVersion: 1 }]) {
     for (const status of ['submitted', 'gsc_review']) {
-      for (const [signoff, groupKey] of [[{}, 'department.gscTet.approved'],
-        [{ gscTet: { approved: true } }, 'department.gscTet.checked']]) {
+      for (const [signoff, groupKey] of [[{}, 'department.gscTet.prepared'],
+        [{ gscTet: { prepared: true } }, 'department.gscTet.checked']]) {
         const tx = transaction();
         const notifications = service();
         const before = { ...legacy, status, internalReview: { signoff } };
@@ -234,11 +234,11 @@ test('adopting legacy routing after a saved signoff sends only the current pendi
   const prepared = await service().prepare(tx, legacy, { ...legacy,
     internalReview: { signoff: { gscTet: done } } });
   assert.equal(prepared.record.mailRoutingPolicyVersion, 2);
-  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.prodEngTet.approved');
+  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.prodEngTet.prepared');
   assert.equal(prepared.plan.queued, true);
   await service().persisted(tx, prepared.record, prepared.plan);
   assert.equal(writes(tx).length, 1);
-  assert.match(JSON.parse(writes(tx)[0].inputs.payload).message, /GSC\/TET Prepared completed/);
+  assert.match(JSON.parse(writes(tx)[0].inputs.payload).message, /GSC\/TET Approved completed/);
 });
 
 test('adoption cancels pending legacy notices only before creating the current handoff', async () => {
@@ -279,7 +279,7 @@ test('legacy adoption with missing recipients or mail configuration persists a b
     const tx = transaction(settings);
     const prepared = await notifications.prepare(tx, legacy, legacy);
     assert.equal(prepared.record.mailRoutingPolicyVersion, 2);
-    assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.approved');
+    assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.prepared');
     assert.equal(prepared.record.mailRoutingState.reason, reason);
     assert.equal((await notifications.persisted(tx, prepared.record, prepared.plan)).queued, false);
     assert.equal(writes(tx).length, 0);
@@ -289,7 +289,7 @@ test('legacy adoption with missing recipients or mail configuration persists a b
 test('clearing a legacy signoff during adoption never queues retrospective completion mail', async () => {
   const tx = transaction();
   const legacy = { ...base, mailRoutingPolicyVersion: 1,
-    internalReview: { signoff: { gscTet: { approved: true } } } };
+    internalReview: { signoff: { gscTet: { prepared: true } } } };
   const prepared = await service().prepare(tx, legacy, { ...legacy, internalReview: {} });
   assert.equal(prepared.record.mailRoutingPolicyVersion, 2);
   assert.equal(prepared.plan.queued, false);
@@ -323,7 +323,7 @@ test('legacy adoption reaches the Power Automate transport with only the current
     emails: group.key === 'department.gscTet.checked' ? 'checked@example.test' : 'approved@example.test' })) };
   const tx = transaction(settings);
   const legacy = { ...base, status: 'submitted', mailRoutingPolicyVersion: 1,
-    internalReview: { signoff: { gscTet: { approved: true } } } };
+    internalReview: { signoff: { gscTet: { prepared: true } } } };
   const notifications = new NotificationService(null, { mailUrl,
     mailConfigurationStatus: () => integrations.mailConfigurationStatus() });
   const prepared = await notifications.prepare(tx, legacy, legacy);
@@ -360,11 +360,11 @@ test('a stale browser notification POST cannot duplicate a version-2 save handof
 
 test('job key uses activation identity and original Power Automate payload contract', async () => {
   const tx = transaction();
-  const prepared = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { approved: true } } } });
+  const prepared = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: { prepared: true } } } });
   await service().persisted(tx, prepared.record, prepared.plan);
   const write = writes(tx)[0];
   assert.equal(write.inputs.eventKey, `${base.id}:${prepared.record.mailRoutingState.activationId}:handoff`);
-  assert.deepEqual(Object.keys(JSON.parse(write.inputs.payload)).sort(), ['message', 'senderName', 'subject', 'to']);
+  assert.deepEqual(Object.keys(JSON.parse(write.inputs.payload)).sort(), ['actionSnapshot', 'message', 'senderName', 'subject', 'to']);
   assert.doesNotMatch(write.query, /BEGIN TRANSACTION|COMMIT/);
 });
 
@@ -391,7 +391,7 @@ test('SQL create/update execute notification hooks before commit and roll back o
       const repository = new IsolatedSqlRepository(pool, { notifications: service() });
       const save = operation === 'create'
         ? repository.create({ ...base, id: undefined, status: 'submitted', createdAt: '2026-10-06T00:00:00Z' })
-        : repository.update(base.id, current => ({ ...current, internalReview: { signoff: { gscTet: { approved: true } } } }), 'reviewer', base.version);
+        : repository.update(base.id, current => ({ ...current, internalReview: { signoff: { gscTet: { prepared: true } } } }), 'reviewer', base.version);
       if (fail) {
         await assert.rejects(save, /outbox failed/);
         assert.equal(pool.tx.calls.at(-1), 'rollback');
@@ -411,4 +411,41 @@ test('stale SQL PCN save rejects before notification preparation', async () => {
   const repository = new IsolatedSqlRepository(pool, { notifications: service() });
   await assert.rejects(repository.update(base.id, () => base, 'reviewer', '000000000000000f'), { statusCode: 409 });
   assert.equal(pool.tx.calls.filter(call => typeof call === 'object' && !call.query.includes('sp_getapplock')).length, 0);
+});
+
+test('old-order v2 records adopt the current Prepared target on the first eligible save only', async () => {
+  for (const oldState of [undefined, { activationId: 'old-activation', stageKey: 'signoff.gscTet',
+    action: 'checked', groupKey: 'department.gscTet.checked', status: 'pending' }]) {
+    const tx = transaction();
+    const before = { ...base, internalReview: { signoff: { gscTet: { approved: true } } },
+      ...(oldState ? { mailRoutingState: oldState } : {}) };
+    const prepared = await service().prepare(tx, before, before);
+    assert.equal(prepared.record.mailRoutingState.signingOrderVersion, 2);
+    assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.prepared');
+    assert.equal(prepared.plan.queued, true);
+    const cancellation = tx.calls.find(call => call.query?.includes("Status=N'cancelled'") && call.inputs.pcnId);
+    assert(cancellation, 'All pending old-order handoffs must be cancelled before replacing them');
+    assert.match(cancellation.query, /Status=N'pending'/);
+    await service().persisted(tx, prepared.record, prepared.plan);
+    assert.equal(writes(tx).length, 1);
+    assert(tx.calls.indexOf(cancellation) < tx.calls.indexOf(writes(tx)[0]));
+    const snapshot = JSON.parse(writes(tx)[0].inputs.payload).actionSnapshot;
+    assert.deepEqual(snapshot, { signingOrderVersion: 2, pcnId: base.id,
+      activationId: prepared.record.mailRoutingState.activationId, stageKey: 'signoff.gscTet',
+      action: 'prepared', groupKey: 'department.gscTet.prepared' });
+    const repeated = await service().prepare(tx, prepared.record, prepared.record);
+    assert.equal(repeated.plan.queued, false);
+    assert.equal(repeated.record.mailRoutingState.activationId, prepared.record.mailRoutingState.activationId);
+  }
+});
+
+test('old-order terminal records do not receive retrospective handoffs when signing order changes', async () => {
+  for (const status of ['approved', 'rejected', 'closed']) {
+    const before = { ...base, status,
+      internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, qateFinal: { signoff: done } },
+      mailRoutingState: { activationId: 'old-final', stageKey: 'supplierNotification', action: null,
+        groupKey: 'supplierNotification', status: 'pending' } };
+    const prepared = await service().prepare(transaction(), before, before);
+    assert.equal(prepared.plan.queued, false);
+  }
 });

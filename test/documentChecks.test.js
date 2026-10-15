@@ -7,6 +7,22 @@ const full = { id:'PCN-2026-0001',status:'submitted',ownerUserId:'supplier',risk
   materialName:'Copper',selectedChange:'Tolerance',reason:'Quality',currentCondition:'Old',newCondition:'New',
   desiredStart:'Lot 42',sampleSubmitted:'no',internalReview:{} };
 const admin = {id:'admin',roles:['admin'],isActive:true};
+test('next action starts with Prepared and fills historical gaps before later steps', () => {
+  assert.equal(buildAction(full, admin).signingStep, 'prepared');
+  const historical = { ...full, internalReview: { signoff: { gscTet: { approved: true, approvedName: 'Original' } } } };
+  assert.equal(buildAction(historical, admin).signingStep, 'prepared');
+  historical.internalReview.signoff.gscTet.prepared = true;
+  assert.equal(buildAction(historical, admin).signingStep, 'checked');
+});
+test('final judgment belongs to the QA/TET Approved assignment', () => {
+  const done = { prepared: true, checked: true, approved: true };
+  const record = { ...full, riskLevel: 'RL0', internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, qateFinal: { signoff: done } } };
+  const approved = { roles: ['qa'], department: 'qaTet', signingStep: 'approved' };
+  const action = buildAction(record, approved);
+  assert.equal(action.signingStep, 'approved');
+  assert.equal(action.canAct, true);
+  assert.equal(buildAction(record, { ...approved, signingStep: 'prepared' }).canAct, false);
+});
 test('checks describe missing document fields, remain advisory for drafts and do not modify records', () => {
   const draft={...full,status:'draft',reason:'',sampleSubmitted:'pending'};
   const before=JSON.stringify(draft);

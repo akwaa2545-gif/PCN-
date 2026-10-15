@@ -5,6 +5,57 @@ const { assertRecordAccess, assertReviewUpdate, assertWritablePayload, assertSta
 const supplier = { id: 4, roles: ['Supplier'] };
 const qa = { id: 5, roles: ['QA'], department: 'qaTet', signingStep: 'checked' };
 
+test('new signatures require all earlier steps and all preceding departments', () => {
+  const admin = { roles: ['admin'] };
+  const done = { prepared: true, checked: true, approved: true };
+  assert.doesNotThrow(() => assertReviewUpdate({}, { signoff: { gscTet: { prepared: true } } }, admin, 'RL0'));
+  assert.throws(() => assertReviewUpdate({}, { signoff: { gscTet: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });
+  assert.throws(() => assertReviewUpdate({}, { signoff: { gscTet: { checked: true, approved: true } } }, admin, 'RL0'), { statusCode: 400 });
+  const before = { signoff: { prodEngTet: done } };
+  const after = { ...before, signoff: { ...before.signoff, qaTet: { prepared: true } } };
+  assert.throws(() => assertReviewUpdate(before, after, admin, 'RL0'), { statusCode: 400 });
+});
+
+test('historical signatures retain identity while missing new prerequisites are completed', () => {
+  const admin = { roles: ['admin'] };
+  const approved = { approved: true, approvedName: 'Historical approver', approvedDate: '2026-10-01' };
+  const before = { signoff: { gscTet: approved } };
+  assert.doesNotThrow(() => assertReviewUpdate(before, structuredClone(before), admin, 'RL0'));
+  const prepared = { signoff: { gscTet: { ...approved, prepared: true } } };
+  assert.doesNotThrow(() => assertReviewUpdate(before, prepared, admin, 'RL0'));
+  const checked = { signoff: { gscTet: { ...prepared.signoff.gscTet, checked: true } } };
+  assert.doesNotThrow(() => assertReviewUpdate(prepared, checked, admin, 'RL0'));
+  assert.throws(() => assertReviewUpdate(checked, { signoff: { gscTet: { ...checked.signoff.gscTet, prepared: false } } }, admin, 'RL0'), { statusCode: 400 });
+  assert.throws(() => assertReviewUpdate(before, { signoff: { gscTet: { ...approved, checked: true } } }, admin, 'RL0'), { statusCode: 400 });
+});
+
+test('historical gaps do not authorize removal of already completed group prerequisites', () => {
+  const admin = { roles: ['admin'] };
+  const before = { signoff: { gscTet: { prepared: true }, qaTet: { approved: true } } };
+  assert.doesNotThrow(() => assertReviewUpdate(before, structuredClone(before), admin, 'RL0'));
+  assert.throws(() => assertReviewUpdate(before, { signoff: { gscTet: { prepared: false }, qaTet: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });
+});
+
+test('changing TaPBU routing cannot remove earlier evidence beneath a retained final signature', () => {
+  const admin = { roles: ['admin'] };
+  const done = { prepared: true, checked: true, approved: true };
+  const before = { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { need: true, gsc: done, qa: done }, qateFinal: { signoff: { approved: true } } };
+  const after = { ...before, tapbu: { need: false, noNeed: true } };
+  assert.throws(() => assertReviewUpdate(before, after, admin, 'RL2'), { statusCode: 400 });
+  const legacy = { signoff: before.signoff, qateFinal: before.qateFinal };
+  assert.doesNotThrow(() => assertReviewUpdate(legacy, { ...legacy, tapbu: { noNeed: true } }, admin, 'RL2'));
+});
+
+test('QA/TET Approved owns final judgment fields and terminal status transitions', () => {
+  const approved = { ...qa, signingStep: 'approved' };
+  const prepared = { ...qa, signingStep: 'prepared' };
+  const review = { qateFinal: { signoff: { prepared: true, checked: true, approved: true }, approve: true } };
+  assert.doesNotThrow(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, approved, 'RL0'));
+  assert.throws(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, prepared, 'RL0'), { statusCode: 403 });
+  assert.doesNotThrow(() => assertStatusPermission({ status: 'qa_review', internalReview: review }, 'approved', approved));
+  assert.throws(() => assertStatusPermission({ status: 'qa_review', internalReview: review }, 'approved', prepared), { statusCode: 403 });
+});
+
 test('explicit TaPBU no-need permits final QA while an undecided requirement remains blocked', () => {
   const done={approved:true,checked:true,prepared:true};
   const admin={id:'admin',roles:['admin'],isActive:true};
