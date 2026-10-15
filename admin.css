@@ -536,3 +536,17 @@ body.admin-page .employee-user-form .employee-mail-result { width: 100%; min-wid
 .user-presence-online { border-color: #b0d1b9; background: #edf7ef; color: #245f37; }
 .user-presence-unavailable { border-style: dashed; }
 @media (max-width: 700px) { .users-presence-note { margin-inline: 16px; } }
+
+/* Department signing summary shares the document's actual saved signature evidence. */
+.pcn-timeline-tabs { display: flex; gap: 0; flex: none; border-bottom: 1px solid var(--portal-line); padding-inline: 24px; }
+body.admin-page .pcn-timeline-tabs button { min-height: 46px; padding: 10px 18px; border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: #fff; color: #52677b; box-shadow: none; font: inherit; font-size: 16px; }
+body.admin-page .pcn-timeline-tabs button[aria-selected="true"] { border-bottom-color: var(--mes-gold); color: var(--mes-blue); }
+.pcn-department-caption { display: flex; align-items: center; justify-content: center; min-height: 41px; color: #52677b; font-size: 14px; }
+body.admin-page .pcn-department-point { min-height: 160px; }
+.pcn-department-completed .pcn-timeline-marker { border-color: #26743b; color: #26743b; }
+.pcn-department-current .pcn-timeline-marker { border-color: #b58100; color: #004583; }
+.pcn-department-waiting .pcn-timeline-marker, .pcn-department-stopped .pcn-timeline-marker { border-color: #8997a4; color: #697a89; }
+.pcn-signature-summary { min-width: 620px; font-family: Aptos, 'Segoe UI', sans-serif; font-size: 16px; }
+.pcn-signature-summary tbody :is(th, td) { font-weight: 400; }
+.pcn-signature-summary .is-current { background: #fff8df; }
+@media (max-width: 600px) { .pcn-timeline-tabs { padding-inline: 12px; } body.admin-page .pcn-timeline-tabs button { padding-inline: 12px; } }

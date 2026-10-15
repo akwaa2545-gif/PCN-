@@ -283,7 +283,7 @@ test('Quick view timeline reads a coherent department snapshot and keeps revisio
   const snapshot = { id: 'PCN-1', version: 'fresh', status: 'qa_review', stages: [{ key: 'qaTet', label: 'QA/TET', completed: 1, total: 3, state: 'current', currentStep: 'Checked', steps: [
     { action: 'prepared', label: 'Prepared', completed: true, person: 'Actual preparer', signedAt: '2026-10-15' },
     { action: 'checked', label: 'Checked', completed: false, person: null, signedAt: null },
-    { action: 'approved', label: 'Approved', completed: false, person: null, signedAt: null }] }], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET ? Checked', terminal: false } };
+    { action: 'approved', label: 'Approved', completed: false, person: null, signedAt: null }] }], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET \u2014 Checked', terminal: false } };
   const page = controllerPage(async url => { calls.push(url); return url.endsWith('/workflow-summary') ? snapshot : url.endsWith('/progress') ? { steps: [] } : { id: 'PCN-1', version: 'stale' }; });
   page.controller.setRecords([{ id: 'PCN-1', version: 'stale' }]); await page.button('Quick view').emit('click');
   await page.find('rdPreviewTab-timeline').emit('click'); await settle();
@@ -294,4 +294,24 @@ test('Quick view timeline reads a coherent department snapshot and keeps revisio
   assert.match(text, /QA\/TET/); assert.match(text, /1\/3 signed/); assert.match(text, /Waiting for Checked/);
   assert.match(text, /Actual preparer/); assert.match(text, /2026-10-15/);
   assert.equal(content.querySelectorAll().filter(item => item.dataset.workflowStage).length, 1);
+});
+
+
+test('department markers and saved placeholders use their real symbols and partial waiting is honest', async () => {
+  const api = dashboard();
+  assert.equal(api.workflowStageCaption({ state: 'waiting', completed: 1 }), 'Waiting for earlier departments');
+  assert.equal(api.workflowStageCaption({ state: 'waiting', completed: 0 }), 'Not started');
+  const counts = [3, 1, 1, 1];
+  const snapshot = { id: 'PCN-1', version: 'latest', status: 'submitted', nextAction: { label: 'Current review', terminal: false },
+    stages: ['completed', 'current', 'waiting', 'stopped'].map((state, index) => ({ key: state, label: state, state, completed: counts[index], total: 3, currentStep: state === 'current' ? 'Checked' : null,
+      steps: ['prepared', 'checked', 'approved'].map((action, position) => ({ action, label: action[0].toUpperCase() + action.slice(1), completed: position < counts[index], person: position < counts[index] ? 'Signer' : null, signedAt: position < counts[index] ? '2026-10-15' : null })) })) };
+  const page = controllerPage(async url => url.endsWith('/workflow-summary') ? snapshot : url.endsWith('/progress') ? { steps: [] } : { id: 'PCN-1', version: 'latest' });
+  page.controller.setRecords([{ id: 'PCN-1' }]); await page.button('Quick view').emit('click');
+  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  const descendants = page.find('rdPreviewContent').querySelectorAll();
+  const markers = descendants.filter(item => item.className === 'rd-timeline-point').map(item => item.textContent);
+  assert.deepEqual(markers, ['\u2713', '\u2022', '\u25cb', '\u25cb']);
+  assert.ok(descendants.some(item => item.textContent === 'current \u00b7 1/3 signed'));
+  assert.ok(descendants.some(item => item.tag === 'td' && item.textContent === '\u2014'));
+  assert.equal(descendants.some(item => item.textContent === '?'), false);
 });

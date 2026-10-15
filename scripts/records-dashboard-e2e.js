@@ -213,12 +213,20 @@ async function main() {
     const dialog = page.locator('#rdPreviewDialog');
     const closePreview = async id => { await dialog.getByRole('button', { name: 'Close preview', exact: true }).click(); await expect(dialog).toBeHidden(); await expect(dashboard.preview(id)).toBeFocused(); };
     const historyReadsBeforePreview = viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0;
+    const summaryReadsBeforePreview = viewer.reads.get(`/api/pcns/${records[0].id}/workflow-summary`) || 0;
     const documentReadsBeforePreview = viewer.reads.get(`/api/pcns/${records[0].id}/documents`) || 0;
     await dashboard.preview(records[0].id).focus(); await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
     assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0, historyReadsBeforePreview, 'Timeline is lazy');
+    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/workflow-summary`) || 0, summaryReadsBeforePreview, 'Department timeline is lazy');
     assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/documents`) || 0, documentReadsBeforePreview, 'Documents are lazy');
     await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click();
+    await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(6);
+    await expect(dialog.locator('[data-workflow-stage="signoff.gscTet"]')).toContainText('1/3');
+    await dialog.locator('[data-workflow-stage="signoff.gscTet"]').click();
+    await expect(dialog.locator('#rdWorkflowDetails')).toContainText('Dashboard GSC Approver');
+    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0, historyReadsBeforePreview, 'Department timeline does not request Change history');
+    await dialog.getByRole('tab', { name: 'Change history', exact: true }).click();
     await expect(dialog.locator('.rd-timeline li')).toHaveCount(2);
     await expect(dialog.locator('.rd-timeline')).toContainText('GSC/TET');
     await expect(dialog.locator('.rd-timeline')).toContainText('Dashboard GSC Approver');
@@ -233,21 +241,37 @@ async function main() {
     await expect(dialog.locator('.rd-documents a')).toHaveCount(0); await closePreview(records[1].id);
     await dashboard.preview(records[2].id).click(); await dialog.getByRole('tab', { name: 'Documents', exact: true }).click();
     await expect(page.locator('#rdPreviewContent')).toContainText('No documents'); await closePreview(records[2].id);
-    report.checks.push('Keyboard Preview opens lazy read-only Overview/Timeline/Documents; real history and clean/quarantine/empty files render; modal pauses refresh and restores focus');
+    report.checks.push('Keyboard Quick view opens lazy read-only Overview, department Timeline, secondary Change history and Documents; saved signatures and clean/quarantine/empty files render without writes');
 
     let historyMode = 'error';
-    await page.route(`**/api/pcns/${records[2].id}/revisions`, route => {
+    const historyRoute = route => {
       if (historyMode === 'error') return route.fulfill({ status: 503, json: { success: false, error: 'Fixture history unavailable' } });
       if (historyMode === 'empty') return route.fulfill({ json: { success: true, data: { items: [], capabilities: {} } } });
       return route.continue();
-    });
+    };
+    await page.route(`**/api/pcns/${records[2].id}/workflow-summary`, historyRoute);
+    await page.route(`**/api/pcns/${records[2].id}/revisions`, historyRoute);
     await dashboard.preview(records[2].id).click(); await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click();
     await expect(page.locator('#rdPreviewContent')).toContainText('Fixture history unavailable');
     historyMode = 'real'; await dialog.getByRole('button', { name: 'Retry', exact: true }).click();
-    await expect(dialog.locator('.rd-timeline li')).toHaveCount(2); await closePreview(records[2].id);
-    historyMode = 'empty'; await dashboard.preview(records[2].id).click(); await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click();
+    await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(6); await closePreview(records[2].id);
+    historyMode = 'empty'; await dashboard.preview(records[2].id).click(); await dialog.getByRole('tab', { name: 'Change history', exact: true }).click();
     await expect(page.locator('#rdPreviewContent')).toContainText('No recorded changes'); await closePreview(records[2].id);
     await page.unroute(`**/api/pcns/${records[2].id}/revisions`);
+    await page.unroute(`**/api/pcns/${records[2].id}/workflow-summary`);
+    await page.route(`**/api/pcns/${records[0].id}/workflow-summary`, async route => {
+      await new Promise(resolve => { releaseHeld = resolve; }); return route.continue();
+    });
+    await dashboard.preview(records[0].id).click(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
+    const summaryEntered = page.waitForRequest(request => new URL(request.url()).pathname === `/api/pcns/${records[0].id}/workflow-summary`);
+    await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click(); await summaryEntered;
+    const lateSummary = page.waitForResponse(response => new URL(response.url()).pathname === `/api/pcns/${records[0].id}/workflow-summary`);
+    await dialog.getByRole('tab', { name: 'Documents', exact: true }).click();
+    await expect(dialog.locator('.rd-documents')).toContainText('Hazardous fixture.pdf');
+    releaseHeld(); assert.equal((await lateSummary).status(), 200);
+    await expect(dialog.getByRole('tab', { name: 'Documents', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(0); await expect(dialog.locator('.rd-documents')).toContainText('Hazardous fixture.pdf');
+    await closePreview(records[0].id); await page.unroute(`**/api/pcns/${records[0].id}/workflow-summary`);
     let held = true;
     await page.route(`**/api/pcns/${records[0].id}`, async route => {
       if (held) await new Promise(resolve => { releaseHeld = resolve; });
@@ -288,9 +312,28 @@ async function main() {
     report.checks.push('Five-second polling updates genuine memory changes while preserving page/search/focus; preferences editor pauses polling and preserves draft');
 
     const admin = await open('admin'); const portal = new DashboardPage(admin.page, '#pcnAdminView'); await portal.ready();
+    await admin.page.locator('#adminUsersButton').click();
+    await expect(admin.page.locator('#adminUsersRows .notification-person-identity').first()).toBeVisible();
+    const userTypography = await admin.page.locator('#adminUsersRows tr').first().evaluate(row =>
+      [...row.querySelectorAll('.notification-person-identity, .user-presence-badge, td:last-child button')].map(element => ({ family: getComputedStyle(element).fontFamily, size: getComputedStyle(element).fontSize })));
+    assert(userTypography.length >= 3, 'Actual Users row contains identity, presence and action controls');
+    for (const element of userTypography) { assert.match(element.family, /^Aptos(?:,|$)/); assert.equal(element.size, '14px'); }
+    await admin.page.setViewportSize({ width: 390, height: 844 });
+    await portal.fits();
+    await admin.page.screenshot({ path: path.resolve('test-results/records-users-font-mobile.png'), fullPage: true });
+    await admin.page.setViewportSize({ width: 1440, height: 1000 });
+    await admin.page.locator('#adminRecordsButton').click(); await portal.ready();
     await expect(portal.host.locator('[data-summary="all"] strong')).toHaveText('17');
     await expect(portal.row(records[2].id).locator('[data-column="next"]')).toContainText('Dashboard Assigned Preparer');
     const actionRow=portal.row(records[2].id),history=actionRow.getByRole('button', { name: `History ${records[2].id}`, exact: true });
+    const typography = await actionRow.evaluate(row => ({
+      cells: [...row.cells].map(cell => ({ column: cell.dataset.column || 'actions', family: getComputedStyle(cell).fontFamily, size: getComputedStyle(cell).fontSize })),
+      open: { family: getComputedStyle(row.querySelector('.rd-open-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-open-button')).fontSize },
+      icon: { family: getComputedStyle(row.querySelector('.rd-preview-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-preview-button')).fontSize }
+    }));
+    for (const cell of typography.cells) { assert.match(cell.family, /^Aptos(?:,|$)/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px'); }
+    assert.match(typography.open.family, /^Aptos(?:,|$)/); assert.equal(typography.open.size, '14px');
+    assert.match(typography.icon.family, /^Aptos(?:,|$)/); assert.equal(typography.icon.size, '14px');
     await expect(history).toHaveAttribute('title', 'History');
     await expect(history.locator('svg[aria-hidden="true"]')).toHaveCount(1);
     await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeHidden();
@@ -307,6 +350,9 @@ async function main() {
     await expect(admin.page.locator('#adminRemoveDialog')).toBeVisible();await admin.page.locator('#adminRemoveCancelButton').click();
     await expect(admin.page.locator('#adminRemoveDialog')).toBeHidden();
     await history.click();await expect(admin.page.locator('#pcnTimelineDialog')).toBeVisible();
+    await expect(admin.page.locator('#pcnTimelineSummaryTab')).toHaveAttribute('aria-selected', 'true');
+    await expect(admin.page.locator('#pcnTimelineTrack [data-workflow-stage]')).toHaveCount(6);
+    assert.equal(admin.reads.get(`/api/pcns/${records[2].id}/revisions`) || 0, 0, 'Portal department summary leaves detailed history lazy');
     await admin.page.locator('#pcnTimelineCloseButton').click();await expect(history).toBeFocused();
     await actionRow.locator('.rd-open-button').click();await expect(admin.page).toHaveURL(`${admin.origin}/${records[2].id}`);
     await expect(admin.page.locator('#appNoticeTitle')).toHaveText('PCN loaded');await admin.page.goBack();await portal.ready();
@@ -333,7 +379,7 @@ async function main() {
     await dashboard.reset(); await page.setViewportSize({ width: 390, height: 844 }); await dashboard.fits();
     await page.screenshot({ path: path.resolve('test-results/records-dashboard-mobile.png'), fullPage: true });
     await dashboard.preview(records[0].id).click(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
-    await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click(); await expect(dialog.locator('.rd-timeline li')).toHaveCount(2);
+    await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click(); await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(6);
     await dashboard.fits();
     assert.equal(await dialog.evaluate(node => { const rect = node.getBoundingClientRect(); return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight && node.scrollWidth <= node.clientWidth; }), true);
     await page.screenshot({ path: path.resolve('test-results/records-dashboard-mobile-preview.png') }); await closePreview(records[0].id);
@@ -346,7 +392,7 @@ async function main() {
     report.checks.push('Revoked overview authorization clears records and hides the workspace');
     const revokedPreview = await open('viewer-two');
     const revokeDashboard = new DashboardPage(revokedPreview.page); await revokeDashboard.ready();
-    await revokedPreview.page.route(`**/api/pcns/${records[0].id}/revisions`, route => route.fulfill({ status: 403, json: { success: false, error: 'Fixture preview access revoked' } }));
+    await revokedPreview.page.route(`**/api/pcns/${records[0].id}/workflow-summary`, route => route.fulfill({ status: 403, json: { success: false, error: 'Fixture preview access revoked' } }));
     await revokeDashboard.preview(records[0].id).click();
     await expect(revokedPreview.page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
     await revokedPreview.page.locator('#rdPreviewDialog').getByRole('tab', { name: 'Timeline', exact: true }).click();

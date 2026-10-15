@@ -101,6 +101,7 @@ test('workflow summary is authorized for owned supplier, internal and read-only 
   assert.equal(created.status,201);
   const id = created.body.data.id;
   await api.repository.seedHistoricalReview(id,{signoff:{gscTet:{prepared:true,preparedName:'Saved signer',preparedDate:'2026-10-15'}}});
+  const before = await api.repository.findById(id);
   const route = `/api/pcns/${id}/workflow-summary`;
   assert.equal((await api.request(route)).status,401);
   assert.equal((await api.request(route,{session:other})).status,404);
@@ -114,6 +115,11 @@ test('workflow summary is authorized for owned supplier, internal and read-only 
     assert.equal(JSON.stringify(response.body.data).includes('email'),false);
   }
   assert.equal((await api.request(`${route}?user=other`,{session:admin})).status,400);
-  assert.equal((await api.request(route,{session:admin,method:'POST',body:{}})).status,405);
+  for (const method of ['POST','PATCH','PUT','DELETE']) {
+    assert.equal((await api.request(route,{session:admin,method,body:{}})).status,405);
+    assert.equal((await api.request(route,{session:viewer,method,body:{}})).status,403);
+  }
   assert.equal((await api.request('/api/pcns/PCN-2026-9999/workflow-summary',{session:admin})).status,404);
+  assert.deepEqual(await api.repository.findById(id),before);
+  assert.deepEqual(api.messages,[]);
 });

@@ -30,7 +30,7 @@
   let autoRefreshBlocked = false;
   let portalAccessEpoch = 0;
   let recordsDashboard = null;
-  let timeline = { record: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
+  let timeline = { record: null, tab: 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -93,7 +93,8 @@
       "adminOverviewWorkflow",
       "pcnTimelineDialog", "pcnTimelineTitle", "pcnTimelineSubtitle", "pcnTimelineMessage",
       "pcnTimelineTrack", "pcnTimelineDetails", "pcnTimelineCloseButton", "pcnTimelineDoneButton",
-      "pcnTimelineRefreshButton", "pcnTimelinePreviousButton", "pcnTimelineNextButton"
+      "pcnTimelineRefreshButton", "pcnTimelinePreviousButton", "pcnTimelineNextButton",
+      "pcnTimelineSummaryTab", "pcnTimelineHistoryTab", "pcnTimelineTabs"
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -600,6 +601,13 @@
     els.pcnTimelineCloseButton.addEventListener('click', closeTimeline);
     els.pcnTimelineDoneButton.addEventListener('click', closeTimeline);
     els.pcnTimelineRefreshButton.addEventListener('click', loadTimeline);
+    els.pcnTimelineSummaryTab.addEventListener('click', () => switchTimelineTab('summary'));
+    els.pcnTimelineHistoryTab.addEventListener('click', () => switchTimelineTab('history'));
+    els.pcnTimelineTabs.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault(); const tab = event.key === 'Home' ? 'summary' : event.key === 'End' ? 'history' : timeline.tab === 'summary' ? 'history' : 'summary';
+      (tab === 'summary' ? els.pcnTimelineSummaryTab : els.pcnTimelineHistoryTab).focus(); switchTimelineTab(tab);
+    });
     els.pcnTimelineDialog.addEventListener('cancel', event => { event.preventDefault(); closeTimeline(); });
     els.pcnTimelineDialog.addEventListener('close', finishTimeline);
     els.pcnTimelineDialog.addEventListener('click', event => {
@@ -610,19 +618,31 @@
     els.pcnTimelinePreviousButton.addEventListener('click', () => scrollTimeline(-1));
     els.pcnTimelineNextButton.addEventListener('click', () => scrollTimeline(1));
     els.pcnTimelineTrack.addEventListener('keydown', event => {
-      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !timeline.revisions.length) return;
+      const items = timeline.tab === 'summary' ? timeline.summary?.stages || [] : timeline.revisions;
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !items.length) return;
       event.preventDefault();
-      const index = timeline.revisions.findIndex(item => item.revision === timeline.selectedRevision);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? timeline.revisions.length - 1
-        : Math.max(0, Math.min(timeline.revisions.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
-      selectTimelineRevision(timeline.revisions[next].revision, true);
+      const index = items.findIndex(item => timeline.tab === 'summary' ? item.key === timeline.selectedDepartment : item.revision === timeline.selectedRevision);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
+      if (timeline.tab === 'summary') selectTimelineDepartment(items[next].key, true); else selectTimelineRevision(items[next].revision, true);
     });
   }
 
-  async function openTimeline(record, opener = document.activeElement) {
+  async function switchTimelineTab(tab) {
+    if (!['summary', 'history'].includes(tab) || !timeline.record) return;
+    timeline = { ...timeline, tab }; await loadTimeline();
+  }
+
+  function updateTimelineTabs() {
+    [[els.pcnTimelineSummaryTab, 'summary'], [els.pcnTimelineHistoryTab, 'history']].forEach(([button, tab]) => {
+      button.setAttribute('aria-selected', String(timeline.tab === tab)); button.tabIndex = timeline.tab === tab ? 0 : -1;
+    });
+    els.pcnTimelineTrack.setAttribute('aria-label', timeline.tab === 'summary' ? 'Signing departments' : 'PCN changes, oldest to latest');
+  }
+
+  async function openTimeline(record, opener = document.activeElement, initialTab = 'summary') {
     if (autoRefreshBlocked) return;
     refreshGeneration++;
-    timeline = { record, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session + 1, opener };
+    timeline = { record, tab: initialTab === 'history' ? 'history' : 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session + 1, opener };
     els.pcnTimelineTitle.textContent = `${record.id} timeline`;
     els.pcnTimelineSubtitle.textContent = [record.supplierName, record.materialName].filter(Boolean).join(' / ');
     els.pcnTimelineTrack.innerHTML = '';
@@ -640,25 +660,34 @@
     const accessEpoch = portalAccessEpoch;
     const id = timeline.record.id;
     const request = timeline.request + 1;
-    const selectedRevision = timeline.selectedRevision;
-    timeline = { ...timeline, request, revisions: [] };
+    const selectedRevision = timeline.selectedRevision; const selectedDepartment = timeline.selectedDepartment; const tab = timeline.tab;
+    timeline = { ...timeline, request, summary: null, revisions: [] };
+    updateTimelineTabs();
     els.pcnTimelineTrack.innerHTML = '';
     els.pcnTimelineDetails.innerHTML = '';
-    els.pcnTimelineMessage.textContent = 'Loading change history...';
+    els.pcnTimelineMessage.textContent = tab === 'summary' ? 'Loading signing departments...' : 'Loading change history...';
     els.pcnTimelineTrack.setAttribute('aria-busy', 'true');
     els.pcnTimelineRefreshButton.hidden = false;
     els.pcnTimelineRefreshButton.disabled = true;
-    els.pcnTimelineRefreshButton.textContent = 'Refresh history';
+    els.pcnTimelineRefreshButton.textContent = tab === 'summary' ? 'Refresh departments' : 'Refresh history';
     updateTimelineNavigation();
-    const current = () => timeline.request === request && timeline.record?.id === id && els.pcnTimelineDialog.open;
+    const current = () => timeline.request === request && timeline.record?.id === id && timeline.tab === tab && els.pcnTimelineDialog.open;
     try {
-      const response = await apiFetch(`/api/pcns/${encodeURIComponent(id)}/revisions`);
+      const response = await apiFetch(`/api/pcns/${encodeURIComponent(id)}/${tab === 'summary' ? 'workflow-summary' : 'revisions'}`);
       if (!current()) return;
-      if (!Array.isArray(response?.items)) throw new Error('The change history returned an invalid response.');
-      const revisions = chronologicalTimeline(response.items);
-      timeline = { ...timeline, revisions, selectedRevision: revisions.some(item => item.revision === selectedRevision)
-        ? selectedRevision : revisions[revisions.length - 1]?.revision ?? null };
-      els.pcnTimelineMessage.textContent = revisions.length ? `${revisions.length} recorded ${revisions.length === 1 ? 'event' : 'events'}. Select a change to see details.` : 'No recorded changes are available for this PCN.';
+      if (tab === 'summary') {
+        const summary = window.PCN_RECORDS_DASHBOARD.workflowSummary(response, id);
+        const selected = summary.stages.find(stage => stage.key === selectedDepartment) || summary.stages.find(stage => stage.state === 'current')
+          || summary.stages.find(stage => stage.state !== 'completed') || summary.stages[0];
+        timeline = { ...timeline, summary, selectedDepartment: selected?.key || null };
+        els.pcnTimelineMessage.textContent = summary.nextAction.label;
+      } else {
+        if (!Array.isArray(response?.items)) throw new Error('The change history returned an invalid response.');
+        const revisions = chronologicalTimeline(response.items);
+        timeline = { ...timeline, revisions, selectedRevision: revisions.some(item => item.revision === selectedRevision)
+          ? selectedRevision : revisions[revisions.length - 1]?.revision ?? null };
+        els.pcnTimelineMessage.textContent = revisions.length ? `${revisions.length} recorded ${revisions.length === 1 ? 'event' : 'events'}. Select a change to see details.` : 'No recorded changes are available for this PCN.';
+      }
       renderTimeline();
     } catch (error) {
       if ((error.status === 401 || error.status === 403) && !autoRefreshBlocked && accessEpoch === portalAccessEpoch) {
@@ -666,8 +695,8 @@
         return;
       }
       if (!current()) return;
-      timeline = { ...timeline, revisions: [], selectedRevision: null };
-      els.pcnTimelineMessage.textContent = `Change history unavailable. ${error.message}`;
+      timeline = { ...timeline, summary: null, selectedDepartment: null, revisions: [], selectedRevision: null };
+      els.pcnTimelineMessage.textContent = `${tab === 'summary' ? 'Department timeline' : 'Change history'} unavailable. ${error.message}`;
       els.pcnTimelineRefreshButton.textContent = 'Retry';
       els.pcnTimelineRefreshButton.hidden = error.status === 401 || error.status === 403;
     } finally {
@@ -687,7 +716,7 @@
   function finishTimeline() {
     if (!timeline.record) return;
     const { opener, record } = timeline;
-    timeline = { record: null, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session, opener: null };
+    timeline = { record: null, tab: 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session, opener: null };
     els.pcnTimelineTrack.innerHTML = '';
     els.pcnTimelineDetails.innerHTML = '';
     els.pcnTimelineMessage.textContent = '';
@@ -748,6 +777,8 @@
   }
 
   function renderTimeline() {
+    if (timeline.tab === 'summary') { renderDepartmentTimeline(); return; }
+    els.pcnTimelineTrack.classList?.remove('is-department-summary');
     els.pcnTimelineTrack.innerHTML = timeline.revisions.map(item => {
       const selected = item.revision === timeline.selectedRevision;
       const entries = timelineEntries(item);
@@ -772,11 +803,40 @@
   }
 
   function renderTimelineDetails() {
+    if (timeline.tab === 'summary') { renderDepartmentDetails(); return; }
     const item = timeline.revisions.find(revision => revision.revision === timeline.selectedRevision);
     if (!item) { els.pcnTimelineDetails.innerHTML = ''; return; }
     const changes = userFacingTimelineChanges(item.changes);
     const rows = changes.map(change => `<tr><th scope="row">${escapeHtml(timelineFieldLabel(change))}</th><td><pre>${escapeHtml(timelineValue(change.before))}</pre></td><td><pre>${escapeHtml(timelineValue(change.after))}</pre></td></tr>`).join('');
     els.pcnTimelineDetails.innerHTML = `<h3>Event ${escapeHtml(item.revision)}: ${escapeHtml(timelineSummary({ ...item, changes }))}</h3><p>${escapeHtml(item.actor || 'Actor not recorded')} &middot; ${escapeHtml(item.createdAt ? formatDate(item.createdAt) : 'Time not recorded')}</p>${rows ? `<div class="pcn-timeline-change-scroll"><table class="pcn-timeline-change-table"><thead><tr><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="pcn-timeline-empty">${item.isBaseline ? 'Earlier changes were not recorded. This is the first available history baseline.' : 'No form or signing field changes were recorded for this event.'}</p>`}`;
+  }
+
+  function renderDepartmentTimeline() {
+    els.pcnTimelineTrack.classList?.add('is-department-summary');
+    els.pcnTimelineTrack.innerHTML = (timeline.summary?.stages || []).map(stage => {
+      const caption = window.PCN_RECORDS_DASHBOARD.workflowStageCaption(stage);
+      const marker = stage.state === 'completed' ? '&#10003;' : stage.state === 'current' ? '&#8226;' : '&#9675;';
+      return `<li class="pcn-timeline-item"><button class="pcn-timeline-event pcn-department-point pcn-department-${stage.state}" data-workflow-stage="${escapeHtml(stage.key)}" type="button" aria-pressed="${stage.key === timeline.selectedDepartment}" aria-controls="pcnTimelineDetails" aria-label="${escapeHtml(`${stage.label}, ${stage.completed}/${stage.total} signed, ${caption}`)}"><span class="pcn-department-caption">${escapeHtml(caption)}</span><span class="pcn-timeline-marker" aria-hidden="true">${marker}</span><strong>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</strong></button></li>`;
+    }).join('');
+    els.pcnTimelineTrack.querySelectorAll('[data-workflow-stage]').forEach(button => button.addEventListener('click', () => selectTimelineDepartment(button.dataset.workflowStage)));
+    renderDepartmentDetails(); scrollSelectedTimeline();
+  }
+
+  function selectTimelineDepartment(key, focus = false) {
+    if (!timeline.summary?.stages.some(stage => stage.key === key)) return;
+    timeline = { ...timeline, selectedDepartment: key };
+    els.pcnTimelineTrack.querySelectorAll('[data-workflow-stage]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.workflowStage === key)));
+    renderDepartmentDetails(); scrollSelectedTimeline(focus);
+  }
+
+  function renderDepartmentDetails() {
+    const stage = timeline.summary?.stages.find(item => item.key === timeline.selectedDepartment);
+    if (!stage) { els.pcnTimelineDetails.innerHTML = timeline.summary ? '<p>No signing departments apply to this PCN.</p>' : ''; return; }
+    const rows = stage.steps.map(step => {
+      const waiting = stage.state === 'current' && !step.completed && step.label === stage.currentStep;
+      return `<tr${waiting ? ' class="is-current"' : ''}><th scope="row">${escapeHtml(step.label)}</th><td>${step.completed ? 'Signed' : waiting ? 'Waiting for signature' : 'Not signed'}</td><td>${escapeHtml(step.completed ? step.person || 'Not recorded' : '\u2014')}</td><td>${escapeHtml(step.completed ? step.signedAt || 'Not recorded' : '\u2014')}</td></tr>`;
+    }).join('');
+    els.pcnTimelineDetails.innerHTML = `<h3>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</h3><p>${escapeHtml(window.PCN_RECORDS_DASHBOARD.workflowStageCaption(stage))}</p><div class="pcn-timeline-change-scroll"><table class="pcn-timeline-change-table pcn-signature-summary"><thead><tr><th scope="col">Step</th><th scope="col">Status</th><th scope="col">Signed by</th><th scope="col">Date</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
   function userFacingTimelineChanges(changes) {
@@ -792,7 +852,7 @@
 
   function scrollSelectedTimeline(focus = false) {
     const track = els.pcnTimelineTrack;
-    const button = [...track.querySelectorAll('.pcn-timeline-event')].find(item => Number(item.dataset.revision) === timeline.selectedRevision);
+    const button = [...track.querySelectorAll('.pcn-timeline-event')].find(item => timeline.tab === 'summary' ? item.dataset.workflowStage === timeline.selectedDepartment : Number(item.dataset.revision) === timeline.selectedRevision);
     if (!button) return;
     if (focus) button.focus({ preventScroll: true });
     // Scroll only the timeline, so selecting a revision cannot move the page or dialog.
@@ -804,7 +864,7 @@
   }
 
   function updateTimelineNavigation() {
-    const disabled = timeline.revisions.length < 2;
+    const disabled = (timeline.tab === 'summary' ? timeline.summary?.stages.length || 0 : timeline.revisions.length) < 2;
     els.pcnTimelinePreviousButton.disabled = disabled;
     els.pcnTimelineNextButton.disabled = disabled;
   }

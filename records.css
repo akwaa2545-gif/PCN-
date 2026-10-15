@@ -148,8 +148,13 @@ body.admin-page .rd-sort:hover { color: #ffe27b; background: transparent; }
 .rd-doc-missing { border-color: #e9cd83; color: #775500; background: #fff7df; }
 .rd-overdue { color: #a92f2b; font-weight: 700; }
 .rd-code-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-body.admin-page :is(.admin-table, .users-table),
-body.admin-page :is(.admin-table, .users-table) * { font-family: Aptos, "Segoe UI", Arial, sans-serif !important; }
+body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table),
+body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table) * { font-family: Aptos, "Segoe UI", Arial, sans-serif !important; }
+body.admin-page :is(.admin-table, .users-table) :is(th, td),
+body.admin-page :is(.admin-table, .users-table) :is(th, td) * { font-size: 14px !important; line-height: 1.5; }
+body.admin-page :is(.admin-table, .users-table) td { font-weight: 400; }
+body.admin-page :is(.admin-table, .users-table) small { font-size: 12px !important; }
+body.admin-page .admin-table td:is([data-column="supplierName"], [data-column="materialName"]) { font-size: 16px !important; }
 .rd-code-link { display: inline-flex; align-items: center; min-height: 28px; color: #004583; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
 .rd-code-cell .rd-test-badge { margin: 0; }
 .rd-code-cell .rd-open-button { white-space: nowrap; }
@@ -235,3 +240,23 @@ body.admin-page .rd-tab[aria-selected="true"], .rd-tab[aria-selected="true"] { b
 .rd-test-badge { display:inline-block; margin:5px 0 0; padding:3px 7px; border:1px solid #b36b00; background:#fff0c2; color:#743a00; font-size:11px; font-weight:800; letter-spacing:.04em; white-space:nowrap; }
 .rd-test-badge[hidden] { display:none; }
 .rd-preview-header .rd-test-badge { margin:0 12px 0 auto; }
+
+.rd-preview-tabs { overflow-x: auto; }
+.rd-preview-tabs > button { flex: none; }
+.rd-department-timeline { margin-top: 8px; }
+.rd-department-timeline li::before { top: 65px; }
+.rd-department-point { display: flex; align-items: center; flex-direction: column; gap: 9px; width: 100%; padding: 0 0 14px; border: 0; border-radius: 0; background: transparent; color: #183958; font: inherit; font-size: 16px; cursor: pointer; }
+.rd-department-caption { display: flex; align-items: center; justify-content: center; min-height: 36px; color: #52677b; font-size: 14px; }
+.rd-department-point .rd-timeline-point { border-color: #8997a4; color: #697a89; }
+.rd-stage-completed .rd-timeline-point { border-color: #26743b; color: #26743b; }
+.rd-stage-current .rd-timeline-point { border-color: #b58100; color: #004583; }
+.rd-department-point[aria-pressed="true"] .rd-timeline-point { box-shadow: 0 0 0 4px #ffedb3; }
+.rd-workflow-details { font-family: Aptos, 'Segoe UI', sans-serif; font-size: 16px; }
+.rd-workflow-details h3 { margin: 0 0 8px; color: #004583; font-size: 18px; }
+.rd-workflow-details > p { margin: 0 0 14px; color: #52677b; }
+.rd-signatures-scroll { overflow-x: auto; border: 1px solid #d5dfeb; }
+.rd-signatures { min-width: 620px; width: 100%; border-collapse: collapse; font: inherit; }
+.rd-signatures :is(th, td) { padding: 12px; border-bottom: 1px solid #d5dfeb; text-align: left; overflow-wrap: anywhere; }
+.rd-signatures th { background: #edf3f8; color: #004583; }
+.rd-signatures td { font-weight: 400; }
+.rd-signatures .is-current { background: #fff8df; }

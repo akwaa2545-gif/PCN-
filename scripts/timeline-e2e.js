@@ -53,8 +53,26 @@ async function main() {
   const signingHistory = await repository.getRevisions(signed.id);
   assert.equal(signingHistory.length, 3);
   report.signingFixtureEvents = signingHistory.length;
+  const done = { prepared: true, checked: true, approved: true, preparedName: 'Saved preparer', checkedName: 'Saved checker', approvedName: 'Saved approver',
+    preparedDate: '2026-10-15', checkedDate: '2026-10-15', approvedDate: '2026-10-15' };
+  const review = { signoff: { gscTet: done, prodEngTet: done,
+    qaTet: { prepared: true, preparedName: 'QA reviewer <literal>', preparedDate: '2026-10-15' } }, tapbu: { need: true } };
+  const departmentCases = [];
+  for (const [name, status, riskLevel, internalReview] of [
+    ['current', 'submitted', 'RL2', review],
+    ['terminal', 'approved', 'RL2', review],
+    ['low-risk', 'submitted', 'RL0', { signoff: { gscTet: done, prodEngTet: done, qaTet: done } }],
+    ['confirmation', 'submitted', 'RL2', { signoff: { gscTet: done, prodEngTet: done, qaTet: done } }],
+    ['no-need', 'submitted', 'RL2', { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { noNeed: true } }],
+    ['partial-future', 'submitted', 'RL2', { signoff: { qaTet: { prepared: true, preparedName: 'Historical later signer', preparedDate: '2026-10-15' } } }]
+  ]) {
+    const created = await service.create({ ...unsignedPayload, status: 'draft', supplierName: `Department ${name} fixture` }, 'Department Fixture Creator', user);
+    const saved = await repository.update(created.id, current => ({ ...current, status, riskLevel, internalReview: { ...current.internalReview, ...structuredClone(internalReview) } }), 'Historical department fixture', created.version);
+    departmentCases.push({ name, record: saved });
+  }
+  const allBefore = await repository.list();
   const server = http.createServer();
-  let browser, context, releaseHeld = () => {}, detailEntered = () => {}, mode = 'real', reads = 0;
+  let browser, context, releaseHeld = () => {}, detailEntered = () => {}, mode = 'real', reads = 0, historyReads = 0, summaryReads = 0;
   try {
     await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -72,6 +90,13 @@ async function main() {
       if (/\/notifications(?:\/|$)/.test(url.pathname) || ['/api/admin/directory-users', '/api/admin/employees'].includes(url.pathname)
         || !['GET', 'HEAD'].includes(method)) { report.forbidden.push({ method, path: url.pathname }); return route.abort(); }
       if (url.pathname === '/api/pcns/overview') reads++;
+      if (url.pathname.endsWith('/revisions')) historyReads++;
+      if (url.pathname.endsWith('/workflow-summary')) {
+        summaryReads++;
+        if (mode === 'summary-held') await new Promise(resolve => { releaseHeld = resolve; });
+        if (mode === 'summary-error') return route.fulfill({ status: 503, json: { success: false, error: 'Department fixture unavailable' } });
+        if (mode === 'summary-denied') return route.fulfill({ status: 403, json: { success: false, error: 'Department access revoked' } });
+      }
       if (url.pathname === `/api/pcns/${record.id}` && mode === 'detail-held') {
         await new Promise(resolve => { releaseHeld = resolve; detailEntered(); });
       }
@@ -92,13 +117,66 @@ async function main() {
     const eye = () => page.getByRole('button', { name: `History ${activeId}`, exact: true });
     const dialog = page.locator('#pcnTimelineDialog'), events = dialog.locator('.pcn-timeline-event');
     const details = dialog.locator('#pcnTimelineDetails');
-    const open = async (keyboard = false) => {
+    const open = async (keyboard = false, changeHistory = true) => {
       if (keyboard) { await eye().focus(); await page.keyboard.press('Enter'); }
       else await eye().click();
       await expect(dialog).toBeVisible();
+      if (changeHistory) await dialog.getByRole('tab', { name: 'Change history', exact: true }).click();
     };
     const close = async button => { await dialog.locator(button).click(); await expect(dialog).toBeHidden(); await expect(eye()).toBeFocused(); };
 
+    activeId = departmentCases[0].record.id;
+    await open(true, false);
+    const stages = dialog.locator('[data-workflow-stage]');
+    const qa = dialog.locator('[data-workflow-stage="signoff.qaTet"]');
+    await expect(stages).toHaveCount(6); await expect(qa).toContainText('1/3'); await expect(qa).toContainText('Checked');
+    await expect(qa.locator('.pcn-timeline-marker')).toHaveText('\u2022');
+    await expect(dialog.locator('[data-workflow-stage="signoff.gscTet"] .pcn-timeline-marker')).toHaveText('\u2713');
+    await expect(dialog.locator('[data-workflow-stage="qateFinal.signoff"] .pcn-timeline-marker')).toHaveText('\u25cb');
+    assert.equal(await stages.locator('strong').evaluateAll(nodes => nodes.some(node => node.textContent.includes('?'))), false, 'Summary separators render their intended glyph');
+    assert.equal(historyReads, 0, 'Default department view never fetches detailed revision history');
+    await qa.click(); await expect(details).toContainText('QA reviewer <literal>');
+    await expect(details).not.toContainText('?');
+    await expect(details).toContainText('Prepared'); await expect(details).toContainText('Checked'); await expect(details).toContainText('Approved');
+    assert.match(await details.innerText(), /Prepared[\s\S]*Checked[\s\S]*Approved/);
+    await expect(dialog.locator('[data-workflow-stage="signoff.gscTet"]')).toContainText('3/3');
+    await expect(dialog.locator('[data-workflow-stage="qateFinal.signoff"]')).toHaveClass(/pcn-department-waiting/);
+    await expect(dialog.locator('[data-workflow-stage="qateFinal.signoff"]')).toContainText('Not started');
+    await expect(dialog.locator('[data-workflow-stage="qateFinal.signoff"]')).toContainText('Final judgment');
+    await page.screenshot({ path: path.resolve('test-results/timeline-departments-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 }); await fit(page, dialog);
+    await page.screenshot({ path: path.resolve('test-results/timeline-departments-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await fit(page, dialog); await close('#pcnTimelineCloseButton');
+    for (const item of departmentCases.slice(1)) {
+      activeId = item.record.id; await open(false, false);
+      await expect(stages).toHaveCount(['low-risk', 'no-need'].includes(item.name) ? 4 : 6);
+      if (['low-risk', 'no-need'].includes(item.name)) await expect(dialog.locator('[data-workflow-stage^="tapbu."]')).toHaveCount(0);
+      if (item.name === 'terminal') {
+        await expect(qa).toContainText('1/3'); await expect(qa).not.toHaveClass(/completed/);
+        await expect(qa).not.toContainText('Waiting for Checked');
+      }
+      if (item.name === 'confirmation') await expect(dialog.locator('[data-workflow-stage="tapbu.gsc"]')).toContainText('Confirm TaPBU requirement');
+      if (item.name === 'partial-future') {
+        await expect(qa).toContainText('1/3'); await expect(qa).toContainText('Waiting for earlier departments');
+        await expect(qa).not.toContainText('Not started');
+      }
+      await close('#pcnTimelineCloseButton');
+    }
+    report.checks.push('Department timeline counts saved signatures, QA 1/3 waits for Checked, completed groups show 3/3, terminal gaps remain incomplete, RL0/no-need omit TaPBU, and confirmation is explicit');
+    activeId = departmentCases[0].record.id; mode = 'summary-error'; await open(false, false);
+    await expect(dialog.locator('#pcnTimelineMessage')).toContainText('Department fixture unavailable');
+    mode = 'real'; await dialog.locator('#pcnTimelineRefreshButton').click(); await expect(stages).toHaveCount(6);
+    await close('#pcnTimelineCloseButton');
+    mode = 'summary-held'; const waitingSummary = page.waitForRequest(request => new URL(request.url()).pathname === `/api/pcns/${activeId}/workflow-summary`);
+    await open(false, false); await waitingSummary; await expect(dialog.locator('#pcnTimelineMessage')).toContainText(/loading/i);
+    await close('#pcnTimelineCloseButton'); mode = 'real'; releaseHeld();
+    activeId = departmentCases[2].record.id; await open(false, false); await expect(stages).toHaveCount(4);
+    await expect(dialog.locator('#pcnTimelineTitle')).toContainText(activeId); await expect(dialog).not.toContainText('QA reviewer <literal>');
+    await close('#pcnTimelineCloseButton');
+    report.checks.push('Default department load has retry and ignores stale results after close and a different PCN is opened; Change history remains lazy');
+
+    activeId = record.id;
     await open(true); await expect(events).toHaveCount(history.length);
     await expect(page.locator('#pcnTimelineTitle')).toContainText(record.id);
     assert.deepEqual(await events.evaluateAll(nodes => nodes.map(node => Number(node.dataset.revision))), history.map(event => event.revision).toSorted((a, b) => a - b));
@@ -181,20 +259,27 @@ async function main() {
     await page.screenshot({ path: path.resolve('test-results/timeline-signing-desktop.png') });
     await close('#pcnTimelineCloseButton');
     report.checks.push('Genuine assigned GSC Prepared then Checked revisions show signer and department/action in simple nodes');
+    activeId = departmentCases[0].record.id; mode = 'real'; await open(false, false); await expect(stages).toHaveCount(6);
+    mode = 'summary-denied'; await dialog.locator('#pcnTimelineRefreshButton').click();
+    await expect(dialog).toBeHidden(); await expect(page.locator('#adminPcnRows tr[data-pcn-id]')).toHaveCount(0);
+    await expect(page.locator('#adminPcnRows')).not.toContainText(/PCN-\d{4}-\d{4}/);
+    await expect(details).toBeEmpty(); await expect(stages).toHaveCount(0);
+    report.checks.push('Department summary authorization loss closes and clears the modal and all protected Portal rows');
     assert.deepEqual(await repository.findById(record.id), record, 'Browser viewing never mutates PCN');
     assert.deepEqual(await repository.getRevisions(record.id), history, 'Browser viewing never mutates revision history');
     assert.deepEqual(await repository.findById(signed.id), signed, 'Timeline viewing never mutates signed PCN');
     assert.deepEqual(await repository.getRevisions(signed.id), signingHistory, 'Timeline viewing never mutates genuine signing history');
+    assert.deepEqual(await repository.list(), allBefore, 'Department browsing never mutates any fixture PCN');
     assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []);
     report.status = 'passed';
   } catch (error) {
     report.status = 'failed'; report.error = error.message; process.exitCode = 1;
   } finally {
     releaseHeld();
+    await fs.writeFile(path.resolve('test-results/timeline-acceptance.json'), JSON.stringify(report, null, 2));
     if (context) { await context.tracing.stop({ path: path.resolve('test-results/timeline-trace.zip') }); await context.close(); }
     if (browser) await browser.close();
     await new Promise(resolve => server.close(resolve));
-    await fs.writeFile(path.resolve('test-results/timeline-acceptance.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
   }
 }

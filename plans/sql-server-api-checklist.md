@@ -53,6 +53,7 @@ PCN API identifiers are canonical `PCN-YYYY-NNNN`; browser alias normalization i
 | `POST /api/pcns/:id/comments` | Authorized append, server actor/role | Expected version; returns aggregate |
 | `POST /api/pcns/:id/approvals` | Internal append in permitted state | Expected version; separate from checkbox signoff |
 | `GET /api/pcns/:id/workflow` | Authorized risk-derived route | RL0 omits TaPBU |
+| `GET /api/pcns/:id/workflow-summary` | Local, not deployed: authorized department signing summary, including read-only employees | Actual Prepared/Checked/Approved counts, recorded signers, effective route and current step from one saved record version; no query selectors or mutations |
 | `GET /api/pcns/:id/progress` | Authorized derived progress | Current rule definition |
 | `GET /api/pcns/:id/audit` | Internal audit read | Suppliers denied |
 | `POST /api/pcns/:id/notifications/workflow` | Internal legacy-policy whole-department enqueue, 202 | Uses legacyGroups under schema 2; policy 2 returns handled_on_save without enqueueing again |

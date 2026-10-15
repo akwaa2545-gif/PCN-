@@ -148,6 +148,34 @@
     return progress?.status === record.status && typeof record.status === 'string' ? progress : null;
   }
 
+  function workflowSummary(value, id) {
+    const actions = ['prepared', 'checked', 'approved'];
+    const invalid = () => { throw new Error('The department timeline returned an invalid response.'); };
+    if (!value || value.id !== id || !['string', 'number'].includes(typeof value.version) || !String(value.version).trim()
+      || typeof value.status !== 'string' || !Array.isArray(value.stages) || value.stages.length > 20
+      || typeof value.nextAction?.label !== 'string' || typeof value.nextAction.terminal !== 'boolean') invalid();
+    const keys = new Set();
+    value.stages.forEach(stage => {
+      if (!stage || typeof stage.key !== 'string' || !stage.key || keys.has(stage.key) || typeof stage.label !== 'string'
+        || !['completed', 'current', 'waiting', 'stopped'].includes(stage.state) || stage.total !== 3
+        || !Number.isInteger(stage.completed) || stage.completed < 0 || stage.completed > 3
+        || !Array.isArray(stage.steps) || stage.steps.length !== 3 || !(stage.currentStep == null || typeof stage.currentStep === 'string')) invalid();
+      keys.add(stage.key);
+      stage.steps.forEach((step, index) => {
+        if (!step || step.action !== actions[index] || typeof step.label !== 'string' || typeof step.completed !== 'boolean'
+          || !(step.person == null || typeof step.person === 'string') || !(step.signedAt == null || typeof step.signedAt === 'string')) invalid();
+      });
+      if (stage.steps.filter(step => step.completed).length !== stage.completed || stage.state === 'completed' && stage.completed !== 3) invalid();
+    });
+    return value;
+  }
+
+  function workflowStageCaption(stage) {
+    return stage.state === 'current' && stage.currentStep ? `Waiting for ${stage.currentStep}`
+      : stage.state === 'waiting' && stage.completed > 0 ? 'Waiting for earlier departments'
+        : { completed: 'Completed', stopped: 'Review stopped', waiting: 'Not started', current: 'Current department' }[stage.state];
+  }
+
   function create(options) {
     const { root, rows, count, search, message } = options;
     const node = (tag, value, className) => {
@@ -252,13 +280,13 @@
     const tabs = node('div', undefined, 'rd-preview-tabs'); tabs.setAttribute('role', 'tablist');
     const content = node('div', undefined, 'rd-preview-content'); content.setAttribute('role', 'tabpanel'); content.id = 'rdPreviewContent'; content.tabIndex = 0;
     const tabButtons = {};
-    ['overview', 'timeline', 'documents'].forEach(tab => {
-      const item = button(label(tab), () => { preview = { ...preview, tab }; loadPreview(); }, 'rd-tab'); item.id = `rdPreviewTab-${tab}`; item.setAttribute('role', 'tab'); item.setAttribute('aria-controls', content.id); tabButtons[tab] = item; tabs.append(item);
+    ['overview', 'timeline', 'documents', 'history'].forEach(tab => {
+      const item = button(tab === 'history' ? 'Change history' : label(tab), () => { preview = { ...preview, tab }; loadPreview(); }, 'rd-tab'); item.id = `rdPreviewTab-${tab}`; item.setAttribute('role', 'tab'); item.setAttribute('aria-controls', content.id); tabButtons[tab] = item; tabs.append(item);
     });
     tabs.addEventListener('keydown', event => {
       if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
       event.preventDefault(); const keys = Object.keys(tabButtons); const index = keys.indexOf(preview.tab);
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (index + (event.key === 'ArrowRight' ? 1 : 2)) % 3;
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? keys.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length;
       preview = { ...preview, tab: keys[next] }; tabButtons[keys[next]].focus(); loadPreview();
     });
     dialog.append(header); dialog.append(tabs); dialog.append(content); document.body?.append(dialog);
@@ -400,14 +428,14 @@
       const current = () => dialog.open && state.accessible && preview.request === request && preview.record?.id === record.id && preview.tab === tab;
       try {
         const base = `/api/pcns/${encodeURIComponent(record.id)}`;
-        const endpoints = tab === 'overview' ? [base, `${base}/progress`] : tab === 'timeline' ? [`${base}/revisions`] : [`${base}/documents`, `${base}/checks`];
+        const endpoints = tab === 'overview' ? [base, `${base}/progress`] : tab === 'timeline' ? [`${base}/workflow-summary`] : tab === 'history' ? [`${base}/revisions`] : [`${base}/documents`, `${base}/checks`];
         const data = preview.cache[tab] || await Promise.all(endpoints.map(endpoint => options.fetch(endpoint)));
         if (!current()) return;
         const cacheable = renderPreview(data, tab, record);
         if (cacheable !== false) preview = { ...preview, cache: { ...preview.cache, [tab]: data } };
       } catch (error) {
-        if (!current()) return;
         if ([401, 403].includes(error.status)) { state = { ...state, accessible: false }; closePreview(); clear(); options.onAccessLost?.(error); message.textContent = 'Your access has changed. Reload the page to continue.'; return; }
+        if (!current()) return;
         content.replaceChildren(node('p', `Preview unavailable. ${error.message}`, 'rd-preview-message')); content.append(button('Retry', loadPreview));
       } finally { if (current()) content.setAttribute('aria-busy', 'false'); }
     }
@@ -428,6 +456,8 @@
         }
         return Boolean(progress);
       } else if (tab === 'timeline') {
+        renderDepartmentPreview(workflowSummary(data[0], summary.id));
+      } else if (tab === 'history') {
         if (!Array.isArray(data[0]?.items)) throw new Error('The timeline returned an invalid response.');
         const points = timelinePoints(data[0].items); if (!points.length) { content.append(node('p', 'No recorded changes are available for this PCN.', 'rd-preview-message')); return; }
         const track = node('ol', undefined, 'rd-timeline');
@@ -442,6 +472,47 @@
           if (file.scanStatus === 'clean' && /^[0-9a-f-]{36}$/i.test(file.id)) { const link = node('a', 'Download'); link.href = `/api/pcns/${encodeURIComponent(summary.id)}/documents/${encodeURIComponent(file.id)}`; link.setAttribute('download', ''); item.append(link); }
           else item.append(node('small', 'Download unavailable until the document is clean.')); list.append(item); }); content.append(list);
       }
+    }
+
+    function renderDepartmentPreview(snapshot) {
+      content.append(node('p', snapshot.nextAction.label, 'rd-preview-message'));
+      const track = node('ol', undefined, 'rd-timeline rd-department-timeline'); track.setAttribute('aria-label', 'Signing departments');
+      const details = node('section', undefined, 'rd-workflow-details'); details.id = 'rdWorkflowDetails'; details.setAttribute('aria-live', 'polite');
+      const selected = snapshot.stages.find(stage => stage.state === 'current') || snapshot.stages.find(stage => stage.state !== 'completed') || snapshot.stages[0];
+      let selectedKey = selected?.key;
+      const points = new Map();
+      const select = (key, focus = false) => {
+        const stage = snapshot.stages.find(item => item.key === key); if (!stage) return;
+        selectedKey = key; points.forEach((point, pointKey) => point.setAttribute('aria-pressed', String(pointKey === key)));
+        details.replaceChildren(node('h3', `${stage.label} \u00b7 ${stage.completed}/${stage.total} signed`));
+        details.append(node('p', workflowStageCaption(stage)));
+        const table = node('table', undefined, 'rd-signatures'); const head = node('thead'); const headings = node('tr');
+        ['Step', 'Status', 'Signed by', 'Date'].forEach(heading => headings.append(node('th', heading))); head.append(headings); table.append(head);
+        const body = node('tbody');
+        stage.steps.forEach(step => {
+          const row = node('tr'); const waiting = stage.state === 'current' && !step.completed && step.label === stage.currentStep;
+          [step.label, step.completed ? 'Signed' : waiting ? 'Waiting for signature' : 'Not signed', step.completed ? step.person || 'Not recorded' : '\u2014', step.completed ? step.signedAt || 'Not recorded' : '\u2014'].forEach(value => row.append(node('td', value)));
+          if (waiting) row.className = 'is-current'; body.append(row);
+        });
+        table.append(body); const scroll = node('div', undefined, 'rd-signatures-scroll'); scroll.append(table); details.append(scroll);
+        const point = points.get(key); if (focus) point?.focus({ preventScroll: true });
+        if (point?.parentElement) track.scrollTo?.({ left: Math.max(0, point.parentElement.offsetLeft - track.offsetLeft - (track.clientWidth - point.clientWidth) / 2), behavior: 'auto' });
+      };
+      snapshot.stages.forEach(stage => {
+        const item = node('li'); const point = button('', () => select(stage.key), `rd-department-point rd-stage-${stage.state}`); point.dataset.workflowStage = stage.key;
+        point.setAttribute('aria-label', `${stage.label}, ${stage.completed}/${stage.total} signed, ${workflowStageCaption(stage)}`); point.setAttribute('aria-controls', details.id);
+        point.append(node('span', workflowStageCaption(stage), 'rd-department-caption'));
+        point.append(node('span', stage.state === 'completed' ? '\u2713' : stage.state === 'current' ? '\u2022' : '\u25cb', 'rd-timeline-point'));
+        point.append(node('strong', `${stage.label} \u00b7 ${stage.completed}/${stage.total} signed`)); points.set(stage.key, point); item.append(point); track.append(item);
+      });
+      track.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !snapshot.stages.length) return;
+        event.preventDefault(); const index = snapshot.stages.findIndex(stage => stage.key === selectedKey);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? snapshot.stages.length - 1 : Math.max(0, Math.min(snapshot.stages.length - 1, index + (event.key === 'ArrowLeft' ? -1 : 1)));
+        select(snapshot.stages[next].key, true);
+      });
+      content.append(track); content.append(details); select(selectedKey);
+      if (!snapshot.stages.length) details.append(node('p', 'No signing departments apply to this PCN.'));
     }
 
     function finishPreview() {
@@ -463,7 +534,7 @@
     };
   }
 
-  window.PCN_RECORDS_DASHBOARD = { create, filterRecords, summaryCounts, documentLabel, pendingLabel, sortRecords, paginate, csvCell, exportCsv, readPreferences, timelinePoints, timelineTone, currentSummary, currentProgress };
+  window.PCN_RECORDS_DASHBOARD = { create, filterRecords, summaryCounts, documentLabel, pendingLabel, sortRecords, paginate, csvCell, exportCsv, readPreferences, timelinePoints, timelineTone, currentSummary, currentProgress, workflowSummary, workflowStageCaption };
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {

@@ -1165,12 +1165,14 @@ async function main() {
     await page.locator('#adminPcnRows tr').filter({hasText:record.id}).waitFor();
     await page.locator('#notificationHealthStatus').filter({hasText:'Unavailable'}).waitFor({state:'attached'});
     const viewButton=page.getByRole('button',{name:`History ${record.id}`,exact:true});
+    const timeline=page.locator('#pcnTimelineDialog');
     const timelineResponse=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/pcns/${record.id}/revisions`);
     await viewButton.click();
+    await expect(timeline).toBeVisible();
+    await timeline.getByRole('tab',{name:'Change history',exact:true}).click();
     const historyResponse=await timelineResponse;
     assert.equal(historyResponse.status(),200,'View loads authorized change history');
     const history=(await historyResponse.json()).data.items;
-    const timeline=page.locator('#pcnTimelineDialog');
     await expect(timeline).toBeVisible();
     await expect(timeline.locator('#pcnTimelineTitle')).toContainText(record.id);
     await expect(timeline.locator('.pcn-timeline-event')).toHaveCount(history.length);

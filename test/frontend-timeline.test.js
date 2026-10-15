@@ -258,7 +258,7 @@ const departmentSummary = (id = 'one', overrides = {}) => ({ id, version: '00112
     { action: 'prepared', label: 'Prepared', completed: true, person: '<img src=x>Actual preparer', signedAt: '2026-10-15' },
     { action: 'checked', label: 'Checked', completed: false, person: null, signedAt: null },
     { action: 'approved', label: 'Approved', completed: false, person: null, signedAt: null }] }
-], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET ? Checked', terminal: false }, ...overrides });
+], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET \u2014 Checked', terminal: false }, ...overrides });
 
 test('default timeline groups one department point per stage and loads audit history only when requested', async () => {
   const calls = [];
@@ -267,14 +267,14 @@ test('default timeline groups one department point per stage and loads audit his
   assert.deepEqual(calls, ['/api/pcns/one/workflow-summary']);
   const track = page.element('pcnTimelineTrack').innerHTML;
   assert.equal((track.match(/data-workflow-stage=/g) || []).length, 2);
-  assert.match(track, /QA\/TET/); assert.match(track, /1\/3 signed/); assert.match(track, /Waiting for Checked/);
+  assert.match(track, /QA\/TET/); assert.match(track, /\u00b7 1\/3 signed/); assert.match(track, /Waiting for Checked/);
   assert.doesNotMatch(track, /data-revision|Time not recorded|Actual preparer/);
   assert.equal(page.getTimeline().summary.version, '0011223344556677');
   const details = page.element('pcnTimelineDetails').innerHTML;
-  assert.ok(details.indexOf('Prepared') < details.indexOf('Checked'));
-  assert.ok(details.indexOf('Checked') < details.indexOf('Approved'));
+  assert.ok(details.indexOf('scope="row">Prepared') < details.indexOf('scope="row">Checked'));
+  assert.ok(details.indexOf('scope="row">Checked') < details.indexOf('scope="row">Approved'));
   assert.match(details, /&lt;img src=x&gt;Actual preparer/); assert.doesNotMatch(details, /<img/);
-  assert.match(details, /2026-10-15/); assert.match(details, /Waiting for signature/);
+  assert.match(details, /2026-10-15/); assert.match(details, /Waiting for signature/); assert.match(details, /<td>\u2014<\/td>/);
   await page.switchTimelineTab('history');
   assert.equal(calls.at(-1), '/api/pcns/one/revisions');
   assert.match(page.element('pcnTimelineDetails').innerHTML, /Old &amp; Co/);

@@ -7,6 +7,7 @@ const { normalizeUserId } = require('./employeeAccounts');
 const { buildChecks, buildAction } = require('./documentChecks');
 const { loadRecordOverview } = require('./recordOverview');
 const { handleDeveloperTools } = require('./developerTools');
+const { buildWorkflowSummary } = require('./workflowSummary');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -168,6 +169,11 @@ async function handleApi(req, res, url, context, requestId) {
   if (!match) throw new ApiError(404,'API route not found');
   const [,code,subroute] = match;
   const record = await service.getById(code,user);
+  if (subroute === 'workflow-summary') {
+    if (method !== 'GET') throw new ApiError(405,'Method not allowed');
+    if (url.searchParams.size) throw new ApiError(400,'Workflow summary request does not accept selectors');
+    return send(buildWorkflowSummary(record));
+  }
   if (subroute === 'template' && method === 'GET') return send(await context.creationService.template(code,user));
   if (subroute === 'receipt' && method === 'GET') return send(await context.creationService.receipt(code,url.searchParams.get('version'),user));
   if (subroute === 'checks' && method === 'GET') {
@@ -282,6 +288,6 @@ function assertDocumentEdit(record,user) {
 }
 function isViewerReadRoute(route) {
   if (['/api/pcns', '/api/pcns/overview', '/api/master-data'].includes(route)) return true;
-  return /^\/api\/pcns\/PCN-\d{4}-\d{4}(?:\/(?:progress|workflow|checks|action|revisions(?:\/[1-9]\d*)?|documents(?:\/[0-9a-f-]{36}(?:\/preview)?)?))?$/i.test(route);
+  return /^\/api\/pcns\/PCN-\d{4}-\d{4}(?:\/(?:progress|workflow|workflow-summary|checks|action|revisions(?:\/[1-9]\d*)?|documents(?:\/[0-9a-f-]{36}(?:\/preview)?)?))?$/i.test(route);
 }
 module.exports = { handleApi, requireVersion };

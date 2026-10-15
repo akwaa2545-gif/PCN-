@@ -24,6 +24,9 @@ test('authenticated user presence ships with its shared client assets', () => {
   const files = ['src/userPresence.js','session-client.js','admin-users.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
 });
+test('department workflow summaries are included in runtime releases', () => {
+  assert.deepEqual(selectRuntimeFiles(['src/workflowSummary.js']), ['src/workflowSummary.js']);
+});
 function fixture(changes = {}) {
   const manifest = { ...createManifest({ archive, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1 }), ...changes };
   const bytes = Buffer.from(JSON.stringify(manifest) + '\n');
