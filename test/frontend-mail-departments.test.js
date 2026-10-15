@@ -43,7 +43,7 @@ function routingPage() {
     window.TEST = {state, els, renderNotificationSettings, getMailRoutingPayload, preservePortalPosition,
       openDepartmentRecipientDialog: typeof openDepartmentRecipientDialog === 'function' ? openDepartmentRecipientDialog : undefined,
       changeRecipientRole: typeof changeRecipientRole === 'function' ? changeRecipientRole : undefined,
-      updateRecipientDialog, closeRecipientDialog, directorySelections, directoryLookupControllers};
+      updateRecipientDialog, confirmRecipientDialog, closeRecipientDialog, directorySelections, directoryLookupControllers};
   })();`);
   vm.runInNewContext(source, { window, document });
   const page = window.TEST;
@@ -66,6 +66,7 @@ test('each department has one header assignment control and collapsing preserves
   assert.equal(departments.length, 5);
   for (const department of departments) {
     assert.equal(department.querySelectorAll('.notification-department-add').length, 1);
+    assert.match(department.querySelector('.notification-department-add').getAttribute('aria-label'), /^Assign user to .* mail list$/);
     const toggle = department.querySelector('.notification-department-toggle');
     const body = department.querySelector('.notification-department-body');
     assert.equal(toggle.getAttribute('aria-controls'), body.id);
@@ -118,4 +119,25 @@ test('a quiet routing repaint preserves focused department assignment and collap
   assert.notEqual(page.document.activeElement, assign);
   assert.equal(page.document.activeElement.className.includes('notification-department-add'), true);
   assert.equal(page.els.notificationGroups.querySelector('.notification-department-body').hidden, true);
+});
+
+test('confirming a recipient expands its collapsed department while cancellation keeps it collapsed', () => {
+  const page = routingPage(); page.renderNotificationSettings();
+  const department = page.els.notificationGroups.querySelectorAll('[data-department]')[0];
+  const toggle = department.querySelector('.notification-department-toggle'); const body = department.querySelector('.notification-department-body');
+  toggle.events.click();
+  page.openDepartmentRecipientDialog('gscTet', 'GSC/TET'); page.closeRecipientDialog();
+  assert.equal(body.hidden, true, 'cancelling does not change the department');
+  page.openDepartmentRecipientDialog('gscTet', 'GSC/TET');
+  page.els.notificationRecipientRole.value = 'checked'; page.changeRecipientRole();
+  const input = page.els.notificationRecipientList.querySelector('input');
+  input.value = 'new-checker@example.test'; input.dataset.directoryLookupState = 'verified'; input.dataset.verifiedEmail = input.value;
+  page.directorySelections.set(input, { targetKey: 'department.gscTet.checked', email: input.value, recipient: { email: input.value } });
+  page.confirmRecipientDialog();
+  assert.equal(body.hidden, false);
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+  const saved = page.getMailRoutingPayload().groups.find(group => group.key === 'department.gscTet.checked');
+  assert.match(saved.emails, /new-checker@example.test/);
+  page.renderNotificationSettings();
+  assert.equal(page.els.notificationGroups.querySelector('.notification-department-body').hidden, false, 'the expanded state survives repaint');
 });

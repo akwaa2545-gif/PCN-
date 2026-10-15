@@ -325,9 +325,10 @@
       <div class="recipient-dialog-heading">
         <span class="section-label">Add email recipient</span>
         <h2 id="notificationRecipientTitle">Recipient list</h2>
-        <p id="notificationRecipientInstructions">Search by name or email and select a directory result. Typed text is only used to search. Signing permissions stay the same.</p>
+        <p id="notificationRecipientInstructions"></p>
       </div>
       <div class="notification-step recipient-dialog-editor" id="notificationRecipientEditor">
+        <label class="recipient-dialog-role" id="notificationRecipientRoleField" for="notificationRecipientRole" hidden>Signing role<select id="notificationRecipientRole"><option value="">Choose a signing role</option><option value="prepared">Prepared</option><option value="checked">Checked</option><option value="approved">Approved</option></select></label>
         <label class="recipient-dialog-input-label" for="notificationRecipientEmail">Search name or email</label>
         <div class="notification-person-list" id="notificationRecipientList"></div>
         <div class="notification-group-warning" id="notificationRecipientValidation" role="status" aria-live="polite" aria-atomic="true"></div>

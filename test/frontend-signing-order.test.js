@@ -91,7 +91,11 @@ test('historical previous-group gaps block new signatures without changing saved
 test('admin current pending action and mail cards follow the same signing order', () => {
   const window = { location: { hash: '' } };
   const cards = [];
-  const document = { addEventListener() {}, createElement() { return { dataset: {}, appendChild(child) { cards.push(child.key); } }; } };
+  const document = { addEventListener() {}, createElement() { return {
+    dataset: {}, setAttribute() {}, addEventListener() {},
+    appendChild(child) { if (child.key) cards.push(child.key); },
+    append(...children) { children.forEach(child => this.appendChild(child)); }
+  }; } };
   const source = read('admin.js').replace(/\}\)\(\);\s*$/, `
     createNotificationGroup = group => group;
     renderLegacyContacts = () => {};

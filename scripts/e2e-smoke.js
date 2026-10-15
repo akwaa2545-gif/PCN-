@@ -884,14 +884,22 @@ async function main() {
     assert.equal((await repository.getNotificationSettings()).groups.length,16,'Empty groups can be saved without input fields');
     assert.equal(await page.locator('[data-recipient-email]').count(),0);
     const approvedList=page.locator('#notificationGroups [data-notification-group="department.gscTet.approved"]');
-    const approvedAdd=approvedList.getByRole('button',{name:'Add recipient to GSC/TET Approved'});
+    const approvedAdd=page.locator('[data-department="gscTet"] .notification-department-add');
     const popup=page.locator('#notificationRecipientDialog');
     const popupInput=popup.locator('input[type=text]');
     const confirmRecipient=popup.getByRole('button',{name:'Add recipient',exact:true});
     const cancelRecipient=popup.getByRole('button',{name:'Cancel',exact:true});
-    await approvedAdd.click();
+    const openAssignment=async(department,role)=>{
+      await page.locator(`[data-department="${department}"] .notification-department-add`).click();
+      await popup.waitFor({state:'visible'});
+      await popup.locator('#notificationRecipientRole').selectOption(role);
+      await expect(popup.locator('#notificationRecipientEditor')).toHaveAttribute('data-notification-group',`department.${department}.${role}`);
+      await popupInput.focus();
+    };
+    const openApproved=()=>openAssignment('gscTet','approved');
+    await openApproved();
     await popup.waitFor({state:'visible'});
-    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'GSC/TET \u2014 Approved');
+    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'Assign mail recipient to GSC/TET');
     assert.equal(await page.locator('#notificationGroups input[type=text]').count(),0,'List cards never display inline text fields');
     assert.equal(await popupInput.count(),1);
     assert.equal(await popupInput.evaluate(input=>document.activeElement===input),true);
@@ -912,8 +920,9 @@ async function main() {
     directoryConfigured=false;
     await page.reload();
     await approvedAdd.waitFor();
-    await approvedAdd.click();
-    await popupInput.fill('typed@example.test');
+    await openApproved();
+    await expect(popupInput).toBeDisabled();
+    await popupInput.evaluate(input=>{input.value='typed@example.test';input.dispatchEvent(new Event('input',{bubbles:true}));});
     assert.equal(await confirmRecipient.isDisabled(),true,'Unconfigured directory lookup cannot permit free text');
     await confirmRecipient.dispatchEvent('click');
     assert.equal(await approvedList.locator('[data-recipient-email]').count(),0);
@@ -921,15 +930,15 @@ async function main() {
     directoryConfigured=true;
     await page.reload();
     await approvedAdd.waitFor();
-    await approvedAdd.click();
+    await openApproved();
     await page.keyboard.press('Escape');
     await popup.waitFor({state:'hidden'});
     assert.equal(await approvedList.locator('[data-recipient-email]').count(),0,'Escape leaves routing unchanged');
     assert.equal(await approvedAdd.evaluate(button=>document.activeElement===button),true);
     const pendingList=page.locator('#notificationGroups [data-notification-group="department.qaTet.approved"]');
     markPhase('pending-directory-dismissal');
-    await pendingList.getByRole('button',{name:'Add recipient to QA/TET Approved'}).click();
-    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'QA/TET \u2014 Approved');
+    await openAssignment('qaTet','approved');
+    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'Assign mail recipient to QA/TET');
     await popupInput.fill('Remove Pending');
     let pendingTimeout;
     try { await Promise.race([pendingLookupStarted,new Promise((resolve,reject)=>{pendingTimeout=setTimeout(()=>reject(new Error('Pending directory lookup did not start')),15000);})]); }
@@ -945,7 +954,7 @@ async function main() {
     await cancelRecipient.click();
     await popup.waitFor({state:'hidden'});
     assert.equal(await pendingList.locator('[data-recipient-email]').count(),0,'Cancelling a lookup adds no recipient');
-    await pendingList.getByRole('button',{name:'Add recipient to QA/TET Approved'}).click();
+    await openAssignment('qaTet','approved');
     markPhase('blur-directory-dismissal');
     await popupInput.fill('Blur Pending');
     try { await Promise.race([blurLookupStarted,new Promise((resolve,reject)=>{pendingTimeout=setTimeout(()=>reject(new Error('Blur directory lookup did not start')),15000);})]); }
@@ -958,7 +967,7 @@ async function main() {
     assert.equal(await popup.locator('.directory-suggestion:not(.is-message)').count(),0,'Late results do not reopen an unfocused search');
     await cancelRecipient.click();
     await popup.waitFor({state:'hidden'});
-    await approvedAdd.click();
+    await openApproved();
     for(const separator of [';',',']) {
       const multiAddress='first@example.test'+separator+'second@example.test';
       await popupInput.fill(multiAddress);
@@ -1005,7 +1014,7 @@ async function main() {
     assert.equal(await approvedList.locator('.notification-person-email').textContent(),'reviewer@example.test');
     assert.equal(await approvedList.locator('.notification-person-avatar img').getAttribute('src'),directoryPhoto);
     assert.equal(await approvedAdd.evaluate(button=>document.activeElement===button),true);
-    await approvedAdd.click();
+    await openApproved();
     await popupInput.fill('Browser Reviewer');
     const duplicateRecipient=popup.locator('.directory-suggestion').filter({hasText:'reviewer@example.test'});
     await duplicateRecipient.waitFor({state:'visible'});
@@ -1016,15 +1025,15 @@ async function main() {
     await popup.waitFor({state:'hidden'});
     assert.equal(await approvedList.locator('[data-recipient-email]').count(),1);
     const removeList=page.locator('#notificationGroups [data-notification-group="department.qaTet.checked"]');
-    await removeList.getByRole('button',{name:'Add recipient to QA/TET Checked'}).click();
-    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'QA/TET \u2014 Checked');
+    await openAssignment('qaTet','checked');
+    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'Assign mail recipient to QA/TET');
     await popupInput.fill('Removal Reviewer');
     await popup.locator('.directory-suggestion').filter({hasText:'remove@example.test'}).click();
     await confirmRecipient.click();
     await popup.waitFor({state:'hidden'});
     await removeList.getByRole('button',{name:'Remove remove@example.test from QA/TET Checked'}).click();
     assert.equal(await removeList.locator('[data-recipient-email]').count(),0);
-    assert.equal(await removeList.locator('.notification-add-button').evaluate(button=>document.activeElement===button),true);
+    assert.equal(await page.locator('[data-department="qaTet"] .notification-department-add').evaluate(button=>document.activeElement===button),true);
     const supplierList=page.locator('#notificationGroups [data-notification-group="supplierNotification"]');
     await supplierList.locator('.notification-add-button').click();
     assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'GSC/TET Supplier Notification');
@@ -1083,8 +1092,8 @@ async function main() {
     assert.equal(storedSettings.groups.find(group=>group.key==='department.gscTet.checked').emails,'legacy@example.test');
     assert.equal(storedSettings.legacyGroups.find(group=>group.key==='signoff.gscTet').emails,'legacy@example.test');
     const preparedList=page.locator('#notificationGroups [data-notification-group="department.gscTet.prepared"]');
-    await preparedList.getByRole('button',{name:'Add recipient to GSC/TET Prepared'}).click();
-    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'GSC/TET — Prepared');
+    await openAssignment('gscTet','prepared');
+    assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'Assign mail recipient to GSC/TET');
     await popupInput.fill('Prepared Reviewer');
     await popup.locator('.directory-suggestion').filter({hasText:'prepared@example.test'}).click();
     await confirmRecipient.click();
@@ -1104,7 +1113,7 @@ async function main() {
     assert.equal(await page.locator('#notificationReloadButton').isVisible(),false);
     assert.equal(await page.locator('#notificationSaveButton').evaluate(button=>document.activeElement===button),true,'Confirmed reload restores keyboard focus to the stable save control');
     assert.equal(await preparedList.locator('input').count(),0);
-    await preparedList.getByRole('button',{name:'Add recipient to GSC/TET Prepared'}).click();
+    await openAssignment('gscTet','prepared');
     await popupInput.fill('Prepared Reviewer');
     await popup.locator('.directory-suggestion').filter({hasText:'prepared@example.test'}).click();
     await confirmRecipient.click();
@@ -1207,7 +1216,7 @@ async function main() {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'Separated routing fits a mobile viewport');
     assert.equal(await page.locator('.notification-department').first().locator('[data-notification-group]').count(),3);
     await page.screenshot({path:path.resolve('test-results/notification-routing-mobile-smoke.png'),fullPage:true});
-    await approvedAdd.click();
+    await openApproved();
     assert.equal(await popup.evaluate(dialog=>dialog.scrollWidth<=dialog.clientWidth),true,'Popup content fits a 320px viewport');
     await popupInput.focus();
     await page.keyboard.press('Shift+Tab');

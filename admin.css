@@ -549,4 +549,16 @@ body.admin-page .pcn-department-point { min-height: 160px; }
 .pcn-signature-summary { min-width: 620px; font-family: Aptos, 'Segoe UI', sans-serif; font-size: 16px; }
 .pcn-signature-summary tbody :is(th, td) { font-weight: 400; }
 .pcn-signature-summary .is-current { background: #fff8df; }
+body.admin-page .notification-department { align-self: start; }
+body.admin-page .notification-department-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.notification-department-header h3 { flex: 1; min-width: 0; }
+body.admin-page .notification-department-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 44px; padding: 0; border: 0; background: transparent; color: #fff; box-shadow: none; text-align: left; font: inherit; font-size: 17px; }
+.notification-department-toggle::before { content: '\25be'; font-size: 16px; }
+.notification-department-toggle[aria-expanded="false"]::before { content: '\25b8'; }
+body.admin-page .notification-department-header .notification-department-add { min-height: 40px; flex: none; padding: 8px 14px; border-color: #c58c00; background: var(--mes-gold); color: #172b3d; }
+body.admin-page .notification-department-header .notification-department-add:hover { background: #ffc32c; color: #172b3d; }
+.notification-department-toggle:focus-visible { outline: 2px solid var(--mes-gold); outline-offset: 4px; }
+.recipient-dialog-role { display: grid; gap: 8px; margin: 0 20px 20px; color: #173454; font-size: 14px; font-weight: 700; }
+.recipient-dialog-role select { min-height: 44px; width: 100%; padding: 8px 12px; border: 1px solid #bdcbd9; border-radius: 0; background: #fff; color: #173454; font: inherit; }
+@media (max-width: 600px) { body.admin-page .notification-department-header { gap: 10px; padding-inline: 14px; } body.admin-page .notification-department-toggle { font-size: 16px; } .recipient-dialog-role { margin-inline: 14px; } }
 @media (max-width: 600px) { .pcn-timeline-tabs { padding-inline: 12px; } body.admin-page .pcn-timeline-tabs button { padding-inline: 12px; } }

@@ -12,6 +12,8 @@
     hasMailChanges: false,
     mailDraftRows: null,
     recipientTargetKey: null,
+    recipientDepartment: null,
+    recipientDepartmentLabel: null,
     mailConflict: false,
     view: getViewFromHash(),
     isLoading: true,
@@ -30,6 +32,7 @@
   let autoRefreshBlocked = false;
   let portalAccessEpoch = 0;
   let recordsDashboard = null;
+  let collapsedRoutingDepartments = new Set();
   let timeline = { record: null, tab: 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
 
   document.addEventListener("DOMContentLoaded", init);
@@ -57,6 +60,7 @@
       "notificationLegacyGroups",
       "notificationRecipientDialog",
       "notificationRecipientTitle",
+      "notificationRecipientRoleField", "notificationRecipientRole",
       "notificationRecipientEditor",
       "notificationRecipientList",
       "notificationRecipientValidation",
@@ -284,6 +288,8 @@
     const position = row ? [row.dataset.pcnId, [...row.querySelectorAll('a, button, summary')].indexOf(active)] : null;
     const card = active?.closest?.('[data-notification-group]');
     const routingPosition = card ? [card.dataset.notificationGroup, [...card.querySelectorAll('button, input')].indexOf(active)] : null;
+    const department = !card && active?.closest?.('[data-department]');
+    const departmentPosition = department ? [department.dataset.department, active.dataset.routingAction] : null;
     const scroll = [window.scrollX, window.scrollY];
     const status = els.adminStatusSelect?.value;
     update();
@@ -295,6 +301,9 @@
     } else if (routingPosition) {
       const replacement = [...els.notificationGroups.querySelectorAll('[data-notification-group]')].find(node => node.dataset.notificationGroup === routingPosition[0]);
       replacement?.querySelectorAll('button, input')[routingPosition[1]]?.focus({ preventScroll: true });
+    } else if (departmentPosition) {
+      const replacement = [...els.notificationGroups.querySelectorAll('[data-department]')].find(node => node.dataset.department === departmentPosition[0]);
+      [...replacement?.querySelectorAll('button') || []].find(button => button.dataset.routingAction === departmentPosition[1])?.focus({ preventScroll: true });
     } else if (active?.isConnected) active.focus?.({ preventScroll: true });
     if (scroll.every(Number.isFinite)) window.scrollTo?.(...scroll);
   }
@@ -311,12 +320,13 @@
     els.notificationReloadButton.addEventListener("click", reloadMailRouting);
     els.notificationRecipientCancelButton.addEventListener("click", closeRecipientDialog);
     els.notificationRecipientConfirmButton.addEventListener("click", confirmRecipientDialog);
+    els.notificationRecipientRole.addEventListener("change", changeRecipientRole);
     els.notificationRecipientDialog.addEventListener("close", () => {
-      if (!els.notificationRecipientDialog.open && state.recipientTargetKey) finishRecipientDialog();
+      if (!els.notificationRecipientDialog.open && (state.recipientTargetKey || state.recipientDepartment)) finishRecipientDialog();
     });
     els.notificationRecipientDialog.addEventListener("keydown", (event) => {
       if (event.key !== "Tab") return;
-      const controls = [...els.notificationRecipientDialog.querySelectorAll("button:not([disabled]), input:not([type=hidden]):not([disabled])")]
+      const controls = [...els.notificationRecipientDialog.querySelectorAll("button:not([disabled]), input:not([type=hidden]):not([disabled]), select:not([disabled])")]
         .filter((control) => control.getClientRects().length);
       const first = controls[0];
       const last = controls[controls.length - 1];
@@ -353,7 +363,7 @@
     if (!isAdmin()) return;
     try {
       const settings = await apiFetch('/api/notification-settings');
-      if (state.hasMailChanges || state.recipientTargetKey) return;
+      if (state.hasMailChanges || state.recipientTargetKey || state.recipientDepartment || els.notificationRecipientDialog?.open) return;
       state.notificationSettings = settings;
       renderNotificationSettings();
     } catch (error) { state.routingMessage = `User access saved; mail routing could not refresh: ${error.message}`; render(); }
@@ -1224,19 +1234,37 @@
       ["gscTapbu", "GSC/TaPBU"], ["qaTapbu", "QA/TaPBU"]
     ];
     departments.forEach(([key, label]) => {
-      const card = document.createElement("article");
-      card.className = "notification-department";
-      card.dataset.department = key;
-      card.innerHTML = `<header class="notification-department-header"><h3>${escapeHtml(label)}</h3></header>`;
-      ["prepared", "checked", "approved"].forEach((action) => {
-        const group = state.notificationSettings.groups.find((entry) => entry.key === `department.${key}.${action}`);
-        if (group) card.appendChild(createNotificationGroup(group, titleCase(action)));
-      });
-      els.notificationGroups.appendChild(card);
+      els.notificationGroups.appendChild(createNotificationDepartment(key, label));
     });
     const supplier = state.notificationSettings.groups.find((group) => group.key === "supplierNotification");
     if (supplier) els.notificationGroups.appendChild(createNotificationGroup(supplier, "Supplier Notification"));
     renderLegacyContacts();
+  }
+
+  function createNotificationDepartment(key, label) {
+    const card = document.createElement('article'); card.className = 'notification-department'; card.dataset.department = key;
+    const header = document.createElement('header'); header.className = 'notification-department-header';
+    const heading = document.createElement('h3');
+    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'notification-department-toggle'; toggle.textContent = label; toggle.dataset.routingAction = 'toggle';
+    const body = document.createElement('div'); body.className = 'notification-department-body'; body.id = `notificationDepartmentBody-${key}`; body.hidden = collapsedRoutingDepartments.has(key);
+    const updateToggle = () => {
+      toggle.setAttribute('aria-expanded', String(!body.hidden)); toggle.setAttribute('aria-controls', body.id);
+      toggle.setAttribute('aria-label', `${body.hidden ? 'Expand' : 'Collapse'} ${label}`);
+    };
+    toggle.addEventListener('click', () => {
+      body.hidden = !body.hidden;
+      collapsedRoutingDepartments = body.hidden ? new Set([...collapsedRoutingDepartments, key]) : new Set([...collapsedRoutingDepartments].filter(value => value !== key));
+      updateToggle();
+    });
+    updateToggle(); heading.appendChild(toggle);
+    const assign = document.createElement('button'); assign.type = 'button'; assign.className = 'ghost-button notification-add-button notification-department-add'; assign.dataset.routingAction = 'assign'; assign.textContent = 'Assign user';
+    assign.setAttribute('aria-label', `Assign user to ${label} mail list`); assign.setAttribute('aria-haspopup', 'dialog'); assign.setAttribute('aria-controls', 'notificationRecipientDialog');
+    assign.addEventListener('click', () => openDepartmentRecipientDialog(key, label)); header.append(heading, assign); card.append(header, body);
+    ['prepared', 'checked', 'approved'].forEach(action => {
+      const group = state.notificationSettings.groups.find(entry => entry.key === `department.${key}.${action}`);
+      if (group) body.appendChild(createNotificationGroup(group, titleCase(action)));
+    });
+    return card;
   }
 
   function createNotificationGroup(group, heading) {
@@ -1245,14 +1273,15 @@
     card.dataset.notificationGroup = group.key;
     card.managedRecipients = Array.isArray(group.automaticRecipients) ? group.automaticRecipients.map((recipient) => ({ ...recipient })) : [];
     card.setAttribute("aria-label", group.label);
-    card.innerHTML = `<div class="notification-group-header"><div><h4>${escapeHtml(heading)}</h4><small data-recipient-count></small></div><button class="ghost-button notification-add-button" type="button" aria-label="Add recipient to ${escapeHtml(group.label)}">Add</button></div><div class="notification-person-list"></div><div class="notification-group-warning" aria-live="polite" hidden></div>`;
+    const supplier = group.key === 'supplierNotification';
+    card.innerHTML = `<div class="notification-group-header"><div><h4>${escapeHtml(heading)}</h4><small data-recipient-count></small></div>${supplier ? `<button class="ghost-button notification-add-button" type="button" aria-label="Add recipient to ${escapeHtml(group.label)}">Add</button>` : ''}</div><div class="notification-person-list"></div><div class="notification-group-warning" aria-live="polite" hidden></div>`;
     const list = card.querySelector(".notification-person-list");
     const recipients = getEditorGroupRecipients(group);
     recipients.forEach((recipient) => appendRecipientRow(list, recipient));
     card.managedRecipients.forEach((recipient) => list.appendChild(createManagedRecipient(recipient)));
     updateRecipientCount(list);
     renderRecipientValidation(list);
-    card.querySelector(".notification-add-button").addEventListener("click", () => {
+    card.querySelector(".notification-add-button")?.addEventListener("click", () => {
       openRecipientDialog(group);
     });
     return card;
@@ -1308,30 +1337,61 @@
     return [...els.notificationGroups.querySelectorAll("[data-notification-group]")].find((card) => card.dataset.notificationGroup === state.recipientTargetKey);
   }
 
-  function openRecipientDialog(group) {
+  function openDepartmentRecipientDialog(key, label) {
+    if (!state.notificationSettings.groups.some(group => group.key.startsWith(`department.${key}.`))) return;
+    openRecipientDialog(null, { key, label });
+  }
+
+  function openRecipientDialog(group, department = null) {
     if (isAnyBusy()) return;
     refreshGeneration++;
-    state.recipientTargetKey = group.key;
-    els.notificationRecipientTitle.textContent = recipientTargetLabel(group);
-    els.notificationRecipientEditor.dataset.notificationGroup = group.key;
-    els.notificationRecipientEditor.setAttribute("aria-label", group.label);
+    state.recipientDepartment = department?.key || null;
+    state.recipientDepartmentLabel = department?.label || null;
+    state.recipientTargetKey = group?.key || null;
+    els.notificationRecipientRoleField.hidden = !department;
+    els.notificationRecipientRole.value = ''; els.notificationRecipientRole.required = Boolean(department);
+    els.notificationRecipientTitle.textContent = department ? `Assign mail recipient to ${department.label}` : recipientTargetLabel(group);
+    buildRecipientDialogInput(group);
+    els.notificationRecipientDialog.showModal();
+    (department ? els.notificationRecipientRole : els.notificationRecipientList.querySelector('input')).focus();
+  }
+
+  function buildRecipientDialogInput(group) {
+    const previous = els.notificationRecipientList.querySelector('input');
+    if (previous) { directorySelections.delete(previous); window.clearTimeout(directoryLookupTimers.get(previous)); abortDirectoryLookup(previous); }
+    const label = group?.label || state.recipientDepartmentLabel;
+    els.notificationRecipientEditor.dataset.notificationGroup = group?.key || `department.${state.recipientDepartment}`;
+    els.notificationRecipientEditor.setAttribute('aria-label', label);
     els.notificationRecipientList.innerHTML = "";
     const row = appendRecipientRow(els.notificationRecipientList, "");
     row.querySelector(".notification-remove-button").remove();
     const input = row.querySelector("input");
     input.id = "notificationRecipientEmail";
-    input.setAttribute("aria-label", `Search name or email for ${group.label}`);
+    input.disabled = !group || !isDirectoryLookupConfigured();
+    input.setAttribute("aria-label", `Search name or email for ${label}`);
     input.maxLength = 320;
     input.setAttribute("aria-describedby", "notificationRecipientValidation");
     updateRecipientDialog();
-    els.notificationRecipientDialog.showModal();
-    input.focus();
+  }
+
+  function changeRecipientRole() {
+    if (!state.recipientDepartment || !els.notificationRecipientDialog.open) return;
+    const action = els.notificationRecipientRole.value;
+    const group = ['prepared', 'checked', 'approved'].includes(action)
+      ? state.notificationSettings.groups.find(entry => entry.key === `department.${state.recipientDepartment}.${action}`) : null;
+    state.recipientTargetKey = group?.key || null;
+    buildRecipientDialogInput(group);
   }
 
   function updateRecipientDialog() {
     const input = els.notificationRecipientList.querySelector("input");
     const target = findRecipientTargetCard();
-    if (!input || !target) return;
+    if (!input || !target) {
+      els.notificationRecipientConfirmButton.disabled = true;
+      els.notificationRecipientValidation.hidden = false;
+      els.notificationRecipientValidation.textContent = state.recipientDepartment ? 'Select a signing role, then choose a directory user.' : 'This recipient list is unavailable.';
+      return;
+    }
     const email = input.value.trim();
     const existing = getRecipientInputs(target).map((entry) => entry.value.trim()).filter(Boolean);
     const selection = directorySelections.get(input);
@@ -1362,10 +1422,22 @@
     if (els.notificationRecipientConfirmButton.disabled) return;
     const recipient = directorySelections.get(input).recipient;
     appendRecipientRow(target.querySelector(".notification-person-list"), recipient, false, Boolean(input.dataset.verifiedEmail));
+    expandRecipientDepartment(target);
     markMailChanged();
-    const label = els.notificationRecipientTitle.textContent;
+    const group = state.notificationSettings.groups.find(entry => entry.key === state.recipientTargetKey);
+    const label = group ? recipientTargetLabel(group) : target.getAttribute('aria-label');
     closeRecipientDialog();
     showAdminNotice("success", "Recipient added", `${recipient.email} added to ${label}. Save Mail to save routing.`);
+  }
+
+  function expandRecipientDepartment(target) {
+    const department = target.closest('.notification-department');
+    const body = department?.querySelector('.notification-department-body');
+    if (!body?.hidden) return;
+    body.hidden = false;
+    collapsedRoutingDepartments = new Set([...collapsedRoutingDepartments].filter(key => key !== department.dataset.department));
+    const toggle = department.querySelector('.notification-department-toggle');
+    toggle.setAttribute('aria-expanded', 'true'); toggle.setAttribute('aria-label', `Collapse ${toggle.textContent}`);
   }
 
   function closeRecipientDialog() {
@@ -1381,10 +1453,18 @@
       abortDirectoryLookup(input);
     }
     const target = findRecipientTargetCard();
+    const department = [...els.notificationGroups.querySelectorAll('[data-department]')].find(card => card.dataset.department === state.recipientDepartment);
+    const focusTarget = department?.querySelector('.notification-department-add') || getRoutingAssignmentButton(target);
     els.notificationRecipientList.innerHTML = "";
     els.notificationRecipientEditor.removeAttribute("data-notification-group");
     state.recipientTargetKey = null;
-    target?.querySelector(".notification-add-button")?.focus();
+    state.recipientDepartment = null; state.recipientDepartmentLabel = null;
+    els.notificationRecipientRole.value = ''; els.notificationRecipientConfirmButton.disabled = true;
+    focusTarget?.focus();
+  }
+
+  function getRoutingAssignmentButton(card) {
+    return card?.closest('.notification-department')?.querySelector('.notification-department-add') || card?.querySelector('.notification-add-button');
   }
 
   function renderLegacyContacts() {
@@ -1514,7 +1594,7 @@
       window.clearTimeout(directoryLookupTimers.get(input));
       abortDirectoryLookup(input);
       row.remove();
-      const focusTarget = list.querySelector(".notification-remove-button") || list.closest("[data-notification-group]").querySelector(".notification-add-button");
+      const focusTarget = list.querySelector(".notification-remove-button") || getRoutingAssignmentButton(list.closest("[data-notification-group]"));
       focusTarget?.focus();
       markMailChanged();
       updateRecipientCount(list);

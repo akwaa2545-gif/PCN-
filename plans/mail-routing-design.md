@@ -26,6 +26,12 @@ Local verification: the full coverage suite passed 283 tests, with 96.12% lines,
 
 Migration 004 was applied on SQL Server 2014 / `Scn_DB` at `2026-10-07T04:56:51.338Z` after a DPAPI-encrypted logical snapshot of 22 tables / 145 rows was decrypted and hash-verified. This is not a native SQL backup and no full restore was exercised. All four user identities and existing role assignments were preserved; no signing grants were added and the employee source was not altered. Database readiness then reported four migrations. The local dev watcher resumed on `127.0.0.1:3000`; real API acceptance passed 26 checks and a SQL-backed headless browser passed login, Users, lookup, one-step controls, verified-mail requirement, English-name lookup and logout without account writes or page errors. These are historical observations; they do not establish the current schema count, host readiness or acceptance of the new signing order.
 
+## Department assignment popup (local, not deployed)
+
+Each department header has one **Assign user** button and an independent expand/collapse control. The popup requires a signing role (Prepared, Checked or Approved) before searching the verified mail directory. Changing the role cancels the previous lookup and clears its selected identity, so an earlier result cannot be assigned to a different list. Supplier Notification retains its fixed-list Add action.
+
+Assignments edit notification recipients; they do not grant PCN signing access. Changes remain drafts until **Save Mail**. Collapsing a department keeps all three lists and their unsaved recipients mounted, preserving the complete versioned save payload. Disclosure state survives rerenders during the visit. Cancel, Escape and confirmation restore focus to the department's header action. Managed contacts from Users retain their existing protections.
+
 ## Scope and recipient model
 
 Mail Routing separates five departments into Prepared, Checked and Approved recipient lists: **15 lists plus supplierNotification**. Each PCN user may have **one signing step** in their assigned department. Active employee-code accounts with a verified directory email become automatic recipients of that department/step list. Manual mail contacts grant no signing access. The application signing order is **Prepared → Checked → Approved**; this supersedes the original workbook display order without editing the workbook.
