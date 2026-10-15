@@ -75,6 +75,21 @@ test('A lost reply with a still-draft canonical record requires a new user actio
   assert.equal(calls.filter(path=>path.includes('/receipt?')).length,0);
 });
 
+test('A lost receipt reply still reports confirmed submission without repeating the status update',async()=>{
+  let updates=0;
+  const {controller}=submissionFixture({api:async(path,options)=>{
+    if(path.endsWith('/preflight'))return {checks:{ready:true,items:[]},nextAction:{label:'GSC/TET — Prepared'}};
+    if(options?.method==='PATCH'){updates++;return {id:'PCN-2026-0001',version:'4444444444444444',status:'submitted'};}
+    throw new TypeError('Receipt unavailable');
+  }});
+  const receipt=await controller.submit();
+  assert.equal(receipt.id,'PCN-2026-0001');
+  assert.equal(receipt.version,'4444444444444444');
+  assert.equal(receipt.notification.state,'needs_attention');
+  assert.match(receipt.notification.message,/was submitted/);
+  assert.equal(updates,1);
+});
+
 test('Live completion counts blocking fields only and retains attachment jump targets',()=>{
   const checks={items:[
     {key:'supplierName',field:'supplierName',blocking:true,complete:true},
@@ -98,4 +113,67 @@ test('Receipt wording never equates workflow acceptance with delivered mail',()=
   assert.equal(ui.notificationLabel({state:'processing'}),'Processing');
   assert.equal(ui.notificationLabel({state:'uncertain'}),'Needs attention');
   assert.equal(ui.notificationLabel({state:'superseded'}),'Superseded');
+});
+
+test('Correcting one field clears only its error while untouched missing fields remain',()=>{
+  const errors=[{key:'reason',field:'reason'},{key:'desiredStart',field:'desiredStart'}];
+  const remaining=ui.remainingErrors(errors,{items:[{key:'reason',complete:true},{key:'desiredStart',complete:false}]});
+  assert.deepEqual(remaining,[errors[1]]);
+});
+
+test('A newer draft entry invalidates an older response even after the newer record is edited',async()=>{
+  const guard=ui.createEntryGuard();let current={supplierName:'Original'};
+  let resolveFirst;
+  const first=new Promise(resolve=>{resolveFirst=resolve;});
+  const firstToken=guard.next();
+  const firstLoad=first.then(record=>{if(guard.current(firstToken))current=record;});
+  const secondToken=guard.next();
+  assert.equal(guard.current(secondToken),true);
+  current={supplierName:'Second draft'};guard.next();current={...current,supplierName:'Edited second draft'};
+  resolveFirst({supplierName:'Late first draft'});await firstLoad;
+  assert.equal(current.supplierName,'Edited second draft');
+});
+
+test('Preflight notification wording requires both configured sending and a recipient',()=>{
+  assert.match(ui.notificationPreview({configurationStatus:'configured',recipientConfigured:true}),/will be queued/);
+  assert.match(ui.notificationPreview({configurationStatus:'not_configured',recipientConfigured:true}),/not configured/);
+  assert.match(ui.notificationPreview({configurationStatus:'invalid',recipientConfigured:true}),/needs attention/);
+  assert.match(ui.notificationPreview({configurationStatus:'configured',recipientConfigured:false}),/No action-mail recipient/);
+});
+
+test('Canonical draft adoption retains read-only requirements for a restricted owner',()=>{
+  const model=require('../create-model');
+  const current={supplierName:'New name',internalReview:{docs:{greenProcurement:true}}};
+  const serialize=value=>{const {internalReview,...payload}=model.toPayload(value);return payload;};
+  const record={...current,id:'PCN-2026-0001',version:'1',status:'draft'};
+  const adopted=ui.savedDocument(model,current,{record,snapshot:serialize(current)},serialize);
+  assert.equal(adopted.matches,true);
+  assert.equal(adopted.document.internalReview.docs.greenProcurement,true);
+  assert.equal(serialize(adopted.document).internalReview,undefined);
+});
+
+test('Reused terminal or signed canonical records keep newer local text and disable editing',()=>{
+  const model=require('../create-model'),current={supplierName:'Unsaved newer name',isTestDocument:true};
+  const record={supplierName:'Older committed name',id:'PCN-2026-0001',version:'2',status:'submitted',isTestDocument:false};
+  const adopted=ui.savedDocument(model,current,{record,snapshot:model.toPayload(current),unsavedChanges:true},model.toPayload);
+  assert.equal(adopted.matches,false);
+  assert.equal(adopted.document.supplierName,'Unsaved newer name');
+  assert.equal(adopted.document.isTestDocument,false);
+  assert.equal(ui.editableDraft(record),false);
+  assert.equal(ui.editableDraft({...record,status:'draft',internalReview:{signoff:{gscTet:{prepared:true}}}}),false);
+  assert.equal(ui.editableDraft({...record,status:'draft',internalReview:{supplierSignoff:{prepared:{checked:true}}}}),false);
+  assert.equal(ui.editableDraft({...record,status:'draft'}),true);
+});
+
+test('An initial creation conflict retries the same draft instead of trying to reload an absent record',()=>{
+  assert.equal(ui.retryMode('conflict',null),'retry');
+  assert.equal(ui.retryMode('conflict',{id:'PCN-2026-0001'}),'reload');
+  assert.equal(ui.retryMode('error',null),'retry');
+});
+
+test('Explicit copy and starter sessions cannot reuse a previous unsaved client identity',()=>{
+  const key='12345678-1234-4234-8234-123456789abc';
+  assert.equal(ui.canReuseClientKey({key,record:null,freshIdentity:false}),true);
+  assert.equal(ui.canReuseClientKey({key,record:null,freshIdentity:true}),false);
+  assert.equal(ui.canReuseClientKey({key,record:{id:'PCN-2026-0001'},freshIdentity:false}),false);
 });

@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { ApiError } = require('./apiError');
 const { PcnService } = require('./pcnService');
+const { PcnCreationService } = require('./pcnCreation');
 const { handleApi } = require('./apiRoutes');
 const { ApiRateLimiter } = require('./apiRateLimit');
 const { getClientAddress, parseTrustProxy } = require('./clientAddress');
@@ -12,6 +13,7 @@ const { COOKIE_NAME, validateSessionCookieName } = require('./authHttp');
 
 const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
+for (const file of ['create.html','create.js','create.css','create-model.js','create-autosave.js','create-documents.js','pcn-readiness.js']) assets.add(file);
 
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');
@@ -22,6 +24,12 @@ function createRequestHandler(options = {}) {
     profileService: new ProfileService({ integrationService: options.integrationService, employeeDirectory: options.employeeDirectory || options.authService.employeeDirectory }),
     trustProxy: parseTrustProxy(options.trustProxy), service: options.service || new PcnService(options.repository, options.clock), publicOrigin: options.publicOrigin || process.env.PUBLIC_ORIGIN || 'http://localhost:3000', secureCookies: options.secureCookies ?? process.env.NODE_ENV === 'production', sessionCookieName: validateSessionCookieName(options.sessionCookieName ?? COOKIE_NAME) };
   const rootDir = options.rootDir || path.resolve(__dirname, '..');
+  context.creationService = options.creationService || new PcnCreationService({
+    service:context.service,repository:context.repository,documents:context.documents,
+    authRepository:context.authService.repository,
+    mailConfigurationStatus:() => context.integrationService?.mailConfigurationStatus?.() || 'not_configured',
+    scannerConfigured:options.scannerConfigured ?? Boolean(context.documents?.scanner)
+  });
   const rateLimiter = options.rateLimiter || new ApiRateLimiter();
   return async (req, res) => {
     const requestId = crypto.randomUUID();
@@ -55,7 +63,8 @@ async function serveStatic(req, res, url, rootDir) {
   if (['/','/admin'].includes(route)) file = 'admin.html';
   if (route === '/login') file = 'login.html';
   if (route === '/records') file = 'records.html';
-  if (route === '/create' || /^\/P(?:CN|NC)-\d{4}-\d{3,4}$/i.test(route)) file = 'form.html';
+  if (route === '/create') file = 'create.html';
+  if (/^\/P(?:CN|NC)-\d{4}-\d{3,4}$/i.test(route)) file = 'form.html';
   if (!assets.has(file)) throw new ApiError(404, 'File not found');
   let content;
   try { content = await fs.readFile(path.join(rootDir, file)); } catch (error) {

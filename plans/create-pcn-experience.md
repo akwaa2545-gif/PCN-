@@ -1,6 +1,6 @@
 # Create PCN experience
 
-Status: implementation plan, 2026-10-15. This plan describes authorized local development; it does not authorize publishing, deployment, host configuration changes or operational test mail.
+Status: implemented locally, 2026-10-15. This plan describes authorized local development; it does not authorize publishing, deployment, host configuration changes or operational test mail.
 
 ## Agreed experience
 
@@ -74,7 +74,7 @@ Final submission uses the existing PATCH `/api/pcns/:id` with **only** `{ versio
 
 1. Validate `clientDraftKey` as a UUID and derive its scope from the authenticated owner, never an owner supplied by the browser.
 2. Pass the key as a trusted repository option. Persist it in existing `LegacyExtrasJson`; do not add it to general user-writable record fields.
-3. In the same SQL transaction as creation, acquire an exclusive, transaction-owned application lock keyed by owner and UUID.
+3. In the same SQL transaction as creation, take the common exclusive creation lock before any replay scan or counter access. Then take the owner/UUID lock. Ordinary creation uses the same first lock, keeping request/counter locking in a consistent order.
 4. Read that owner's candidate metadata across **all statuses**, including deleted rows, and parse JSON in JavaScript for SQL Server 2014 compatibility. A submitted record with the same key must still be found.
 5. Return the existing aggregate if the key was previously committed, retaining its canonical test marker regardless of a changed replay parameter. A deleted matching record yields a conflict; it must not allocate a second identity.
 6. Only an unmatched key allocates a PCN code and inserts the draft. Counter allocation, aggregate, history and audit remain atomic.
@@ -148,13 +148,23 @@ Tests use memory/fake SQL and loopback browser servers with fake integrations. T
 
 ## Completion criteria
 
-- [ ] Create opens the dedicated four-stage page; existing signing and official sheet paths remain functional.
-- [ ] All seven requested features and the normal-validation Test document autofill are implemented.
-- [ ] Test documents persist immutable test identity, retain it through replay/reuse/resume and display **TESTING DOC** in the wizard, Records, official preview/print and distinguishing notification prefixes.
-- [ ] Draft creation is atomically idempotent and autosave cannot change a signed/submitted/other-owner record.
-- [ ] Autosave, uploads and submission share canonical versions and preserve newer local edits.
-- [ ] Reuse creates a fresh document without signatures, history, mail state or copied files.
-- [ ] Readiness and inline errors match server rules; scan-unavailable files never appear Ready.
-- [ ] Receipt accurately reports next responsibility and workflow acceptance without claiming delivery or exposing private mail data.
-- [ ] Relevant tests, browser regressions, release checks and reviews pass; verification evidence is recorded.
-- [ ] No deployment occurs until the user explicitly requests it.
+- [x] Create opens the dedicated four-stage page; existing signing and official sheet paths remain functional.
+- [x] All seven requested features and the normal-validation Test document autofill are implemented.
+- [x] Test documents persist immutable test identity, retain it through replay/reuse/resume and display **TESTING DOC** in the wizard, Records, official preview/print and distinguishing notification prefixes.
+- [x] Draft creation is atomically idempotent and autosave cannot change a signed/submitted/other-owner record.
+- [x] Autosave, uploads and submission share canonical versions and preserve newer local edits.
+- [x] Reuse creates a fresh document without signatures, history, mail state or copied files.
+- [x] Readiness and inline errors match server rules; scan-unavailable files never appear Ready.
+- [x] Receipt accurately reports next responsibility and workflow acceptance without claiming delivery or exposing private mail data.
+- [x] Relevant tests, browser regressions, release checks and reviews pass; verification evidence is recorded.
+- [x] No deployment occurs until the user explicitly requests it.
+
+
+## Local verification ? 2026-10-15
+
+- Full unit/API coverage run: **860/860 passed**, with **88.10% lines, 90.93% branches and 95.11% functions** (`node --test --experimental-test-coverage --test-concurrency=4`). Evidence: `test-results/create-final-coverage.log`.
+- Create browser acceptance: **13 journeys**, plus focused 350/390px layout, initial-save retry and old-client copy/starter identity checks. All use isolated synthetic records, scanner metadata and captured outbox jobs; no external requests, real SQL writes or operational mail. Evidence: `test-results/create-pcn-*-final.log` and acceptance JSON/trace files.
+- Existing browser regressions: smoke **120**, documents **13**, signing order **8**, Records **12**, login **8** checks/groups passed. The Records fixture was aligned with the current unsigned Prepared responsibility; historical signatures and privacy assertions remain unchanged.
+- Windows release packaging/extraction checks: **11/11 passed**, including all creation assets and private-file exclusions.
+- Code, JavaScript and security reviews approved the implementation. Follow-up regressions cover in-flight edits, stale entry/receipt responses, readonly requirements, document note/caret preservation, fresh testing/copy identities and consistent SQL creation lock order.
+- Local readiness returned `ready`. No migration, push, deployment, private configuration change or operational notification was performed.

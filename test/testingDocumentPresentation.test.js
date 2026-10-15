@@ -36,7 +36,7 @@ test('record rows and fetched preview visibly identify TESTING DOC without repla
     assert.ok(rowItems.some(item => item.tag === 'a' && item.textContent === record.id));
     await rowItems.find(item => item.tag === 'button' && item.textContent === 'Preview').emit('click');
     const preview = page.find('rdPreviewDialog').querySelectorAll();
-    assert.equal(preview.some(item => item.textContent === 'TESTING DOC'), marker === true);
+    assert.equal(preview.some(item => item.textContent === 'TESTING DOC' && item.hidden !== true), marker === true);
   }
 });
 

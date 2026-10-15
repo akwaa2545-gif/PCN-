@@ -195,7 +195,7 @@ async function main() {
     await portal.goto(`${origin}/records`, { waitUntil: 'domcontentloaded' });
     await portal.waitForURL(`${origin}/admin`);
     await expect(portal.locator('#pcnAdminView')).toBeVisible();
-    await portal.goto(`${origin}/create`, { waitUntil: 'domcontentloaded' });
+    await portal.goto(`${origin}/form.html`, { waitUntil: 'domcontentloaded' });
     await expect(portal.locator('#formAdminLink')).toBeVisible();
     await expect(portal.locator('#formAdminLink')).toHaveText('Portal');
     await expect(portal.locator('.topbar-actions a[href="/records"]')).toBeHidden();
@@ -240,7 +240,7 @@ async function main() {
       await member.goto(`${origin}/records`, { waitUntil: 'domcontentloaded' });
       await member.waitForURL(`${origin}/admin`);
       await expect(member.locator('#adminNoticeTitle')).toHaveText('Portal ready');
-      await member.goto(`${origin}/create`, { waitUntil: 'domcontentloaded' });
+      await member.goto(`${origin}/form.html`, { waitUntil: 'domcontentloaded' });
       await expect(member.locator('#formAdminLink')).toBeVisible();
       await expect(member.locator('.topbar-actions a[href="/records"]')).toBeHidden();
       await member.locator('#formAdminLink').click();

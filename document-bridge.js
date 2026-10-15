@@ -28,7 +28,8 @@
   function exportStamp(record, dirty) {
     const terminal = ['approved','rejected','closed'].includes(record.status);
     return {id:record.id || 'Unassigned',revision:record.documentControl?.contentRevision ? String(record.documentControl.contentRevision) : 'Not recorded',
-      status:String(record.status || 'draft').toUpperCase().replace(/_/g,' '),watermark:dirty ? 'UNSAVED PREVIEW' : terminal ? '' : 'DRAFT'};
+      status:String(record.status || 'draft').toUpperCase().replace(/_/g,' '),watermark:dirty ? 'UNSAVED PREVIEW' : terminal ? '' : 'DRAFT',
+      ...(record.isTestDocument === true ? {testDocumentLabel:'TESTING DOC'} : {})};
   }
   function recoveredRows(rows, formId, controls) {
     return rows.map(row => {
@@ -78,7 +79,7 @@
     doc.addEventListener('input',changed); doc.addEventListener('change',changed);
     const stampPrint = () => {
       const current=context(),stamp=exportStamp(current.savedRecord || current.record,current.dirty);
-      doc.getElementById('documentPrintIdentity').textContent=`${stamp.id} · Content revision ${stamp.revision} · ${stamp.status}`;
+      doc.getElementById('documentPrintIdentity').textContent=`${stamp.testDocumentLabel ? `${stamp.testDocumentLabel} · ` : ''}${stamp.id} · Content revision ${stamp.revision} · ${stamp.status}`;
       const watermark=doc.getElementById('documentPrintWatermark'); watermark.textContent=stamp.watermark; watermark.hidden=!stamp.watermark;
     };
     root.addEventListener('beforeprint',stampPrint);

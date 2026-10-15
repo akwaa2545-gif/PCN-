@@ -18,6 +18,7 @@ function complete(review, group) {
   const value = group.split('.').reduce((current, key) => current?.[key], review);
   return value && ['approved', 'checked', 'prepared'].every((key) => value[key] === true);
 }
+const notificationSubject = (record, subject) => record.isTestDocument === true ? `[TESTING DOC] ${subject}` : subject;
 
 class NotificationService {
   constructor(pool, options = {}) {
@@ -48,7 +49,7 @@ class NotificationService {
     try {
       const message = buildPcnUpdateNotificationMessage(record, { pcnUrl: this.pcnLink(record.id), updateSummary, status: record.status });
       return { queued: true, jobCount: batches.length, batches: batches.map(recipients => ({
-        to: emailList(recipients.map(recipient => recipient.email).join('; ')), subject: `[PCN Update] ${record.id} - ${record.status}`,
+        to: emailList(recipients.map(recipient => recipient.email).join('; ')), subject: notificationSubject(record, `[PCN Update] ${record.id} - ${record.status}`),
         message, senderName: 'Supplier PCN Workflow', notificationKind: 'pcn_update', updateSnapshot: { pcnId: record.id, recipients }
       })) };
     } catch (error) {
@@ -123,7 +124,7 @@ class NotificationService {
     const completed = submitted ? 'Supplier submission' : prerequisiteResolved ? 'TaPBU approval requirement selected'
       : changes.completed.length ? describeCompletion(changes.completed.at(-1)) : 'Current workflow routing activated';
     try {
-      const payload = { to: emailList(group.effectiveEmails), subject: `[Action Required] ${record.id} - ${target.label}`,
+      const payload = { to: emailList(group.effectiveEmails), subject: notificationSubject(record, `[Action Required] ${record.id} - ${target.label}`),
         message: buildWorkflowNotificationMessage(record, { completedGroup: completed, nextGroup: target.label,
           nextDepartment: departments.find(department => department.key === target.departmentKey)?.label,
           nextRole: target.action ? target.action[0].toUpperCase() + target.action.slice(1) : undefined,
@@ -229,7 +230,7 @@ class NotificationService {
     const to = emailList(configured);
     if (!this.mailUrl) return { queued: false, reason: 'mail_not_configured', nextGroupKey };
     if (!/^PCN-\d{4}-\d{4}$/.test(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
-    const payload = { to, subject: `[PCN] ${record.id} - ${completedLabel} completed`,
+    const payload = { to, subject: notificationSubject(record, `[PCN] ${record.id} - ${completedLabel} completed`),
       message: buildWorkflowNotificationMessage(record, { completedGroup: completedLabel, nextGroup: nextLabel, pcnUrl: this.pcnLink(record.id) }),
       senderName: typeof user.displayName === 'string' ? user.displayName.slice(0, 120) : 'Supplier PCN Workflow' };
     const eventKey = `${record.id}:${record.version}:${completedKey}:completed`;

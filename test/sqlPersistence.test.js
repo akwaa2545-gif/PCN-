@@ -42,7 +42,7 @@ function mockPool(results) {
     request() { return request(); } };
   function request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; },
     async query(sql) { calls.push({ sql, inputs });
-      if (sql.includes('sp_getapplock') && inputs.resource === 'pcn:user-mail-routing') return { recordset: [{ LockResult: 0 }] };
+      if (sql.includes('sp_getapplock') && ['pcn:user-mail-routing', 'pcn:creation-global'].includes(inputs.resource)) return { recordset: [{ LockResult: 0 }] };
       if (sql.includes('u.MailProfileJson')) return { recordset: [] };
       const next = results.shift(); if (next instanceof Error) throw next; return next || { recordset: [], rowsAffected: [1] }; } }; }
   return { calls, transaction: () => transaction, request };
@@ -87,7 +87,7 @@ test('create rolls back atomic counter allocation when parent insert fails', asy
   await assert.rejects(new SqlPcnRepository(pool).create({ createdAt: '2026-10-05T00:00:00.000Z', status: 'draft' }, 'actor'), /insert failed/);
   assert.equal(pool.calls.at(-1), 'rollback');
   assert.equal(pool.calls.includes('commit'), false);
-  assert.match(pool.calls[2].sql, /UPDLOCK, HOLDLOCK/);
+  assert.match(pool.calls.find(call => call.sql?.includes('pcn.PcnCounters')).sql, /UPDLOCK, HOLDLOCK/);
 });
 
 test('year counter refuses code overflow rather than creating an inaccessible code', async () => {

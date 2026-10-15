@@ -12,7 +12,8 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = String(value); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   async emit(name, event = {}) { return this.listeners[name]?.({ target: this, ...event }); }
-  focus() { this.focused = true; }
+  focus() { this.focused = true; if (this.ownerDocument) this.ownerDocument.activeElement = this; }
+  setSelectionRange(start, end, direction) { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; }
 }
 const tree = node => [node, ...node.children.flatMap(tree)];
 const text = node => tree(node).map(item => item.textContent).join(' ');
@@ -22,8 +23,9 @@ const initial = () => ({ id: 'PCN-2026-0001', version: '0000000000000001', statu
 function fixture(overrides = {}) {
   let record = initial(); let savedRecord = record;
   const container = new Element('div');
-  container.ownerDocument = { createElement: tag => new Element(tag) };
-  const calls = []; const changes = []; const saved = []; const notices = [];
+  const document = { activeElement: null, createElement(tag) { const node = new Element(tag); node.ownerDocument = document; return node; } };
+  container.ownerDocument = document;
+  const calls = []; const changes = []; const saved = []; const notices = []; const attachmentUpdates = [];
   const state = { editable: true, canSetRequirements: true, scannerConfigured: false };
   const api = async (url, options) => {
     calls.push({ url, options });
@@ -39,9 +41,10 @@ function fixture(overrides = {}) {
     return result;
   } };
   const control = documents.mount({ container, getContext: () => ({ record, savedRecord, ...state }),
-    api, autosave, readFile: async () => 'YWJj',
-    onChange(value) { changes.push(value); record = value; },
+    api, autosave, ...(overrides.defaultReadFile ? {} : { readFile: async () => 'YWJj' }),
+    onChange(value) { changes.push(value); record = value; if (overrides.rerenderOnChange) control.render(); },
     onSaved(value) { saved.push(value); savedRecord = value; },
+    onAttachments(files, identity) { attachmentUpdates.push({ files, identity }); },
     notify(...args) { notices.push(args); } });
   const find = predicate => tree(container).find(predicate);
   const card = key => find(node => node.dataset.requirement === key);
@@ -49,7 +52,7 @@ function fixture(overrides = {}) {
   const upload = async (key = 'greenProcurement', file = { name: 'report.txt', size: 3, type: 'text/plain' }) => {
     const picker = input(key); picker.files = [file]; await picker.emit('change');
   };
-  return { container, control, calls, changes, saved, notices, state, card, input, upload,
+  return { container, control, calls, changes, saved, notices, attachmentUpdates, state, card, input, upload,
     context(value) { record = value; savedRecord = value; }, find };
 }
 
@@ -182,4 +185,116 @@ test('requirement focus targets a labeled card and deleted files never count Rea
   c.control.focusRequirement('internalReview.docs.greenProcurement');
   assert.equal(c.card('greenProcurement').focused, true);
   assert.equal(c.card('greenProcurement').attributes.tabindex, '-1');
+});
+
+test('refresh replaces previously adopted attachment metadata without replacing local form data', async () => {
+  const file = { id: 'one', fileName: 'ready.txt', requirementName: 'greenProcurement', scanStatus: 'clean' };
+  const c = fixture({ api: async () => [file] });
+  c.context({ ...initial(), documentAttachments: [] }); c.control.render();
+  await c.control.refresh();
+  assert.match(text(c.card('greenProcurement')), /ready.txt/);
+  assert.equal(c.saved.length, 0);
+  assert.equal(c.changes.length, 0);
+  assert.deepEqual(c.attachmentUpdates, [{ files: [file], identity: { id: 'PCN-2026-0001', version: '0000000000000001' } }]);
+});
+
+test('a committed upload with failed metadata refresh still adopts its new version and explains recovery', async () => {
+  const c = fixture({ api: async (url, options) => {
+    if (options) return { id: 'one', fileName: 'report.txt', requirementName: 'greenProcurement', scanStatus: 'pendingScan', version: '0000000000000002' };
+    throw new Error('Connection lost');
+  } });
+  await c.upload();
+  assert.equal(c.saved[0].version, '0000000000000002');
+  assert.equal(c.saved[0].documentAttachments[0].fileName, 'report.txt');
+  assert.match(c.notices[0][2], /saved.*could not be refreshed/i);
+  assert.match(text(c.card('greenProcurement')), /Reload the draft/);
+});
+
+test('empty, oversized and unsafe filenames never allocate a draft or upload bytes', async () => {
+  const c = fixture();
+  for (const file of [{ name: 'empty.txt', type: 'text/plain', size: 0 },
+    { name: 'large.txt', type: 'text/plain', size: 11 * 1024 * 1024 },
+    { name: '../name.txt', type: 'text/plain', size: 3 }]) await c.upload('greenProcurement', file);
+  assert.equal(c.calls.length, 0);
+  assert.equal(c.notices.length, 3);
+});
+
+test('supporting files use normal bytes encoding without a requirement category', async () => {
+  const c = fixture({ defaultReadFile: true });
+  await c.upload('supporting', { name: 'readme.txt', type: 'text/plain', size: 3, arrayBuffer: async () => Uint8Array.from([97, 98, 99]).buffer });
+  const call = c.calls.find(item => item.options?.method === 'POST');
+  assert.equal(JSON.parse(call.options.body).base64, 'YWJj');
+  assert.equal(Object.hasOwn(JSON.parse(call.options.body), 'requirementName'), false);
+});
+
+test('requirement notes use immutable edits and submitted documents cannot mutate', async () => {
+  const c = fixture();
+  const note = tree(c.card('supplierDocument')).find(node => node.type === 'text');
+  note.value = 'Detailed material report'; await note.emit('change');
+  assert.equal(c.changes[0].internalReview.docs.supplierDocumentNote, 'Detailed material report');
+  c.context({ ...initial(), status: 'submitted' }); c.control.render(); await c.upload();
+  assert.equal(c.calls.length, 0);
+});
+
+test('failed document loads report the failure and destroyed controls ignore later edits', async () => {
+  const c = fixture({ api: async () => { throw new Error('Files unavailable'); } });
+  await c.control.refresh();
+  assert.match(text(c.card('supporting')), /Files unavailable/);
+  c.control.destroy(); c.control.render(); await c.control.refresh(); await c.upload();
+  assert.equal(c.calls.length, 1);
+});
+
+test('missing integration options fail explicitly', () => {
+  assert.throws(() => documents.mount({}), /container, context, API client and autosave queue/);
+});
+
+for (const key of ['supplierDocument', 'otherRequirement']) {
+  test(`${key} description persists while a delayed file refresh completes and keeps the typing selection`, async () => {
+    let finish;
+    const c = fixture({ rerenderOnChange: true, api: async () => new Promise(resolve => { finish = resolve; }) });
+    const pending = c.control.refresh();
+    let input = tree(c.card(key)).find(node => node.type === 'text');
+    input.focus(); input.value = 'Supplier technical specification'; input.setSelectionRange(9, 18, 'backward');
+    await input.emit('input');
+    assert.equal(c.changes.at(-1)?.internalReview.docs[`${key}Note`], 'Supplier technical specification');
+    input = tree(c.card(key)).find(node => node.type === 'text');
+    assert.equal(c.container.ownerDocument.activeElement, input);
+    assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [9, 18, 'backward']);
+    finish([]); await pending;
+    input = tree(c.card(key)).find(node => node.type === 'text');
+    assert.equal(input.value, 'Supplier technical specification');
+    assert.equal(c.container.ownerDocument.activeElement, input);
+    assert.deepEqual([input.selectionStart, input.selectionEnd, input.selectionDirection], [9, 18, 'backward']);
+  });
+}
+
+test('keyboard requirement toggles retain contextual checkbox focus after parent rerender', async () => {
+  const c = fixture({ rerenderOnChange: true });
+  let checkbox = tree(c.card('greenProcurement')).find(node => node.type === 'checkbox');
+  checkbox.focus(); checkbox.checked = false; await checkbox.emit('change');
+  checkbox = tree(c.card('greenProcurement')).find(node => node.type === 'checkbox');
+  assert.equal(c.container.ownerDocument.activeElement, checkbox);
+  assert.equal(checkbox.checked, false);
+  assert.equal(checkbox.attributes['aria-label'], 'Green Procurement declaration: Required document');
+});
+
+test('file picker retains focus during refresh while outside focus remains untouched', async () => {
+  const c = fixture();
+  c.input('greenProcurement').focus(); await c.control.refresh();
+  assert.equal(c.container.ownerDocument.activeElement, c.input('greenProcurement'));
+  const outside = c.container.ownerDocument.createElement('button'); outside.focus();
+  c.control.render();
+  assert.equal(c.container.ownerDocument.activeElement, outside);
+});
+
+test('removal returns keyboard focus to its card and download names identify the file', async () => {
+  const c = fixture();
+  c.context({ ...initial(), documentAttachments: [
+    { id: '00000000-0000-0000-0000-000000000001', fileName: 'report.txt', requirementName: 'greenProcurement', scanStatus: 'clean' }
+  ] }); c.control.render();
+  const link = tree(c.card('greenProcurement')).find(node => node.tagName === 'A');
+  assert.equal(link.attributes['aria-label'], 'Download report.txt');
+  const remove = tree(c.card('greenProcurement')).find(node => node.tagName === 'BUTTON');
+  remove.focus(); await remove.emit('click');
+  assert.equal(c.container.ownerDocument.activeElement, c.card('greenProcurement'));
 });

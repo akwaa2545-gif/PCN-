@@ -1,36 +1,9 @@
 const { ApiError } = require('./apiError');
-const { documentRequirements } = require('./documentRequirements');
+const { buildChecks } = require('../pcn-readiness');
 const { isInternal, isEmployeeViewer, routeGroups, hasRole } = require('./workflowAccess');
 const { actions, stageDepartments, departments, canSign } = require('./signingPermissions');
 
 const at = (value, field) => field.split('.').reduce((item, key) => item?.[key], value);
-const textPresent = value => typeof value === 'string' && value.trim().length > 0;
-
-function buildChecks(record, attachments = []) {
-  const fields = [
-    ['supplierName', 'Supplier name'], ['materialName', 'Material / chemical name'],
-    ['selectedChange', 'Change description'], ['reason', 'Reason for change'],
-    ['currentCondition', 'Current condition'], ['newCondition', 'New condition'],
-    ['desiredStart', 'Target start date or lot']
-  ];
-  const core = fields.map(([key, label]) => ({ key, label, field: key,
-    complete: textPresent(record[key]) || (['currentCondition', 'newCondition'].includes(key)
-      && Array.isArray(record.changeRows) && record.changeRows.length > 0
-      && record.changeRows.every(row => textPresent(row[key]))), blocking: true }));
-  const sample = [{key:'sampleSubmitted',label:'Sample submission choice',field:'sampleSubmitted',
-    complete:['yes','no'].includes(record.sampleSubmitted),blocking:true},
-  ...(record.sampleSubmitted === 'yes' ? [{key:'sampleSubmittedDate',label:'Sample submission date',
-    field:'sampleSubmittedDate',complete:textPresent(record.sampleSubmittedDate),blocking:false}] : [])];
-  const required = documentRequirements.filter(item => at(record, item.field) === true).map(item => ({
-    ...item, requirementName: item.key, attachment: true, blocking: true,
-    complete: attachments.some(file => !file.deletedAt && !file.DeletedAt && file.isDeleted !== true
-      && (file.scanStatus || file.ScanStatus) === 'clean'
-      && [item.key,item.label].includes(file.requirementName || file.RequirementName))
-  }));
-  const items = [...core, ...sample, ...required];
-  return { items, ready: items.every(item => !item.blocking || item.complete) };
-}
-
 function assertCompletion(record, attachments = [], { requiredFilesOnly = false } = {}) {
   const missing = buildChecks(record, attachments).items.filter(item => item.blocking && !item.complete
     && (!requiredFilesOnly || item.attachment));

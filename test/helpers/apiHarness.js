@@ -32,6 +32,7 @@ function memoryRepository() {
   let revisions = {};
   let settings = { groups: [] };
   let counter = 0;
+  let deletedCreationKeys = new Set();
   const version = () => (++counter).toString(16).padStart(16, '0');
   const appendRevision = (id, before, after, actor) => {
     const history = revisions[id] || [];
@@ -54,11 +55,18 @@ function memoryRepository() {
       records = { ...records, [id]: seeded };
       return structuredClone(seeded);
     },
-    async create(record, actor) {
+    async create(record, actor, user, options = {}) {
+      if (options.clientDraftKey) {
+        const identity = `${record.ownerUserId}:${options.clientDraftKey}`;
+        if (deletedCreationKeys.has(identity)) throw new ApiError(409, 'Draft identity was deleted');
+        const replay = Object.values(records).find(row => row.ownerUserId === record.ownerUserId && row.creationDraftKey === options.clientDraftKey);
+        if (replay) return { ...structuredClone(replay), creationReused: true };
+      }
       const id = `PCN-${record.createdAt.slice(0, 4)}-${String(Object.keys(records).length + 1).padStart(4, '0')}`;
-      const created = { ...structuredClone(record), id, version: version(), internalReview: { ...record.internalReview, pcnCode: id } };
+      const created = { ...structuredClone(record), ...(options.clientDraftKey ? { creationDraftKey: options.clientDraftKey,
+        ...(options.testDocument ? { isTestDocument: true } : {}) } : {}), id, version: version(), internalReview: { ...record.internalReview, pcnCode: id } };
       appendRevision(id, null, created, actor);
-      records = { ...records, [id]: created }; return structuredClone(created);
+      records = { ...records, [id]: created }; return { ...structuredClone(created), ...(options.clientDraftKey ? { creationReused: false } : {}) };
     },
     async update(id, updater, actor, expectedVersion) {
       if (!/^[a-f0-9]{16}$/i.test(expectedVersion || '')) throw new ApiError(400, 'PCN version is required');
@@ -72,11 +80,13 @@ function memoryRepository() {
       if (!/^[a-f0-9]{16}$/i.test(expectedVersion || '')) throw new ApiError(400, 'PCN version is required');
       if (!records[id]) return false;
       if (expectedVersion !== records[id].version) throw new ApiError(409, 'PCN has been changed by another user');
+      if (records[id].creationDraftKey) deletedCreationKeys = new Set([...deletedCreationKeys, `${records[id].ownerUserId}:${records[id].creationDraftKey}`]);
       const { [id]: deleted, ...remaining } = records; records = remaining; return true;
     },
     async getNotificationSettings() { return structuredClone(settings); },
     async saveNotificationSettings(value) { settings = structuredClone(value); return structuredClone(settings); },
     async getAudit() { return []; },
+    async getNotificationStatus() { return []; },
     async getMasterData() { return { versionId: 1, formDefinitions: {}, statusDefinitions: [] }; },
     async readiness() {}
   };

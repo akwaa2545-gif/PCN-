@@ -80,11 +80,11 @@ async function main() {
     page.setDefaultTimeout(12000);
     page.setDefaultNavigationTimeout(30000);
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(`${origin}/login?returnTo=%2Fcreate`);
+    await page.goto(`${origin}/login?returnTo=%2Fform.html`);
     const signingIn = page.waitForResponse(response => response.url().endsWith('/api/auth/login') && response.request().method() === 'POST');
     await page.locator('#employeeCode').fill('0000001');
     assert.equal((await signingIn).status(), 200, 'Entering the complete employee code signs in automatically');
-    await page.waitForURL(`${origin}/create`, { waitUntil: 'domcontentloaded' });
+    await page.waitForURL(`${origin}/form.html`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#saveDraftButton')).toBeEnabled();
     const save = async (draft = false) => {
       const response = page.waitForResponse(res => /\/api\/pcns(?:\/PCN-\d{4}-\d{4})?$/.test(new URL(res.url()).pathname) && ['POST', 'PATCH'].includes(res.request().method()));

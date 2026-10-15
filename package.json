@@ -21,7 +21,8 @@
     "db:migrate": "node scripts/db-migrate.js",
     "db:import": "node scripts/db-import.js",
     "start:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-pcn.ps1",
-    "test:signing-order": "node scripts/signing-order-e2e.js"
+    "test:signing-order": "node scripts/signing-order-e2e.js",
+    "test:create": "node scripts/create-pcn-e2e.js"
   },
   "engines": {
     "node": ">=22"

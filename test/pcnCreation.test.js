@@ -92,3 +92,103 @@ test('test documents retain an immutable server-owned mark through drafts, retri
   await assert.rejects(creation.create({ clientDraftKey: key, testDocument: 'yes', document: unsignedPayload }, 'owner', user), { statusCode: 400 });
   await assert.rejects(creation.create({ clientDraftKey: key, document: { ...unsignedPayload, isTestDocument: true } }, 'owner', user), { statusCode: 400 });
 });
+
+test('draft-only update rejects a submission that wins before the locked updater executes', async () => {
+  const { creation, service, repository } = setup(); const { record } = await create(creation);
+  const update = repository.update.bind(repository);
+  repository.update = (id, updater, ...args) => update(id, current => updater({ ...current, status: 'submitted' }), ...args);
+  await assert.rejects(creation.update(record.id, { version: record.version, document: { reason: 'Late edit' } }, 'owner', user), { statusCode: 409 });
+  assert.equal((await service.getById(record.id, user)).reason, unsignedPayload.reason);
+});
+
+test('preflight rejects mismatched attachment metadata and cannot silently report readiness', async () => {
+  const { creation } = setup(); const { record } = await create(creation);
+  creation.documents.listForRecords = async () => new Map([[record.id, { parentVersion: '000000000000ffff', attachments: [] }]]);
+  await assert.rejects(creation.preflight(record.id, { version: record.version }, user), { statusCode: 409 });
+  creation.documents = null;
+  await assert.rejects(creation.preflight(record.id, { version: record.version }, user), { statusCode: 503 });
+});
+
+test('draft identity remains idempotent after submission and cannot resurrect a deleted record', async () => {
+  const { creation, service, repository } = setup(); const { record } = await create(creation);
+  const submitted = await service.update(record.id, { version: record.version, status: 'submitted' }, 'owner', user);
+  const replay = await create(creation);
+  assert.equal(replay.record.id, record.id); assert.equal(replay.record.status, 'submitted'); assert.equal(replay.reused, true);
+  await repository.delete(record.id, 'owner', submitted.version);
+  await assert.rejects(create(creation), { statusCode: 409 });
+});
+
+test('roleless, inactive and unauthorized requirements are rejected before draft writes', async () => {
+  const { creation, repository } = setup();
+  for (const denied of [{ ...user, isActive: false }, { ...user, roles: [] }, { ...user, identityProvider: 'employee-code', employeeCode: '1234567', roles: [] }]) {
+    await assert.rejects(creation.create({ clientDraftKey: key, document: unsignedPayload }, 'owner', denied), { statusCode: 403 });
+  }
+  await assert.rejects(creation.create({ clientDraftKey: key, document: { ...unsignedPayload, internalReview: { docs: { greenProcurement: true } } } }, 'owner', { ...user, roles: ['supplier'] }), { statusCode: 403 });
+  assert.equal((await repository.list()).length, 0);
+});
+
+test('preflight recognizes verified assigned recipients without exposing their private addresses', async () => {
+  const { applyUserMailRouting } = require('../src/userMailRouting');
+  const { creation, repository } = setup(); const { record } = await create(creation);
+  const preparer = { id: 'preparer', displayName: 'Prepared person', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared',
+    identityProvider: 'employee-code', isActive: true, email: 'prepared@example.test', mailDirectoryId: 'directory-id',
+    mailVerifiedAt: '2026-10-01T00:00:00Z', mailProfile: { id: 'directory-id', email: 'prepared@example.test' } };
+  repository.getNotificationSettings = async () => applyUserMailRouting({ schemaVersion: 2, groups: [] }, [preparer]);
+  creation.authRepository.listUsers = async () => [preparer];
+  const result = await creation.preflight(record.id, { version: record.version }, user);
+  assert.equal(result.notification.recipientConfigured, true);
+  assert.deepEqual(result.nextAction.people, [{ displayName: 'Prepared person' }]);
+  assert.doesNotMatch(JSON.stringify(result), /@|directory-id|mailProfile/);
+});
+
+test('old receipt with no recorded action job still explains a currently blocked action after unrelated saves', async () => {
+  const { creation, repository } = setup(); const { record } = await create(creation);
+  await repository.update(record.id, current => ({ ...current, status: 'submitted', mailRoutingState: {
+    activationId: 'different-current-activation', status: 'blocked', reason: 'no_verified_recipients' } }), 'fixture', record.version);
+  const receipt = await creation.receipt(record.id, record.version, user);
+  assert.equal(receipt.notification.state, 'needs_attention');
+  assert.match(receipt.notification.message, /current action is blocked/i);
+  assert.match(receipt.notification.message, /no action notification is recorded for the requested version/i);
+  assert.equal(receipt.notification.currentActionBlocked, true);
+  assert.equal(receipt.notification.requestedVersionRecorded, false);
+});
+
+test('accepted action job for a requested older version is not downgraded by a later blocked activation', async () => {
+  const { creation, repository } = setup(); const { record } = await create(creation);
+  await repository.update(record.id, current => ({ ...current, status: 'submitted', mailRoutingState: {
+    activationId: 'later-blocked-activation', status: 'blocked' } }), 'fixture', record.version);
+  repository.getNotificationStatus = async () => [{ Status: 'sent', JobCount: 1 }];
+  const receipt = await creation.receipt(record.id, record.version, user);
+  assert.equal(receipt.notification.state, 'accepted');
+  assert.match(receipt.notification.message, /accepted by workflow/i);
+  assert.doesNotMatch(receipt.notification.message, /blocked/i);
+});
+
+test('draft autosave preserves an explicitly cleared change description and every other row and condition', async () => {
+  const { creation, service } = setup(); const { formDefinitions } = require('../src/masterData');
+  const options = formDefinitions.rawMaterial.riskOptions.filter(option => option.risk === 'RL2');
+  const rows = options.slice(0, 2).map((option, index) => ({ ...option, optionText: option.text,
+    currentCondition: `Current row ${index}`, newCondition: `New row ${index}` }));
+  const { record } = await creation.create({ clientDraftKey: key, document: { ...unsignedPayload, changeRows: rows } }, 'owner', user);
+  const cleared = [{ ...rows[0], text: '' }, rows[1]];
+  const saved = await creation.update(record.id, { version: record.version,
+    document: { selectedChange: '', changeRows: cleared } }, 'owner', user);
+  assert.equal(saved.record.selectedChange, ''); assert.deepEqual(saved.record.changeRows, cleared);
+  const preflight = await creation.preflight(record.id, { version: saved.record.version }, user);
+  assert.equal(preflight.checks.ready, false);
+  assert.equal(preflight.checks.items.find(item => item.key === 'selectedChange').complete, false);
+  await assert.rejects(service.update(record.id, { version: saved.record.version, status: 'submitted' }, 'owner', user), { statusCode: 400 });
+  assert.equal((await service.getById(record.id, user)).status, 'draft');
+  await assert.rejects(service.create({ ...unsignedPayload, changeRows: [rows[0], { ...rows[1], text: '' }], status: 'submitted' }, 'owner', user), { statusCode: 400 });
+});
+
+test('draft risk changes preserve prior populated rows while the new change selection is incomplete', async () => {
+  const { creation, service } = setup(); const { record } = await create(creation);
+  const saved = await creation.update(record.id, { version: record.version,
+    document: { riskLevel: 'RL1', selectedChange: '' } }, 'owner', user);
+  assert.equal(saved.record.riskLevel, 'RL1'); assert.equal(saved.record.selectedChange, '');
+  assert.equal(saved.record.changeRows[0].risk, 'RL2');
+  assert.equal(saved.record.changeRows[0].text, unsignedPayload.changeRows[0].text);
+  assert.equal(saved.record.changeRows[0].currentCondition, unsignedPayload.changeRows[0].currentCondition);
+  await assert.rejects(service.update(record.id, { version: saved.record.version, status: 'submitted' }, 'owner', user), { statusCode: 400 });
+});

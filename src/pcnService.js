@@ -74,7 +74,7 @@ class PcnService {
     return this.getNotificationSettings();
   }
 
-  async create(input, actor = "web", user) {
+  async create(input, actor = "web", user, options = {}) {
     if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to create records');
     const now = this.clock().toISOString();
     assertWritablePayload(input);
@@ -108,10 +108,10 @@ class PcnService {
 
     if (record.status !== 'draft') require('./documentChecks').assertCompletion(record, []);
 
-    return this.repository.create(applyDocumentControl(null, record, user, now), actor, user);
+    return this.repository.create(applyDocumentControl(null, record, user, now), actor, user, options);
   }
 
-  async update(id, input, actor = "web", user) {
+  async update(id, input, actor = "web", user, options = {}) {
     if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to edit records');
     assertValidId(id);
     assertWritablePayload(input);
@@ -119,6 +119,10 @@ class PcnService {
     const updated = await this.repository.update(
       id,
       async (current, context = {}) => {
+        if (options.draftOnly) {
+          if (!user?.id || String(current.ownerUserId) !== String(user.id)) throw new ApiError(404, 'PCN draft not found');
+          if (current.status !== 'draft' || require('./documentControl').hasSignatures(current)) throw new ApiError(409, 'This PCN is no longer an unsigned draft');
+        }
         if (user) {
           assertRecordAccess(current, user);
           if (['approved','rejected','closed'].includes(current.status)) throw new ApiError(403, 'Completed PCNs cannot be edited');
@@ -321,12 +325,12 @@ class PcnService {
       throw new ApiError(400, "Invalid risk level");
     }
 
-    const changeRows = sanitizeChangeRows(input.changeRows, changeForm, riskLevel);
+    const changeRows = sanitizeChangeRows(input.changeRows, changeForm, minimumRequired);
     const validSelectedChange = changeRows.some(
       (row) => row.risk === riskLevel && row.text === selectedChange
     );
 
-    if (!validSelectedChange && !(status === 'draft' && !selectedChange && changeRows.length === 0)) {
+    if (!validSelectedChange && !(status === 'draft' && !selectedChange)) {
       throw new ApiError(400, "Selected change does not match the form and risk level");
     }
 
@@ -509,7 +513,7 @@ function assertValidId(id) {
   }
 }
 
-function sanitizeChangeRows(value, changeForm, riskLevel) {
+function sanitizeChangeRows(value, changeForm, minimumTextLength = 1) {
   if (value === undefined || value === null) {
     return [];
   }
@@ -521,7 +525,7 @@ function sanitizeChangeRows(value, changeForm, riskLevel) {
   const validOptions = new Map(formDefinitions[changeForm].riskOptions.map((option) => [option.text, option]));
 
   return value.map((row, index) => {
-    const text = sanitizeString(row && row.text, `changeRows[${index}].text`, 1, 500);
+    const text = sanitizeString(row && row.text, `changeRows[${index}].text`, minimumTextLength, 500);
     const optionText = sanitizeString(row && (row.optionText || row.originalText || row.text), `changeRows[${index}].optionText`, 1, 500);
     const option = validOptions.get(optionText);
 

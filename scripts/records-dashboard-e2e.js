@@ -79,7 +79,7 @@ async function fixtures() {
   const authService = fakeAuthService({ additionalUsers: [
     { username: 'viewer', employeeCode: '0800001', identityProvider: 'employee-code', roles: [], displayName: 'Dashboard Viewer' },
     { username: 'viewer-two', employeeCode: '0800002', identityProvider: 'employee-code', roles: [], displayName: 'Dashboard Viewer Two' },
-    { username: 'gsc-assigned', roles: ['gsc'], department: 'gscTet', signingStep: 'approved', displayName: 'Dashboard Assigned Approver' },
+    { username: 'gsc-assigned', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared', displayName: 'Dashboard Assigned Preparer' },
     { username: 'gsc-checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked', displayName: 'Dashboard Assigned Checker' }
   ] });
   return { repository, service, records, documents, authService };
@@ -194,7 +194,7 @@ async function main() {
     await expect(dashboard.row(records[1].id).locator('[data-column="documents"]')).toContainText('Missing 1');
     await expect(dashboard.row(records[2].id).locator('[data-column="progress"]')).toContainText('signing steps');
     await expect(dashboard.row(records[2].id).locator('[data-column="next"]')).toContainText('GSC/TET');
-    await expect(dashboard.row(records[2].id).locator('[data-column="next"]')).not.toContainText('Dashboard Assigned Approver');
+    await expect(dashboard.row(records[2].id).locator('[data-column="next"]')).not.toContainText('Dashboard Assigned Preparer');
     await expect(dashboard.row(records[2].id).locator('[data-column="pending"]')).toContainText('Waiting');
     await expect(dashboard.host.locator('.rd-overdue')).toHaveCount(0);
     await expect(dashboard.host.getByRole('button', { name: /^(Remove|Delete PCN|Save changes|Approve)\b/i })).toHaveCount(0);
@@ -272,7 +272,7 @@ async function main() {
 
     const admin = await open('admin'); const portal = new DashboardPage(admin.page, '#pcnAdminView'); await portal.ready();
     await expect(portal.host.locator('[data-summary="all"] strong')).toHaveText('17');
-    await expect(portal.row(records[2].id).locator('[data-column="next"]')).toContainText('Dashboard Assigned Approver');
+    await expect(portal.row(records[2].id).locator('[data-column="next"]')).toContainText('Dashboard Assigned Preparer');
     await expect(portal.host.getByRole('button', { name: `View ${records[2].id}`, exact: true })).toBeVisible();
     await expect(portal.row(records[2].id).getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
     const portalWrap = portal.host.locator('.admin-table-wrap');

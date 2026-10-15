@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const model = require('../create-model');
 const master = require('../src/masterData');
 const { buildChecks } = require('../src/documentChecks');
+const vm=require('node:vm');
+const fs=require('node:fs');
 
 test('blank remains empty while sample contains normal validated draft data', () => {
   const blank = model.blank(master);
@@ -55,11 +57,15 @@ test('change selection and templates preserve populated rows by stable option id
   assert.equal(next.changeRows.length,2);
   const copy=model.fromTemplate(next,{canSetRequirements:true});
   assert.deepEqual(copy.changeRows,next.changeRows);
+  const legacy=model.fromTemplate({...next,selectedChange:second.text,currentCondition:'Stale',newCondition:'Stale'},{});
+  assert.equal(legacy.selectedChange,'Specific second');
+  assert.equal(legacy.currentCondition,'Old second');
   const changed=model.changeForm(next,'packaging',master);
   assert.equal(changed.changeForm,'packaging');
   assert.equal(changed.selectedChange,'');
   assert.deepEqual(changed.changeRows,[]);
   assert.equal(next.changeForm,'rawMaterial');
+  assert.equal(model.selectChange(next,second,{currentCondition:'Typing a '}).currentCondition,'Typing a ');
 });
 
 test('field stages route exact validation keys to guided sections',()=>{
@@ -67,4 +73,34 @@ test('field stages route exact validation keys to guided sections',()=>{
   assert.equal(model.fieldStage('selectedChange'),'changes');
   assert.equal(model.fieldStage('reason'),'changes');
   assert.equal(model.fieldStage('internalReview.docs.greenProcurement'),'documents');
+  assert.equal(model.fieldStage('internalReview.materialCodeDescription'),'documents');
+});
+
+test('browser model matches Node exports and handles optional template data safely',()=>{
+  const context={};vm.runInNewContext(fs.readFileSync(require.resolve('../create-model'),'utf8'),context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.PCN_CREATE_MODEL.sample(master))),model.sample(master));
+  assert.equal(model.blank({packaging:master.formDefinitions.packaging}).changeForm,'packaging');
+  assert.equal(model.blank().changeForm,'rawMaterial');
+  assert.equal(model.toPayload().sampleSubmitted,'pending');
+  assert.deepEqual(model.fromTemplate().changeRows,[]);
+  assert.throws(()=>model.sample({}),/unavailable/);
+  assert.throws(()=>model.selectChange({},{}),/valid change/);
+  assert.throws(()=>model.changeForm({},'missing',master),/valid change form/);
+  assert.equal(model.changeForm(model.sample(master),'rawMaterial',master).selectedChange,model.sample(master).selectedChange);
+  assert.equal(model.fieldStage('unknown'),'review');
+  const payload=model.toPayload({supplierName:42,changeRows:[null,{originalText:'Option',risk:'RL1',text:'Custom'}]});
+  assert.equal(payload.supplierName,'');assert.equal(payload.changeRows[0].optionText,'Option');
+});
+
+test('explicitly cleared change description remains blank in readiness and draft payload',()=>{
+  const record=model.sample(master);
+  const option=master.formDefinitions.rawMaterial.riskOptions.find(item=>item.text===record.changeRows[0].optionText);
+  const cleared=model.selectChange(record,option,{text:''});
+  assert.equal(cleared.selectedChange,'');
+  assert.equal(cleared.changeRows[0].text,'');
+  assert.equal(cleared.changeRows[0].optionText,option.text);
+  assert.equal(buildChecks(cleared).items.find(item=>item.key==='selectedChange').complete,false);
+  assert.equal(model.toPayload(cleared).changeRows[0].text,'');
+  assert.equal(model.fromTemplate(cleared).changeRows[0].text,'');
+  assert.equal(model.selectChange({...record,changeRows:[]},option).selectedChange,option.text);
 });

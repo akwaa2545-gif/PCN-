@@ -70,14 +70,22 @@ class SqlPcnRepository {
     return `PCN-${year}-${String(sequence).padStart(4, '0')}`;
   }
 
-  async create(record, actor = 'system', user) {
+  async create(record, actor = 'system', user, options = {}) {
     return this.transaction(async tx => {
       await lockUserMailRouting(tx);
       await assertCurrentUser(tx, user);
+      // Both normal and idempotent creation share this order before touching owner rows or counters.
+      await this.lockCreation(tx, 'pcn:creation-global');
+      if (options.clientDraftKey) {
+        const replay = await this.findCreationReplay(tx, record, options.clientDraftKey);
+        if (replay) return { ...replay, creationReused: true };
+      }
       const year = Number(String(record.createdAt || new Date().toISOString()).slice(0, 4));
       const id = record.id || await this.allocateCode(tx, year);
       assertCode(id);
-      const proposed = { ...record, id, internalReview: { ...(record.internalReview || {}), pcnCode: id } };
+      const proposed = { ...record, ...(options.clientDraftKey ? { creationDraftKey: options.clientDraftKey.toLowerCase(),
+        ...(options.testDocument === true ? { isTestDocument: true } : {}) } : {}), id,
+        internalReview: { ...(record.internalReview || {}), pcnCode: id } };
       const prepared = this.notifications ? await this.notifications.prepare(tx, null, proposed, actor) : { record: proposed };
       const next = prepared.record;
       const parent = await this.writeParent(tx, next);
@@ -87,8 +95,39 @@ class SqlPcnRepository {
       const saved = await this.readAggregate(tx, parent);
       await this.revisions.append(tx, id, null, saved, actor);
       const notification = this.notifications ? await this.notifications.persisted(tx, saved, prepared.plan) : undefined;
-      return notification ? { ...saved, notification } : saved;
+      return { ...saved, ...(notification ? { notification } : {}), ...(options.clientDraftKey ? { creationReused: false } : {}) };
     });
+  }
+
+  async findCreationReplay(tx, record, key) {
+    if (!record.ownerUserId || record.status !== 'draft' || typeof key !== 'string' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(key)) throw new ApiError(400, 'Invalid draft identity');
+    const normalized = key.toLowerCase();
+    const resource = `pcn:creation:${crypto.createHash('sha256').update(`${record.ownerUserId}\0${normalized}`).digest('hex')}`;
+    await this.lockCreation(tx, resource);
+    // Deleted and submitted identities remain authoritative. SQL 2014 parses the extras in JavaScript.
+    const rows = await tx.request().input('owner', sql.UniqueIdentifier, record.ownerUserId)
+      .query('SELECT * FROM pcn.PcnRequests WITH (UPDLOCK,HOLDLOCK) WHERE OwnerUserId=@owner');
+    const previous = rows.recordset.find(row => JSON.parse(row.LegacyExtrasJson || '{}').creationDraftKey === normalized);
+    if (!previous) return null;
+    if (previous.DeletedAt) throw new ApiError(409, 'This draft identity belongs to a deleted PCN; start a new document');
+    return this.readAggregate(tx, previous);
+  }
+
+  async lockCreation(tx, resource) {
+    const locked = await tx.request().input('resource', sql.NVarChar(255), resource).query(`DECLARE @result int;
+      EXEC @result=sys.sp_getapplock @Resource=@resource,@LockMode=N'Exclusive',@LockOwner=N'Transaction',@LockTimeout=10000;
+      SELECT @result AS LockResult;`);
+    const result = locked.recordset?.[0]?.LockResult;
+    if (!Number.isInteger(result) || result < 0) throw new ApiError(409, 'PCN creation is busy; retry the operation');
+  }
+
+  async getNotificationStatus(code, version) {
+    assertCode(code);
+    if (typeof version !== 'string' || !/^[a-f0-9]{16}$/i.test(version)) throw new ApiError(400, 'Submission version is required');
+    const result = await this.pool.request().input('code', sql.NVarChar(32), code).input('version', sql.NVarChar(16), version.toLowerCase())
+      .query(`SELECT Status,COUNT(*) AS JobCount,MAX(SentAt) AS LatestAcceptedAt FROM pcn.NotificationJobs
+        WHERE PcnId=@code AND PcnVersion=@version AND Action<>N'pcn_update' GROUP BY Status`);
+    return result.recordset;
   }
 
   checkVersion(parent, expectedVersion) {

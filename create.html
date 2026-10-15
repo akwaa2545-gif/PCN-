@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create PCN | PCN Portal System</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/create.css" />
+</head>
+<body class="create-page">
+  <a class="create-skip" href="#createMain">Skip to document</a>
+  <header class="topbar create-topbar">
+    <a class="create-brand" href="/admin"><img src="/tokin-header-logo.png" alt="TOKIN, a YAGEO company" /><span><small>NSN-000244</small><strong>PCN Portal System</strong></span></a>
+    <nav class="topbar-actions" aria-label="Account navigation"><a class="ghost-link" href="/admin">Portal</a><div class="account-menu" id="accountMenu"></div></nav>
+  </header>
+  <main id="createMain" class="create-main">
+    <header class="create-page-heading">
+      <div><p class="create-eyebrow">Supplier change management</p><h1>Create a PCN</h1><p>Prepare the change, add supporting documents and review before submitting.</p></div>
+      <div class="create-identity"><strong id="draftIdentity">New document</strong><span class="create-badge" id="draftStatusBadge">Draft</span><span class="create-test-badge" id="testDocumentBadge" hidden>TESTING DOC</span><span id="draftSaveStatus">Loading…</span><span id="saveAnnouncement" class="create-sr-only" role="status" aria-live="polite"></span><button id="retrySave" class="create-link" type="button" hidden>Retry save</button><button id="fillTestDocument" class="create-link" type="button" hidden>Test document</button><button id="saveRecoveryCopy" class="create-link" type="button" hidden>Download unsaved content</button><a id="canonicalDocumentLink" class="create-link" hidden>Open saved PCN</a></div>
+    </header>
+    <section class="create-entry" id="createEntry" aria-labelledby="startTitle">
+      <div class="create-section-heading"><div><p class="create-eyebrow">Start here</p><h2 id="startTitle" tabindex="-1">How would you like to begin?</h2></div><button id="testDocument" type="button" class="create-button">Test document</button></div>
+      <div class="create-entry-grid">
+        <button id="startBlank" class="create-entry-card" type="button"><span class="create-entry-icon" aria-hidden="true">01</span><strong>Blank PCN</strong><span>Start a new change document.</span></button>
+        <button id="startCommon" class="create-entry-card" type="button"><span class="create-entry-icon" aria-hidden="true">02</span><strong>Common change starter</strong><span>Choose a change type and add your details.</span></button>
+        <button id="startCopy" class="create-entry-card" type="button"><span class="create-entry-icon" aria-hidden="true">03</span><strong>Copy existing PCN</strong><span>Reuse content with a fresh approval process.</span></button>
+        <button id="startResume" class="create-entry-card" type="button"><span class="create-entry-icon" aria-hidden="true">04</span><strong>Resume draft</strong><span>Continue a draft saved to your account.</span></button>
+      </div>
+      <div id="entryChoices" class="create-choices" tabindex="-1" hidden></div>
+    </section>
+    <div id="createLoading" class="create-loading" role="status">Preparing your workspace…</div>
+    <section id="createEditor" hidden>
+      <fieldset id="createMutationLock" class="create-mutation-lock">
+      <section class="create-recovery" id="createRecovery" hidden aria-labelledby="recoveryTitle"><div><strong id="recoveryTitle">Unfinished edits found</strong><p id="recoveryMessage"></p></div><button class="create-button" id="restoreRecovery" type="button">Recover edits</button><button class="create-link" id="discardRecovery" type="button">Discard recovery copy</button></section>
+      <nav class="create-steps" aria-label="Create PCN stages"><ol>
+        <li><button data-stage="details" type="button" aria-current="step"><span>1</span>Details</button></li>
+        <li><button data-stage="changes" type="button"><span>2</span>Changes</button></li>
+        <li><button data-stage="documents" type="button"><span>3</span>Documents</button></li>
+        <li><button data-stage="review" type="button"><span>4</span>Review &amp; submit</button></li>
+      </ol><p id="mobileStage" class="create-mobile-stage">Step 1 of 4 · Details</p></nav>
+      <div class="create-editor-grid">
+        <div class="create-content">
+          <section class="create-stage" data-panel="details" aria-labelledby="detailsTitle"><div class="create-section-heading"><div><p class="create-eyebrow">Step 1 of 4</p><h2 id="detailsTitle" tabindex="-1">Supplier &amp; material details</h2><p>Fields marked <span aria-label="required">*</span> are required to submit.</p></div></div>
+            <div class="create-fields">
+              <label class="create-field">Supplier name <span>*</span><input id="supplierName" data-field="supplierName" autocomplete="organization" maxlength="160" /><small data-error="supplierName"></small></label>
+              <label class="create-field">Manufacturer<input id="manufacturerName" data-field="manufacturerName" maxlength="180" /><small data-error="manufacturerName"></small></label>
+              <label class="create-field create-field-wide">Material / chemical name <span>*</span><input id="materialName" data-field="materialName" maxlength="180" /><small data-error="materialName"></small></label>
+              <label class="create-field">Change form <span>*</span><select id="changeForm" data-field="changeForm"></select><small data-error="changeForm"></small></label>
+              <label class="create-field">Risk level <span>*</span><select id="riskLevel" data-field="riskLevel"><option>RL3</option><option>RL2</option><option>RL1</option><option>RL0</option></select><small data-error="riskLevel"></small></label>
+            </div>
+          </section>
+          <section class="create-stage" data-panel="changes" aria-labelledby="changesTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 2 of 4</p><h2 id="changesTitle" tabindex="-1">Describe the proposed change</h2><p>Explain what changes and why it is needed.</p></div></div>
+            <div class="create-fields">
+              <label class="create-field create-field-wide">Change category <span>*</span><select id="changeCategory"><option value="">Select a change</option></select></label>
+              <label class="create-field create-field-wide">Change description <span>*</span><textarea id="selectedChange" data-field="selectedChange" maxlength="500" rows="3"></textarea><small data-error="selectedChange"></small></label>
+              <label class="create-field">Current condition <span>*</span><textarea id="currentCondition" data-field="currentCondition" maxlength="2000" rows="5"></textarea><small data-error="currentCondition"></small></label>
+              <label class="create-field">New condition <span>*</span><textarea id="newCondition" data-field="newCondition" maxlength="2000" rows="5"></textarea><small data-error="newCondition"></small></label>
+              <div id="additionalChangeRows" class="create-field-wide"></div>
+              <label class="create-field create-field-wide">Reason for change <span>*</span><textarea id="reason" data-field="reason" maxlength="2000" rows="4"></textarea><small data-error="reason"></small></label>
+              <label class="create-field">Target start date or lot <span>*</span><input id="desiredStart" data-field="desiredStart" maxlength="120" placeholder="Date, lot number or planned start" /><small data-error="desiredStart"></small></label>
+              <label class="create-field">Sample submission <span>*</span><select id="sampleSubmitted" data-field="sampleSubmitted"><option value="pending">Select Yes or No</option><option value="yes">Yes</option><option value="no">No</option></select><small data-error="sampleSubmitted"></small></label>
+              <label class="create-field" id="sampleDateField" hidden>Sample submission date<input id="sampleSubmittedDate" data-field="sampleSubmittedDate" maxlength="120" /><small data-error="sampleSubmittedDate"></small></label>
+              <label class="create-field">Sample location<input id="sampleLocation" data-field="sampleLocation" maxlength="180" /></label>
+              <label class="create-field">Price impact<select id="priceLevel" data-field="priceLevel"><option value="no-change">No change</option><option value="decreasing">Decreasing</option><option value="increasing">Increasing</option></select></label>
+              <label class="create-field create-field-wide">Identification of changed material<textarea id="identification" data-field="identification" maxlength="1200" rows="3"></textarea></label>
+            </div>
+          </section>
+          <section class="create-stage" data-panel="documents" aria-labelledby="documentsTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 3 of 4</p><h2 id="documentsTitle" tabindex="-1">Supporting documents</h2><p>A required document is complete when its uploaded file passes the security scan.</p></div></div><div id="createDocuments"></div></section>
+          <section class="create-stage" data-panel="review" aria-labelledby="reviewTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 4 of 4</p><h2 id="reviewTitle" tabindex="-1">Review &amp; submit</h2><p>Confirm the document information before starting approval.</p></div></div><div id="reviewSummary"></div><section class="create-next-action"><p class="create-eyebrow">After you submit</p><h3 id="nextActionLabel">Check your document to see the next responsible person.</h3><p id="nextActionPeople"></p><p id="reviewMailStatus"></p><button type="button" class="create-button" id="refreshReview">Check readiness</button></section></section>
+        </div>
+        <aside class="create-readiness" aria-labelledby="readinessTitle"><p class="create-eyebrow">Document readiness</p><h2 id="readinessTitle">Ready for review?</h2><strong id="completionCount">0 of 8 required items complete</strong><progress id="completionProgress" aria-labelledby="completionCount" max="8" value="0"></progress><p>Your draft can be saved at any stage.</p><ul id="completionItems"></ul><button class="create-button" id="previewDocument" type="button">Preview document <span aria-hidden="true">↗</span></button><button class="create-link" id="newDocument" type="button">Start another PCN</button></aside>
+      </div>
+      <footer class="create-actionbar"><div><button id="saveDraftButton" class="create-button" type="button">Save draft</button><span id="actionSaveStatus"></span></div><div><button id="previousStage" class="create-button" type="button">Back</button><button id="nextStage" class="create-button create-primary" type="button">Continue</button><button id="submitButton" class="create-button create-primary" type="button" hidden>Submit PCN</button></div></footer>
+      </fieldset>
+    </section>
+    <section id="submissionReceipt" class="create-receipt" aria-labelledby="receiptTitle" hidden><span class="create-receipt-check" aria-hidden="true">✓</span><p class="create-eyebrow">Submission complete</p><h2 id="receiptTitle" tabindex="-1">Your PCN has been submitted</h2><p id="receiptIdentity"></p><div id="receiptDetails"></div><div class="create-receipt-actions"><a id="receiptOpen" class="create-button create-primary">Open PCN</a><a class="create-button" href="/admin">Back to Portal</a><button class="create-button" id="receiptNew" type="button">Create another</button></div></section>
+  </main>
+  <aside class="create-notice" id="createNotice" role="status" aria-live="polite" aria-atomic="true" hidden><div><strong id="noticeTitle"></strong><button type="button" id="dismissNotice" aria-label="Dismiss notification">×</button></div><p id="noticeMessage"></p><ul id="noticeItems"></ul></aside>
+  <dialog class="create-dialog" id="createConfirm" aria-labelledby="confirmTitle" aria-describedby="confirmMessage"><h2 id="confirmTitle"></h2><p id="confirmMessage"></p><div><button class="create-button" id="confirmCancel" type="button">Cancel</button><button class="create-button create-primary" id="confirmAccept" type="button">Continue</button></div></dialog>
+  <script src="/session-client.js"></script><script src="/pcn-readiness.js"></script><script src="/create-model.js"></script><script src="/create-autosave.js"></script><script src="/document-recovery.js"></script><script src="/create-documents.js"></script><script src="/create.js"></script>
+</body>
+</html>

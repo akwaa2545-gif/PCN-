@@ -9544,3 +9544,8 @@ body.pcn-page .app-notice.has-missing-items {
   .app-notice-missing li { align-items: flex-start; gap: 10px; }
   .app-notice-missing button { min-height: 44px; max-width: 120px; white-space: normal; }
 }
+.document-test-badge, .queue-test-badge { display:inline-block; padding:5px 10px; border:2px solid #b36b00; background:#fff0c2; color:#743a00; font-size:13px; font-weight:800; letter-spacing:.06em; }
+.document-test-badge { margin:0 0 10px; }
+.document-test-badge[hidden] { display:none; }
+.queue-test-badge { margin:4px 0; padding:2px 6px; border-width:1px; font-size:10px; }
+@media print { body.pcn-page .document-test-badge:not([hidden]) { display:block!important; padding:3mm; border:2px solid #743a00; color:#743a00; background:#fff0c2; text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }

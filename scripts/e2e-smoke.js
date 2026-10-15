@@ -185,7 +185,7 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
       assert(notification,'Unexpected extra PCN save');
       return route.fulfill({status:request.method()==='POST'?201:200,json:{success:true,data:{...record,notification}}});
     });
-    await page.goto('http://127.0.0.1:3099/create');
+    await page.goto('http://127.0.0.1:3099/form.html');
     await page.locator('#submitButton:not([disabled])').waitFor();
     const formViewport = page.viewportSize();
     await page.setViewportSize({width:320,height:700});
@@ -697,7 +697,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     await page.waitForURL(`${origin}/admin`);
 
     phase = 'loading a new draft document';
-    await page.goto(`${origin}/create`);
+    await page.goto(`${origin}/form.html`);
     await loaded();
     assert.equal(await unloadBlocked(),false,'A new unedited PCN does not warn');
     await page.locator('#supplierName').fill('Unsaved create fixture');
@@ -1125,11 +1125,11 @@ async function main() {
     supplier.setDefaultNavigationTimeout(15000);
     supplier.on('pageerror',error=>errors.push(error.message));
     await supplier.route('**/api/auth/config',route=>route.fulfill({json:{success:true,data:{mode:'password',employeeProvisioningConfigured:true}}}));
-    await supplier.goto('http://127.0.0.1:3099/login?returnTo=%2Fcreate');
+    await supplier.goto('http://127.0.0.1:3099/login?returnTo=%2Fform.html');
     await supplier.locator('#username').fill('supplier');
     await supplier.locator('#password').fill(TEST_PASSWORD);
     await supplier.locator('#loginForm button[type=submit]').click();
-    await supplier.waitForURL('**/create');
+    await supplier.waitForURL('**/form.html');
     await supplier.locator('#submitButton:not([disabled])').waitFor();
     assert.equal(await supplier.locator('#submitButton').textContent(),'Create PCN');
     assert.equal(await supplier.locator('#pcnCreateIntro').isVisible(),true,'New records show the creation introduction');

@@ -1238,6 +1238,8 @@
     els.submitButton.textContent = request.id ? "Update PCN" : "Create PCN";
     els.submitButton.classList.toggle("is-important-update", Boolean(request.id));
     els.statusBadge.textContent = isCreating ? "Not saved" : titleCase(request.status || "draft");
+    const testBadge = document.getElementById('documentTestBadge');
+    if (testBadge) testBadge.hidden = request.isTestDocument !== true;
     els.summaryList.innerHTML = "";
 
     rows.forEach(([term, description]) => {
@@ -1320,6 +1322,7 @@
           <span>${escapeHtml(record.riskLevel)}</span>
         </div>
         <div class="queue-meta">${escapeHtml(record.supplierName || "Unassigned supplier")}</div>
+        ${record.isTestDocument === true ? '<span class="queue-test-badge">TESTING DOC</span>' : ''}
         <div class="queue-meta">${escapeHtml(record.materialName || "No material entered")}</div>
       `;
       button.addEventListener("click", async () => {

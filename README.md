@@ -113,6 +113,14 @@ The server checks schema and master data before listening. Use `NODE_ENV=product
 
 `npm run start:windows` is an additional Windows credential launcher. Use `npm start` with the runtime's configurable credential location or environment configuration.
 
+### Guided PCN creation (local development)
+
+`/create` opens **Details → Changes → Documents → Review & Submit**, with shared readiness checks, inline errors, document upload cards and a compact bottom-right error checklist. Draft edits save to the current user's account and can be resumed on another computer. Opening the page does not create a record; submission is an explicit final action. Concurrent edits use rowversions and draft creation retries reuse the same identity.
+
+Blank documents, common change starters and safe copies of existing PCNs are available. **Test document** fills sample values and permanently marks the resulting document **TESTING DOC**, including Records, the official sheet, printed copies and workflow mail. Copying a test document retains its marker. Test documents use normal validation, attachment scanning and workflow rules; submitting one can queue ordinary workflow notifications.
+
+The official preview, printing and signing page remains `/form.html?id=PCN-YYYY-NNNN`. Required files count as ready only after a trusted clean scan. Receipt statuses distinguish queued notifications from workflow acceptance; acceptance does not confirm inbox delivery. No migration is required for this feature, and it has not been deployed. Run `npm run test:create` for isolated browser verification with synthetic records, file metadata and captured notification jobs.
+
 ## Windows internal pilot
 
 The employee-code pilot runs on `THCHA-WEBHOST01` at `http://172.30.77.137:8443`, using the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` Node service on loopback port 3000. Signed runtime `pcn-test-17-1` is installed with the Portal timeline and automatic browser updates. Exact-release Node PID 9280, NetworkService / WinSW ownership, exclusive loopback listener and public HTTP SQL readiness passed. The three timeline assets served over HTTP match the deployed source after line-ending normalization. Live acceptance passed five groups and fifteen read-only API responses, including an existing PCN's five events with actual GSC/TET signing labels/people, selection and desktop/mobile fit. Only login/logout writes were sent; no business writes, mail, directory/external attempts or unexpected errors occurred. One notification-health read was blocked locally; profile reads were configured to be locally stubbed but none occurred. The SYSTEM task is enabled / Ready / result 0. A repeat consumer returned `already_current` for runtime 17 with Node PID 9280 unchanged, and independent final checks confirmed HTTP/SQL readiness. Runtime 15's eight live automatic-update groups and unchanged-PID no-op remain historical evidence in [the Windows deployment runbook](plans/windows-test-deployment.md).
@@ -171,6 +179,7 @@ npm run test:auto-refresh
 npm run test:timeline
 npm run test:records-dashboard
 npm run test:developer-role
+npm run test:create
 ```
 
 The local Records dashboard source passed 682/682 unit/API tests with 91.92% line / 91.09% branch / 93.80% function coverage and 12 isolated dashboard browser groups using 17 fixture records, with no browser errors, external calls or forbidden writes. The standalone full application browser smoke suite and existing Records, timeline and automatic-update regressions also passed. Its implementation and browser evidence are recorded in [the dashboard plan](plans/records-dashboard.md). This is local verification, not a new deployment.

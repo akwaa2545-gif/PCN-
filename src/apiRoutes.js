@@ -67,6 +67,19 @@ async function handleApi(req, res, url, context, requestId) {
     return send({authenticated:false,passwordChanged:true});
   }
   const actor = `user:${user.id}`;
+  if (route === '/api/pcn-drafts') {
+    if (method === 'GET') return send(await context.creationService.list(user));
+    if (method === 'POST') return send(await context.creationService.create(await readJsonBody(req),actor,user),201);
+    throw new ApiError(405,'Method not allowed');
+  }
+  const draft = /^\/api\/pcn-drafts\/(PCN-\d{4}-\d{4})(?:\/(preflight))?$/.exec(route);
+  if (draft) {
+    const [,id,operation] = draft;
+    if (!operation && method === 'GET') return send(await context.creationService.get(id,user));
+    if (!operation && method === 'PATCH') return send(await context.creationService.update(id,await readJsonBody(req),actor,user));
+    if (operation === 'preflight' && method === 'POST') return send(await context.creationService.preflight(id,await readJsonBody(req),user));
+    throw new ApiError(405,'Method not allowed');
+  }
   const admin = () => { if (!hasRole(user,'admin')) throw new ApiError(403,'Administrator access required'); };
   if (route.startsWith('/api/admin/')) {
     admin();
@@ -149,6 +162,8 @@ async function handleApi(req, res, url, context, requestId) {
   if (!match) throw new ApiError(404,'API route not found');
   const [,code,subroute] = match;
   const record = await service.getById(code,user);
+  if (subroute === 'template' && method === 'GET') return send(await context.creationService.template(code,user));
+  if (subroute === 'receipt' && method === 'GET') return send(await context.creationService.receipt(code,url.searchParams.get('version'),user));
   if (subroute === 'checks' && method === 'GET') {
     const files = context.documents ? await context.documents.list(code) : [];
     return send(buildChecks(record,files));

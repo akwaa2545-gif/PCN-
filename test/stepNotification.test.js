@@ -16,6 +16,7 @@ function transaction(settings = configured, failInsert = false) {
     const inputs = {};
     return { input(name, type, value) { inputs[name] = value; return this; }, async query(query) {
       calls.push({ query, inputs });
+      if (query.includes('sp_getapplock') && inputs.resource === 'pcn:creation-global') return { recordset: [{ LockResult: 0 }] };
       if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
       if (query.includes('INSERT pcn.NotificationJobs')) {
         if (failInsert) throw new Error('outbox failed');

@@ -229,7 +229,9 @@
     const wrap = rows.closest?.('.admin-table-wrap'); if (wrap?.parentNode) wrap.parentNode.insertBefore(toolbar, wrap); else root.prepend?.(toolbar);
     if (wrap?.parentNode) wrap.after(footer); else root.append?.(footer);
     const dialog = node('dialog', undefined, 'rd-preview'); dialog.id = 'rdPreviewDialog'; dialog.setAttribute('aria-labelledby', 'rdPreviewTitle');
-    const header = node('div', undefined, 'rd-preview-header'); const title = node('h2'); title.id = 'rdPreviewTitle'; const closeButton = button('Close', closePreview); closeButton.setAttribute('aria-label', 'Close preview'); header.append(title); header.append(closeButton);
+    const header = node('div', undefined, 'rd-preview-header'); const title = node('h2'); title.id = 'rdPreviewTitle';
+    const testBadge = node('span', 'TESTING DOC', 'rd-test-badge'); testBadge.hidden = true;
+    const closeButton = button('Close', closePreview); closeButton.setAttribute('aria-label', 'Close preview'); header.append(title); header.append(testBadge); header.append(closeButton);
     const tabs = node('div', undefined, 'rd-preview-tabs'); tabs.setAttribute('role', 'tablist');
     const content = node('div', undefined, 'rd-preview-content'); content.setAttribute('role', 'tabpanel'); content.id = 'rdPreviewContent'; content.tabIndex = 0;
     const tabButtons = {};
@@ -290,7 +292,7 @@
       row.setAttribute('aria-selected', String(selected));
       state.preferences.columns.forEach(key => {
         const cell = node('td'); cell.dataset.column = key;
-        if (key === 'id') { const link = node('a', record.id); link.dataset.rdFocus = `code:${record.id}`; link.href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`; cell.append(link); }
+        if (key === 'id') { const link = node('a', record.id); link.dataset.rdFocus = `code:${record.id}`; link.href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`; cell.append(link); if (record.isTestDocument === true) cell.append(node('span', 'TESTING DOC', 'rd-test-badge')); }
         else if (key === 'status') cell.append(node('span', label(record.status), `rd-badge rd-status-${String(record.status || '').replace(/[^a-z_]/g, '')}`));
         else if (key === 'progress') renderProgress(cell, record);
         else if (key === 'next') { cell.append(node('strong', action(record).label || 'Not available')); cell.append(node('small', personNames(record) || (terminal(record.status) ? 'Review finished' : 'Assignee not available'))); }
@@ -328,6 +330,7 @@
     async function openPreview(record, opener) {
       if (!state.accessible || options.isBusy?.()) return;
       options.onOpen?.(); preview = { record, tab: 'overview', request: preview.request + 1, cache: {}, opener }; title.textContent = `PCN preview · ${record.id}`; content.replaceChildren();
+      testBadge.hidden = record.isTestDocument !== true;
       if (!dialog.open) dialog.showModal(); closeButton.focus(); await loadPreview();
     }
 
@@ -354,6 +357,7 @@
       content.replaceChildren();
       if (tab === 'overview') {
         const [record, fetchedProgress] = data; if (!record || !fetchedProgress) throw new Error('The overview returned an invalid response.');
+        testBadge.hidden = record.isTestDocument !== true;
         const overview = node('dl', undefined, 'rd-overview'); const consistent = currentSummary(record, summary); const progress = currentProgress(record, summary);
         [['Supplier', record.supplierName], ['Material', record.materialName], ['Status', label(record.status)], ['Risk', record.riskLevel], ['Current stage', progress?.currentStepTitle || 'Not available'], ['Next responsible', columnValue(consistent, 'next')], ['Documents', documentLabel(consistent)], ['Pending time', pendingLabel(consistent)], ['Reason for change', record.reason], ['Target start', record.desiredStart]].forEach(([key, value]) => { overview.append(node('dt', key)); overview.append(node('dd', text(value))); }); content.append(overview);
         if (!progress) content.append(node('p', 'Refresh the records list to reload current progress and responsibility.', 'rd-preview-message'));
@@ -383,7 +387,7 @@
 
     function finishPreview() {
       if (!preview.record) return;
-      const { opener } = preview; preview = { record: null, tab: 'overview', request: preview.request + 1, cache: {}, opener: null }; content.replaceChildren(); title.textContent = ''; options.onClose?.();
+      const { opener } = preview; preview = { record: null, tab: 'overview', request: preview.request + 1, cache: {}, opener: null }; content.replaceChildren(); title.textContent = ''; testBadge.hidden = true; options.onClose?.();
       (opener?.isConnected ? opener : search).focus?.({ preventScroll: true });
     }
     function closePreview() { if (dialog.open) dialog.close(); finishPreview(); }

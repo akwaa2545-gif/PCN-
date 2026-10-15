@@ -37,6 +37,7 @@ function buildNotificationMessage(record, notification, actionRequired) {
   const summary = notification.updateSummary === undefined || notification.updateSummary === null || notification.updateSummary === ''
     ? '' : escapeHtml(notification.updateSummary);
   const updateSummary = summary ? `<tr><td style="padding:0 18px 14px;color:#334155;font-size:12px;line-height:1.5;"><strong>Update Summary</strong><div style="margin-top:5px;">${summary}</div></td></tr>` : '';
+  const testDocument = record.isTestDocument === true ? '<tr><td style="padding:12px 18px;background:#fff0c2;color:#743a00;border-bottom:2px solid #bd6d00;font-size:16px;font-weight:800;letter-spacing:.06em;">TESTING DOC</td></tr>' : '';
   const firstLabel = actionRequired ? 'Current Status / Completed Action' : 'Current Status';
   const firstValue = actionRequired ? notification.completedGroup : record.status;
   const secondLabel = actionRequired ? 'Next To Check' : 'Notification';
@@ -53,6 +54,7 @@ function buildNotificationMessage(record, notification, actionRequired) {
       <tr>
         <td style="padding:18px;">
           <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#ffffff;border:1px solid #cbd5e1;">
+            ${testDocument}
             <tr>
               <td style="padding:14px 18px;background:#001a7a;color:#ffffff;">
                 <div style="font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">Supplier PCN Workflow</div>
