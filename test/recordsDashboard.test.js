@@ -90,11 +90,11 @@ test('preview does not combine a newer record with stale assignee or readiness m
 
 function controllerPage(fetch, options = {}) {
   const all = [];
-  const document = { activeElement: null, addEventListener() {} };
+  const document = { activeElement: null, events: {}, addEventListener(name, listener) { this.events[name] = listener; }, removeEventListener(name) { delete this.events[name]; } };
   const createElement = tag => {
     const element = { tag, children: [], events: {}, attributes: {}, dataset: {}, value: '', textContent: '', open: false, isConnected: true,
-      append(...children) { this.children.push(...children); }, prepend(child) { this.children.unshift(child); },
-      replaceChildren(...children) { this.children = children; }, setAttribute(key, value) { this.attributes[key] = value; },
+      append(...children) { children.forEach(child => { child.parentElement = this; }); this.children.push(...children); }, prepend(child) { child.parentElement = this; this.children.unshift(child); },
+      replaceChildren(...children) { children.forEach(child => { child.parentElement = this; }); this.children = children; }, getAttribute(key) { return this.attributes[key]; }, contains(target) { return this === target || this.querySelectorAll().includes(target); }, closest(selector) { return selector.split(',').includes(this.tag) ? this : this.parentElement?.closest(selector); }, setAttribute(key, value) { this.attributes[key] = value; },
       addEventListener(event, listener) { this.events[event] = [...(this.events[event] || []), listener]; },
       async emit(event, value = {}) { for (const listener of this.events[event] || []) await listener({target:this, preventDefault(){}, ...value}); },
       querySelectorAll() { return this.children.flatMap(child => [child, ...child.querySelectorAll()]); },
@@ -109,7 +109,7 @@ function controllerPage(fetch, options = {}) {
   const search = createElement('input'); root.append(search);
   const count = createElement('span'); const message = createElement('p'); let accessLost = 0;
   const controller = window.PCN_RECORDS_DASHBOARD.create({root,rows,search,count,message,user:{id:'viewer'},fetch,onAccessLost(){accessLost++;}, ...options});
-  return { controller, document, rows, root, count, message, all, find:id => all.find(item => item.id === id),
+  return { controller, document, rows, root, count, message, all, createElement, find:id => all.find(item => item.id === id),
     button: (text, inside = root) => inside.querySelectorAll().find(item => item.tag === 'button' && item.textContent === text),
     lost:()=>accessLost };
 }
@@ -119,11 +119,11 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 test('shared controller preserves focus after changed records and pauses polling while preview is open', async () => {
   const page = controllerPage(async url => url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1',version:1});
   page.controller.setRecords([{id:'PCN-1',version:1}]);
-  const preview = page.button('Preview'); preview.focus();
+  const preview = page.button('Quick view'); preview.focus();
   page.controller.setRecords([{id:'PCN-1',version:1,supplierName:'Changed'}]);
   assert.equal(page.document.activeElement.dataset.rdFocus, 'preview:PCN-1');
   assert.notEqual(page.document.activeElement, preview);
-  await page.button('Preview').emit('click');
+  await page.button('Quick view').emit('click');
   assert.equal(page.controller.canRefresh(),false);
   await page.find('rdPreviewDialog').emit('cancel');
   assert.equal(page.controller.canRefresh(),true);
@@ -136,7 +136,7 @@ test('malformed timeline response is not cached and Retry issues a new authorize
     if(url.endsWith('/revisions')) return ++revisionCalls === 1 ? {items:null} : {items:[{revision:1,actor:'Actual signer'}]};
     return url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1'};
   });
-  page.controller.setRecords([{id:'PCN-1'}]); await page.button('Preview').emit('click');
+  page.controller.setRecords([{id:'PCN-1'}]); await page.button('Quick view').emit('click');
   await page.find('rdPreviewTab-timeline').emit('click'); await settle();
   const content = page.find('rdPreviewContent');
   assert.match(content.children[0].textContent,/invalid response/);
@@ -148,7 +148,7 @@ test('permission loss in preview clears record options and stops future preview 
   let calls = 0;
   const page = controllerPage(async()=>{calls++;throw Object.assign(new Error('Forbidden'),{status:403});});
   page.controller.setRecords([{id:'PCN-1',supplierName:'Protected supplier',status:'submitted'}]);
-  const preview = page.button('Preview'); await preview.emit('click');
+  const preview = page.button('Quick view'); await preview.emit('click');
   assert.equal(page.rows.children.length,0); assert.equal(page.count.textContent,'0');
   assert.equal(page.find('rdFilter-supplier').children.length,1);
   assert.equal(page.controller.canRefresh(),false); assert.equal(page.find('rdPreviewDialog').open,false); assert.equal(page.lost(),1);
@@ -160,7 +160,7 @@ test('a closed or superseded preview cannot render late responses', async () => 
   const late = new Promise(resolve=>{resolveRead=resolve;});
   const page = controllerPage(()=>late);
   page.controller.setRecords([{id:'PCN-1'}]);
-  const opened = page.button('Preview').emit('click');
+  const opened = page.button('Quick view').emit('click');
   await page.find('rdPreviewDialog').emit('cancel');
   resolveRead({id:'PCN-1',supplierName:'Late private data',steps:[]}); await opened;
   assert.equal(page.find('rdPreviewContent').children.length,0);
@@ -178,7 +178,7 @@ test('Portal selection retains its existing highlight and accessible selection s
 test('overview never mixes a fresh record with independently fetched old progress', async () => {
   const page = controllerPage(async url => url.endsWith('/progress') ? {status:'submitted',currentStepTitle:'Old GSC review',steps:[{title:'Old pending stage',state:'active'}]} : {id:'PCN-1',version:2,status:'approved'});
   page.controller.setRecords([{id:'PCN-1',version:1,status:'submitted',dashboard:{progress:{status:'submitted',currentStepTitle:'Old GSC review'},action:{label:'Old pending approver'}}}]);
-  await page.button('Preview').emit('click');
+  await page.button('Quick view').emit('click');
   const content = page.find('rdPreviewContent'); const text = content.querySelectorAll().map(item=>item.textContent).join(' ');
   assert.match(text,/Approved/); assert.match(text,/Refresh the records list/);
   assert.doesNotMatch(text,/Old GSC review|Old pending stage|Old pending approver/);
@@ -195,7 +195,7 @@ test('Rejected displays its actual signing count without a false 100 percent com
   page.controller.setRecords([record]);
   assert.equal(page.rows.querySelectorAll().filter(item=>item.tag==='progress').length,0);
   assert.ok(page.rows.querySelectorAll().some(item=>item.textContent==='2/18 signing steps'));
-  await page.button('Preview').emit('click');
+  await page.button('Quick view').emit('click');
   const content = page.find('rdPreviewContent'); const displayed=content.querySelectorAll().map(item=>item.textContent).join(' ');
   assert.match(displayed,/Rejected/); assert.match(displayed,/Review ended with rejection/);
   assert.doesNotMatch(displayed,/Stage never signed|100%/);
@@ -203,4 +203,58 @@ test('Rejected displays its actual signing count without a false 100 percent com
   const approved = {...record,status:'approved',dashboard:{progress:{...progress,status:'approved'}}};
   const normal = controllerPage(async()=>({})); normal.controller.setRecords([approved]);
   assert.equal(normal.rows.querySelectorAll().filter(item=>item.tag==='progress').length,1);
+});
+
+
+test('record opening uses native links with the exact authorized route and keeps testing identity separate', () => {
+  const page = controllerPage(async () => ({}), { codeHref: record => `/view/${record.id}?readonly=1` });
+  const record = { id: 'PCN-2026-0001', isTestDocument: true };
+  page.controller.setRecords([record]);
+  const links = page.rows.querySelectorAll().filter(item => item.tag === 'a');
+  assert.equal(links.length, 2);
+  assert.equal(links[0].textContent, record.id);
+  assert.equal(links[1].textContent, 'Open PCN');
+  for (const link of links) {
+    assert.equal(link.href, '/view/PCN-2026-0001?readonly=1');
+    assert.equal(link.target, undefined);
+    assert.equal(link.events.click, undefined, 'native navigation supports modifiers and middle click');
+  }
+  assert.equal(links[1].dataset.rdFocus, `open:${record.id}`);
+  links[1].focus();
+  page.controller.setRecords([{ ...record, supplierName: 'Updated' }]);
+  assert.equal(page.document.activeElement.dataset.rdFocus, `open:${record.id}`);
+  const identity = page.rows.querySelectorAll().find(item => item.className === 'rd-code-cell');
+  assert.equal(identity.children[0].textContent, record.id);
+  assert.equal(identity.children[1].textContent, 'TESTING DOC');
+});
+
+test('overflow actions pause refresh, close safely and never select their row', async () => {
+  let removed = false; let selected = 0; let invalidations = 0; let page;
+  page = controllerPage(async () => ({}), { onRowSelect() { selected++; }, onOpen() { invalidations++; }, actions() {
+    const remove = page.createElement('button'); remove.textContent = 'Remove'; remove.dataset.rdOverflow = 'true';
+    remove.addEventListener('click', () => { removed = true; }); return [remove];
+  } });
+  page.controller.setRecords([{ id: 'PCN-1' }]);
+  const more = page.rows.querySelectorAll().find(item => item.tag === 'details');
+  assert.ok(more, 'destructive actions live inside a disclosure');
+  const summary = more.children[0];
+  assert.equal(summary.textContent, 'More');
+  assert.equal(summary.attributes['aria-label'], 'More actions for PCN-1');
+  await summary.emit('click'); more.open = true; await more.emit('toggle');
+  assert.ok(invalidations > 0); assert.equal(page.controller.canRefresh(), false);
+  await page.rows.children[0].emit('click', { target: summary }); assert.equal(selected, 0);
+  await more.emit('keydown', { key: 'Escape', stopPropagation() {} });
+  assert.equal(more.open, false); assert.equal(page.document.activeElement, summary);
+  more.open = true;
+  await more.emit('focusout', { relatedTarget: page.root });
+  assert.equal(more.open, false);
+  more.open = true;
+  page.document.events.click({ target: page.root });
+  assert.equal(more.open, false);
+  more.open = true;
+  const remove = page.button('Remove');
+  await more.emit('click', { target: remove });
+  await remove.emit('click');
+  assert.equal(more.open, false); assert.equal(removed, true);
+  assert.equal(page.controller.canRefresh(), true);
 });

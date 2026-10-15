@@ -22,7 +22,7 @@ function portal(fetch) {
     window.TEST = { state, els, initializeRecordsDashboard, loadPcns, refreshQuietly, canAutoRefresh, loadDetail: actualLoadDetail };
   })();`);
   vm.runInNewContext(source, { window, document: { addEventListener() {}, querySelector: () => null, activeElement: null,
-    createElement() { return { events: {}, attributes: {}, addEventListener(name, handler) { this.events[name] = handler; }, setAttribute(name, value) { this.attributes[name] = value; } }; } } });
+    createElement() { return { events: {}, attributes: {}, dataset: {}, addEventListener(name, handler) { this.events[name] = handler; }, setAttribute(name, value) { this.attributes[name] = value; } }; } } });
   const { state, els } = window.TEST;
   state.user = { id: 'reviewer', roles: ['qa'] }; state.isLoading = false;
   for (const id of ['pcnAdminView', 'adminPcnRows', 'adminSearchInput', 'adminStatusFilter', 'adminRiskFilter', 'adminCount', 'adminMessage']) els[id] = { id };
@@ -48,12 +48,15 @@ test('Portal dashboard uses batched authorized overview and preserves row select
   const actions = page.window.options.actions(items[0]);
   assert.equal(actions.length, 1);
   assert.match(actions[0].className, /admin-view-button/);
+  assert.equal(actions[0].textContent, 'History');
+  assert.equal(actions[0].attributes['aria-label'], 'History PCN-1');
   actions[0].events.click();
   assert.equal(page.window.timelineAction.record, items[0]);
   assert.equal(page.window.timelineAction.opener, actions[0]);
   page.state.user = { id: 'admin', roles: ['admin'] };
   const adminActions = page.window.options.actions(items[0]);
   assert.equal(adminActions.length, 2);
+  assert.equal(adminActions[1].dataset.rdOverflow, 'true');
   adminActions[1].events.click(); assert.equal(page.window.removeAction, items[0]);
 });
 
