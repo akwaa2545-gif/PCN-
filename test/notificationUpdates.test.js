@@ -5,7 +5,7 @@ const { NotificationService } = require('../src/notificationService');
 const { NotificationWorker } = require('../src/notificationWorker');
 const { SqlPcnRepository } = require('../src/sqlPcnRepository');
 const record = { id: 'PCN-2026-0001', status: 'gsc_review', ownerUserId: 'owner', internalReview: {} };
-const user = { id: 'admin', identityProvider: 'employee-code', isActive: true, roles: ['admin'], email: 'Admin@example.test',
+const user = { id: 'admin', identityProvider: 'employee-code', isActive: true, roles: ['admin'], department: 'gscTet', email: 'Admin@example.test',
   mailVerifiedAt: '2026-10-07', mailDirectoryId: 'ad1', mailProfile: { id: 'ad1', email: 'admin@example.test' } };
 
 test('meaningful updates ignore server metadata and drafts but include domain changes, resets and comments', () => {
@@ -16,11 +16,11 @@ test('meaningful updates ignore server metadata and drafts but include domain ch
   assert.deepEqual(meaningfulUpdate(null, { ...record, status: 'submitted' }), ['PCN submitted']);
 });
 
-test('general audience includes no-step admin and only active verified users with record access', () => {
-  assert.equal(notificationRecipient(user, record).email, user.email);
+test('general audience includes same-department no-step admin and only active verified users with record access', () => {
+  assert.equal(notificationRecipient(user, record, ['gscTet']).email, user.email);
   for (const patch of [{ isActive: false }, { identityProvider: 'retired' }, { mailVerifiedAt: null },
     { mailProfile: { id: 'different', email: user.email } }, { roles: ['supplier'] }]) {
-    assert.equal(notificationRecipient({ ...user, ...patch }, record), null);
+    assert.equal(notificationRecipient({ ...user, ...patch }, record, ['gscTet']), null);
   }
   assert(notificationRecipient({ ...user, id: 'owner', roles: ['supplier'] }, record));
 });
@@ -36,7 +36,7 @@ test('recipient batching deduplicates and sorts without dropping overflow, respe
 });
 
 test('pending update audience drops revoked, changed identities and lost access without adding new users', () => {
-  const payload = { to: user.email, updateSnapshot: { pcnId: record.id, recipients: [{ userId: user.id, email: user.email, directoryId: user.mailDirectoryId }] } };
+  const payload = { to: user.email, updateSnapshot: { pcnId: record.id, audiencePolicyVersion: 1, departmentKeys: ['gscTet'], recipients: [{ userId: user.id, email: user.email, directoryId: user.mailDirectoryId, department: user.department }] } };
   assert.equal(filterPendingUpdates(payload, [user], record).to, user.email);
   for (const entries of [[], [{ ...user, isActive: false }], [{ ...user, roles: ['supplier'] }], [{ ...user, mailDirectoryId: 'changed' }],
     [{ ...user, email: 'new@example.test', mailProfile: { id: user.mailDirectoryId, email: 'new@example.test' } }]]) {
@@ -190,7 +190,7 @@ test('all update batches are deterministic and inserted under saved version with
 
 test('worker revalidates current access and exact email identity before claiming update; sends only four fields', async () => {
   const payload = { to: user.email, subject: 'PCN updated', message: 'safe', senderName: 'PCN', notificationKind: 'pcn_update',
-    updateSnapshot: { pcnId: base.id, recipients: [{ userId: user.id, email: user.email, directoryId: user.mailDirectoryId }] } };
+    updateSnapshot: { pcnId: base.id, audiencePolicyVersion: 1, departmentKeys: ['gscTet'], recipients: [{ userId: user.id, email: user.email, directoryId: user.mailDirectoryId, department: user.department }] } };
   for (const [users, current, expected] of [[[user], base, 'sent'], [[{ ...user, isActive: false }], base, 'cancelled'],
     [[{ ...user, roles: ['supplier'] }], base, 'cancelled'], [[user], null, 'cancelled'],
     [[{ ...user, mailDirectoryId: 'new' }], base, 'cancelled']]) {
@@ -211,8 +211,8 @@ test('worker sends valid snapshot recipients while dropping revoked contacts and
     mailProfile: { id: user.mailDirectoryId, email: 'revoked@example.test' } };
   const added = { ...user, id: 'new-user', email: 'new@example.test', mailProfile: { id: user.mailDirectoryId, email: 'new@example.test' } };
   const payload = { to: `${user.email}; ${revoked.email}`, subject: 'PCN updated', message: 'safe', senderName: 'PCN',
-    notificationKind: 'pcn_update', updateSnapshot: { pcnId: base.id, recipients: [user, revoked].map(entry => ({
-      userId: entry.id, email: entry.email, directoryId: entry.mailDirectoryId
+    notificationKind: 'pcn_update', updateSnapshot: { pcnId: base.id, audiencePolicyVersion: 1, departmentKeys: ['gscTet'], recipients: [user, revoked].map(entry => ({
+      userId: entry.id, email: entry.email, directoryId: entry.mailDirectoryId, department: entry.department
     })) } };
   const tx = transaction({ users: [user, { ...revoked, isActive: false }, added], current: base, payload });
   let delivered;

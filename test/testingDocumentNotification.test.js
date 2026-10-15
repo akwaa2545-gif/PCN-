@@ -5,7 +5,7 @@ const { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage } = 
 
 const record = { id: 'PCN-2026-0001', version: '0000000000000001', status: 'submitted', riskLevel: 'RL0',
   mailRoutingPolicyVersion: 2, supplierName: 'Supplier', materialName: 'Material', internalReview: {} };
-const userRow = { Id: 'admin', EmployeeCode: '123', IsActive: true, IdentityProvider: 'employee-code', RoleName: 'admin',
+const userRow = { Id: 'admin', EmployeeCode: '123', IsActive: true, IdentityProvider: 'employee-code', RoleName: 'admin', DepartmentKey: 'gscTet',
   Email: 'admin@example.test', MailDirectoryId: 'directory', MailVerifiedAt: '2026-10-01',
   MailProfileJson: JSON.stringify({ id: 'directory', email: 'admin@example.test' }) };
 function transaction() {
