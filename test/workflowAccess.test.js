@@ -5,6 +5,26 @@ const { assertRecordAccess, assertReviewUpdate, assertWritablePayload, assertSta
 const supplier = { id: 4, roles: ['Supplier'] };
 const qa = { id: 5, roles: ['QA'], department: 'qaTet', signingStep: 'checked' };
 
+test('new terminal transitions require the whole route even when historical final signatures are complete', () => {
+  const actor = { ...qa, signingStep: 'approved' };
+  const done = { prepared: true, checked: true, approved: true };
+  const review = { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { need: true, gsc: done, qa: done }, qateFinal: { signoff: done, approve: true } };
+  for (const status of ['approved', 'rejected', 'closed']) {
+    const judgment = { ...review.qateFinal, approve: status !== 'rejected', reject: status === 'rejected' };
+    for (const partial of [
+      { ...review, signoff: { ...review.signoff, gscTet: { approved: true } } },
+      { ...review, signoff: { gscTet: done, qaTet: done } },
+      { ...review, tapbu: { need: true, gsc: done, qa: { prepared: true } } }
+    ]) {
+      const historical = { ...partial, qateFinal: judgment };
+      assert.doesNotThrow(() => assertReviewUpdate(historical, structuredClone(historical), { roles: ['admin'] }, 'RL2'));
+      assert.throws(() => assertStatusPermission({ status: 'qualification', riskLevel: 'RL2', internalReview: historical }, status, actor), { statusCode: 400 });
+    }
+    assert.doesNotThrow(() => assertStatusPermission({ status: 'qualification', riskLevel: 'RL2', internalReview: { ...review, qateFinal: judgment } }, status, actor));
+  }
+  assert.doesNotThrow(() => assertStatusPermission({ status: 'approved', riskLevel: 'RL2', internalReview: { qateFinal: review.qateFinal } }, 'approved', actor));
+});
+
 test('new signatures require all earlier steps and all preceding departments', () => {
   const admin = { roles: ['admin'] };
   const done = { prepared: true, checked: true, approved: true };
@@ -60,7 +80,7 @@ test('explicit TaPBU no-need permits final QA while an undecided requirement rem
   const done={approved:true,checked:true,prepared:true};
   const admin={id:'admin',roles:['admin'],isActive:true};
   const before={signoff:{gscTet:done,prodEngTet:done,qaTet:done},tapbu:{need:false,noNeed:true}};
-  const after={...before,qateFinal:{signoff:{approved:true}}};
+  const after={...before,qateFinal:{signoff:{prepared:true}}};
   assert.doesNotThrow(()=>assertReviewUpdate(before,after,admin,'RL2'));
   assert.throws(()=>assertReviewUpdate({...before,tapbu:{need:false,noNeed:false}}, {...after,tapbu:{need:false,noNeed:false}},admin,'RL2'),/preceding approval group/);
 });
@@ -84,8 +104,8 @@ test('QA cannot sign another department and cannot skip signoff prerequisites', 
 });
 test('complete prior groups allow ordered review and RL0 forbids TaPBU approval', () => {
   const done = { approved: true, checked: true, prepared: true };
-  const before = { signoff: { gscTet: done, prodEngTet: done, qaTet: { approved: true } } };
-  const after = { signoff: { gscTet: done, prodEngTet: done, qaTet: { approved: true, checked: true } } };
+  const before = { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true } } };
+  const after = { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true, checked: true } } };
   assert.doesNotThrow(() => assertReviewUpdate(before, after, qa, 'RL0'));
   assert.throws(() => assertReviewUpdate({}, { tapbu: { need: true } }, { roles: ['Admin'] }, 'RL0'), { statusCode: 400 });
 });
@@ -95,7 +115,7 @@ test('supplier cannot advance an internal workflow stage or edit a locked submis
 });
 
 test('closure requires a recorded final judgment as well as signoffs', () => {
-  const qaFinal = { ...qa, signingStep: 'prepared' };
+  const qaFinal = { ...qa, signingStep: 'approved' };
   const record={status:'qa_review',internalReview:{qateFinal:{signoff:{approved:true,checked:true,prepared:true}}}};
   assert.throws(()=>assertStatusPermission(record,'closed',qaFinal),{statusCode:400});
   assert.doesNotThrow(()=>assertStatusPermission({...record,internalReview:{qateFinal:{...record.internalReview.qateFinal,approve:true}}},'closed',qaFinal));
@@ -109,14 +129,15 @@ test('reviewers cannot change signature flags or metadata without the exact assi
   }
   const before = { signoff: { gscTet: { approved: true } } };
   assert.throws(() => assertReviewUpdate(before, { signoff: { gscTet: { approved: false } } }, { roles: ['Reviewer'] }, 'RL0'), { statusCode: 403 });
-  assert.doesNotThrow(() => assertReviewUpdate({}, before, { roles: ['gsc'], department: 'gscTet', signingStep: 'approved' }, 'RL0'));
+  const prerequisites = { signoff: { gscTet: { prepared: true, checked: true } } };
+  assert.doesNotThrow(() => assertReviewUpdate(prerequisites, { signoff: { gscTet: { ...prerequisites.signoff.gscTet, approved: true } } }, { roles: ['gsc'], department: 'gscTet', signingStep: 'approved' }, 'RL0'));
 });
 
 test('truthy signature strings cannot satisfy signing prerequisites', () => {
   assert.throws(() => assertReviewUpdate({}, { signoff: { gscTet: { approved: 'true' } } }, { roles: ['gsc'], department: 'gscTet', signingStep: 'approved' }, 'RL0'), { statusCode: 400 });
 });
 
-test('administrators can record final judgment while non-admins require QA/TET Prepared', () => {
+test('administrators can record final judgment while non-admins require QA/TET Approved', () => {
   assert.doesNotThrow(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, { roles: ['Admin'] }, 'RL0'));
   assert.throws(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, qa, 'RL0'), { statusCode: 403 });
 });
@@ -149,7 +170,7 @@ test('replacing an ancestor cannot remove signatures without permission', () => 
 
 test('administrator override preserves signing order, RL0 restrictions and final status prerequisites', () => {
   const admin = { roles: ['admin'], department: 'it', signingStep: null };
-  assert.doesNotThrow(() => assertReviewUpdate({}, { signoff: { gscTet: { approved: true } } }, admin, 'RL0'));
+  assert.doesNotThrow(() => assertReviewUpdate({}, { signoff: { gscTet: { prepared: true } } }, admin, 'RL0'));
   assert.throws(() => assertReviewUpdate({}, { signoff: { gscTet: { checked: true } } }, admin, 'RL0'), { statusCode: 400 });
   assert.throws(() => assertReviewUpdate({}, { signoff: { prodEngTet: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });
   assert.throws(() => assertReviewUpdate({}, { tapbu: { gsc: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });

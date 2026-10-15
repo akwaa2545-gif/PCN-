@@ -2,6 +2,31 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startApi, validPayload, unsignedPayload, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
 
+test('HTTP rejects new terminal status when legacy final signatures hide incomplete preceding groups', async t => {
+  const api = await startApi(t);
+  const admin = await api.login('admin');
+  const done = { prepared: true, checked: true, approved: true };
+  for (const terminal of ['approved', 'rejected', 'closed']) {
+    const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: { ...unsignedPayload, internalReview: {} } });
+    assert.equal(created.status, 201);
+    let record = await api.repository.seedHistoricalReview(created.body.data.id, {
+      signoff: { gscTet: { approved: true, approvedName: 'Historical Approver' }, qaTet: done },
+      qateFinal: { signoff: done, approve: terminal !== 'rejected', reject: terminal === 'rejected' }
+    });
+    for (const status of ['gsc_review', 'technical_review', 'qa_review', 'tapbu_review', 'qualification']) {
+      const response = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, status } });
+      assert.equal(response.status, 200, response.text);
+      record = response.body.data;
+    }
+    const response = await api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin, body: { version: record.version, status: terminal } });
+    assert.equal(response.status, 400, `cannot ${terminal} with incomplete earlier signatures`);
+    const persisted = await api.repository.findById(record.id);
+    assert.equal(persisted.status, 'qualification');
+    assert.equal(persisted.version, record.version);
+    assert.equal(persisted.internalReview.signoff.gscTet.approvedName, 'Historical Approver');
+  }
+});
+
 test('historical Approved identity survives saving and Prepared then Checked backfill through HTTP', async t => {
   const api = await startApi(t);
   const admin = await api.login('admin');
@@ -46,6 +71,7 @@ test('reviewer and department role alone cannot sign, and administrators cannot 
 test('exact department signer records server identity and cannot alter other signatures or metadata', async t => {
   const api = await startApi(t, { authService: fakeAuthService({ additionalUsers: [
     { username: 'gsc-approved', displayName: 'Verified Approver', roles: ['gsc'], department: 'gscTet', signingStep: 'approved' },
+    { username: 'gsc-prepared', displayName: 'Verified Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' },
     { username: 'gsc-checked', displayName: 'Verified Checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' },
     { username: 'reviewer', roles: ['reviewer'] },
     { username: 'qa-approved', roles: ['qa'], department: 'qaTet', signingStep: 'approved' }
@@ -55,26 +81,37 @@ test('exact department signer records server identity and cannot alter other sig
   assert.equal(created.status, 201);
   let record = created.body.data;
   const approver = await api.login('gsc-approved');
+  const preparer = await api.login('gsc-prepared');
   const checker = await api.login('gsc-checked');
   const reviewer = await api.login('reviewer');
   const qa = await api.login('qa-approved');
   const patch = (session, signoff) => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
     body: { version: record.version, internalReview: { signoff } } });
   assert.equal((await patch(checker, { gscTet: { checked: true } })).status, 400, 'prerequisite still required');
+  assert.equal((await patch(approver, { gscTet: { approved: true } })).status, 400, 'approval requires preparation and checking');
   assert.equal((await patch(qa, { gscTet: { approved: true } })).status, 403, 'other department denied');
-  const signed = await patch(approver, { gscTet: { approved: true, approvedName: 'Forged Name', approvedDate: '1999-01-01' } });
+  const signed = await patch(preparer, { gscTet: { prepared: true, preparedName: 'Forged Name', preparedDate: '1999-01-01' } });
   assert.equal(signed.status, 200);
   record = signed.body.data;
-  assert.equal(record.internalReview.signoff.gscTet.approvedName, 'Verified Approver');
-  assert.equal(record.internalReview.signoff.gscTet.approvedDate, record.updatedAt.slice(0, 10));
+  assert.equal(record.internalReview.signoff.gscTet.preparedName, 'Verified Preparer');
+  assert.equal(record.internalReview.signoff.gscTet.preparedDate, record.updatedAt.slice(0, 10));
   assert.equal((await patch(approver, { gscTet: { checked: true } })).status, 403, 'other step denied');
-  assert.equal((await patch(approver, { gscTet: { approvedName: 'Rewrite Name' } })).status, 400, 'signed identity immutable');
-  assert.equal((await patch(reviewer, { gscTet: { approved: false } })).status, 403, 'reviewer cannot clear signer');
+  assert.equal((await patch(preparer, { gscTet: { preparedName: 'Rewrite Name' } })).status, 400, 'signed identity immutable');
+  assert.equal((await patch(reviewer, { gscTet: { prepared: false } })).status, 403, 'reviewer cannot clear signer');
   const checked = await patch(checker, { gscTet: { checked: true } });
   assert.equal(checked.status, 200);
   record = checked.body.data;
   assert.equal(record.internalReview.signoff.gscTet.checkedName, 'Verified Checker');
+  assert.equal(record.internalReview.signoff.gscTet.preparedName, 'Verified Preparer');
+  const approved = await patch(approver, { gscTet: { approved: true, approvedName: 'Forged Name', approvedDate: '1999-01-01' } });
+  assert.equal(approved.status, 200);
+  record = approved.body.data;
   assert.equal(record.internalReview.signoff.gscTet.approvedName, 'Verified Approver');
+  assert.equal(record.internalReview.signoff.gscTet.approvedDate, record.updatedAt.slice(0, 10));
+  assert.equal((await patch(checker, { gscTet: { checked: false } })).status, 400, 'cannot clear a prerequisite below approval');
+  const unapproved = await patch(approver, { gscTet: { approved: false } });
+  assert.equal(unapproved.status, 200);
+  record = unapproved.body.data;
   const cleared = await patch(checker, { gscTet: { checked: false } });
   assert.equal(cleared.status, 200);
   assert.equal(cleared.body.data.internalReview.signoff.gscTet.checkedName, '');
@@ -99,7 +136,7 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
   assert.equal((await patch({ signoff: { gscTet: { approved: true } } }, disabled)).status, 403, 'disabled administrator cannot sign');
   assert.equal((await api.repository.findById(record.id)).version, record.version);
 
-  for (const action of ['approved', 'checked', 'prepared']) {
+  for (const action of ['prepared', 'checked', 'approved']) {
     const response = await patch({ supplierSignoff: { [action]: { checked: true, name: 'Forged Supplier' } } });
     assert.equal(response.status, 200, `supplier ${action}`);
     record = response.body.data;
@@ -114,7 +151,7 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
     ['tapbu', 'gsc'], ['tapbu', 'qa'], ['qateFinal', 'signoff']
   ];
   for (const [section, group] of stages) {
-    for (const action of ['approved', 'checked', 'prepared']) {
+    for (const action of ['prepared', 'checked', 'approved']) {
       const response = await patch({ [section]: { [group]: { [action]: true,
         [`${action}Name`]: 'Forged Name', [`${action}Date`]: '1900-01-01' } } });
       assert.equal(response.status, 200, `${section}.${group}.${action}: ${response.text}`);
@@ -135,7 +172,7 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
   record = judgment.body.data;
   assert.equal(record.internalReview.qateFinal.approve, true);
   for (const [section, group] of stages) {
-    for (const action of ['approved', 'checked', 'prepared']) {
+    for (const action of ['prepared', 'checked', 'approved']) {
       assert.equal(record.internalReview[section][group][action], true);
       assert.equal(record.internalReview[section][group][`${action}Name`], displayName);
     }
