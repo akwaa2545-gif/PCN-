@@ -13,7 +13,7 @@ function portal(options = {}) {
   const profiles = [];
   const nodes = new Map();
   const records = [{ id: 'PCN-2026-0001', supplierName: 'Assigned requester', status: 'draft' }];
-  const user = { id: 'portal-user', roles, mustChangePassword };
+  const user = { id: 'portal-user', roles, mustChangePassword, isActive: true, ...options.user };
   const element = (id) => {
     if (!nodes.has(id)) nodes.set(id, {
       hidden: false, disabled: false, textContent: '', value: '', dataset: {}, style: {}, children: [],
@@ -75,6 +75,7 @@ function portal(options = {}) {
       showAdminToast = function () {};
       window.PORTAL_TEST = {
         state, els, loadPcns, setAdminView, syncViewFromHash, renderProgress, renderStatusControl,
+        isDeveloper: typeof isDeveloper === 'function' ? isDeveloper : undefined,
         checkPortalSession: typeof checkPortalSession === 'function' ? checkPortalSession : checkAdminSession
       };
     })();`);
@@ -90,6 +91,18 @@ function portal(options = {}) {
   }
   return { ...window.PORTAL_TEST, window, user, records, calls, redirects, gates, profiles, element };
 }
+
+test('Developer Tools menu is visible only for an active exclusive Developer assignment',async()=>{
+  const assigned={roles:['developer'],department:'developer',signingStep:null,isActive:true};
+  for(const [user,allowed]of [[assigned,true],[{...assigned,roles:['admin']},false],
+    [{...assigned,roles:['developer','admin']},false],[{...assigned,department:'it'},false],
+    [{...assigned,signingStep:'prepared'},false],[{...assigned,isActive:false},false]]){
+    const page=portal({roles:user.roles,user});
+    await page.checkPortalSession();
+    assert.equal(page.isDeveloper(),allowed);
+    assert.equal(page.element('adminDeveloperLink').hidden,!allowed);
+  }
+});
 
 test('every assigned PCN role opens the Portal and loads records without administrator requests', async () => {
   for (const role of ['supplier', 'reviewer', 'gsc', 'productionengineering', 'qa', 'tapbu', 'QA']) {
