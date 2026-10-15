@@ -87,3 +87,5 @@
   .developer-tabs button { padding: 15px 12px; font-size: 13px; }
   .developer-pagination { align-items: flex-start; flex-direction: column; }
 }
+.developer-table,
+.developer-table * { font-family: var(--pcn-table-font) !important; font-weight: 600 !important; }

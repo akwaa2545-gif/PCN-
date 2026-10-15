@@ -317,7 +317,7 @@ async function main() {
     const userTypography = await admin.page.locator('#adminUsersRows tr').first().evaluate(row =>
       [...row.querySelectorAll('.notification-person-identity, .user-presence-badge, td:last-child button')].map(element => ({ family: getComputedStyle(element).fontFamily, size: getComputedStyle(element).fontSize })));
     assert(userTypography.length >= 3, 'Actual Users row contains identity, presence and action controls');
-    for (const element of userTypography) { assert.match(element.family, /^Aptos(?:,|$)/); assert.equal(element.size, '14px'); }
+    for (const element of userTypography) { assert.match(element.family, /PCN Table Semibold/); assert.equal(element.size, '14px'); }
     await admin.page.setViewportSize({ width: 390, height: 844 });
     await portal.fits();
     await admin.page.screenshot({ path: path.resolve('test-results/records-users-font-mobile.png'), fullPage: true });
@@ -331,9 +331,9 @@ async function main() {
       open: { family: getComputedStyle(row.querySelector('.rd-open-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-open-button')).fontSize },
       icon: { family: getComputedStyle(row.querySelector('.rd-preview-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-preview-button')).fontSize }
     }));
-    for (const cell of typography.cells) { assert.match(cell.family, /^Aptos(?:,|$)/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px'); }
-    assert.match(typography.open.family, /^Aptos(?:,|$)/); assert.equal(typography.open.size, '14px');
-    assert.match(typography.icon.family, /^Aptos(?:,|$)/); assert.equal(typography.icon.size, '14px');
+    for (const cell of typography.cells) { assert.match(cell.family, /PCN Table Semibold/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px'); }
+    assert.match(typography.open.family, /PCN Table Semibold/); assert.equal(typography.open.size, '14px');
+    assert.match(typography.icon.family, /PCN Table Semibold/); assert.equal(typography.icon.size, '14px');
     await expect(history).toHaveAttribute('title', 'History');
     await expect(history.locator('svg[aria-hidden="true"]')).toHaveCount(1);
     await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeHidden();

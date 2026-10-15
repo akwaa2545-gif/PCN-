@@ -1,4 +1,12 @@
 @font-face {
+  font-family: "PCN Table Semibold";
+  src: url("/SegoeUI-Semibold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
   font-family: "Cairoli Classic";
   src: url("/CairoliClassic-Bold.otf") format("opentype");
   font-style: normal;
@@ -7,6 +15,7 @@
 }
 
 :root {
+  --pcn-table-font: "PCN Table Semibold", "Segoe UI", Arial, sans-serif;
   --bg: #f6f7f9;
   --surface: #ffffff;
   --surface-muted: #f4f5f7;

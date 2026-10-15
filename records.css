@@ -149,7 +149,7 @@ body.admin-page .rd-sort:hover { color: #ffe27b; background: transparent; }
 .rd-overdue { color: #a92f2b; font-weight: 700; }
 .rd-code-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table),
-body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table) * { font-family: Aptos, "Segoe UI", Arial, sans-serif !important; }
+body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table) * { font-family: var(--pcn-table-font) !important; font-weight: 600 !important; }
 body.admin-page :is(.admin-table, .users-table) :is(th, td),
 body.admin-page :is(.admin-table, .users-table) :is(th, td) * { font-size: 14px !important; line-height: 1.5; }
 body.admin-page :is(.admin-table, .users-table) td { font-weight: 400; }
@@ -251,7 +251,7 @@ body.admin-page .rd-tab[aria-selected="true"], .rd-tab[aria-selected="true"] { b
 .rd-stage-completed .rd-timeline-point { border-color: #26743b; color: #26743b; }
 .rd-stage-current .rd-timeline-point { border-color: #b58100; color: #004583; }
 .rd-department-point[aria-pressed="true"] .rd-timeline-point { box-shadow: 0 0 0 4px #ffedb3; }
-.rd-workflow-details { font-family: Aptos, 'Segoe UI', sans-serif; font-size: 16px; }
+.rd-workflow-details { font-family: var(--pcn-table-font); font-size: 16px; }
 .rd-workflow-details h3 { margin: 0 0 8px; color: #004583; font-size: 18px; }
 .rd-workflow-details > p { margin: 0 0 14px; color: #52677b; }
 .rd-signatures-scroll { overflow-x: auto; border: 1px solid #d5dfeb; }
