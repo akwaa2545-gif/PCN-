@@ -10,7 +10,8 @@ const layoutOnly = process.argv.includes('--layout-only');
 const retryOnly = process.argv.includes('--retry-only');
 const identityOnly = process.argv.includes('--identity-only');
 const previewOnly = process.argv.includes('--preview-only');
-const artifactSuffix = layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
+const entryMenuOnly = process.argv.includes('--entry-menu-only');
+const artifactSuffix = entryMenuOnly ? '-entry-menu' : layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
 function checked(description) { report.checks.push(description); console.log(JSON.stringify({ creationCheck: description })); }
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], writes: [], outbox: [], submissions: [] };
 
@@ -147,6 +148,37 @@ async function main() {
     page = await context.newPage();
     page.setDefaultTimeout(10000); page.setDefaultNavigationTimeout(30000);
     page.on('pageerror', error => report.errors.push(error.message));
+    if(entryMenuOnly){
+      await page.goto(`${origin}/admin`);
+      const trigger=page.getByRole('button',{name:'Create PCN',exact:true}),menu=page.locator('#createStartOptions');
+      await expect(trigger).toHaveAttribute('aria-expanded','false');
+      await expect(menu).toBeHidden();await trigger.hover();await expect(menu).toBeVisible();
+      await expect(menu.locator('a')).toHaveText(['Blank PCN','Common change starter','Copy existing PCN','Resume draft']);
+      await menu.getByRole('link',{name:'Blank PCN',exact:true}).hover();await expect(menu).toBeVisible();
+      await page.screenshot({path:path.resolve('test-results/create-pcn-entry-menu-desktop.png')});
+      await page.mouse.move(1,500);await expect(menu).toBeHidden();
+      await trigger.focus();await page.keyboard.press('ArrowDown');
+      await expect(menu.locator('a').first()).toBeFocused();await page.keyboard.press('Escape');
+      await expect(menu).toBeHidden();await expect(trigger).toBeFocused();
+      await trigger.click();await expect(menu).toBeVisible();await page.locator('#adminRefreshButton').click();await expect(menu).toBeHidden();
+      checked('Create dropdown supports hover without gaps, keyboard opening, Escape, click and outside dismissal');
+      const choices=[['Blank PCN','#createEditor'],['Common change starter','#starterOption'],['Copy existing PCN','#templatePcnId'],['Resume draft','#entryChoices']];
+      for(const [label,target]of choices){
+        await page.goto(`${origin}/admin`);await trigger.hover();await menu.getByRole('link',{name:label,exact:true}).click();
+        await expect(page.locator(target)).toBeVisible();
+        if(label==='Resume draft')await expect(page.locator('#entryChoices')).toContainText('You have no unfinished drafts');
+        assert.equal((await system.repository.list()).length,0);assert.deepEqual(system.jobs,[]);
+      }
+      checked('All four header choices open their matching Create flow without creating records or queuing mail');
+      await page.setViewportSize({width:390,height:844});await page.goto(`${origin}/admin`);
+      await trigger.click();await expect(menu).toBeVisible();
+      const box=await menu.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=390,'Dropdown stays inside mobile viewport');
+      await page.screenshot({path:path.resolve('test-results/create-pcn-entry-menu-mobile.png')});
+      await menu.getByRole('link',{name:'Copy existing PCN',exact:true}).click();await expect(page.locator('#templatePcnId')).toBeFocused();
+      await page.goto(`${origin}/create?start=unrecognized`);await expect(page.locator('#createEntry')).toBeVisible();await expect(page.locator('#createEditor')).toBeHidden();
+      checked('Small-screen click navigation fits the viewport and unknown start choices safely keep the entry chooser');
+      assert.deepEqual(report.errors,[]);assert.deepEqual(report.external,[]);report.status='passed';return;
+    }
     const response = await page.goto(`${origin}/create`);
     assert.equal(response.status(), 200, 'Dedicated Create PCN page is served');
     await expect(page.getByRole('heading', { name: 'Create a PCN', exact: true })).toBeVisible();

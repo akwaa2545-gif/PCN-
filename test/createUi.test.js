@@ -2,6 +2,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ui = require('../create');
 
+test('Create entry links accept only one supported start choice and preserve explicit draft links',()=>{
+  for(const choice of ['blank','starter','copy','resume'])assert.equal(ui.entryIntent(`?start=${choice}`),choice);
+  for(const search of ['', '?start=unknown','?start=blank&start=copy','?start=copy&draft=PCN-2026-0001'])assert.equal(ui.entryIntent(search),null);
+});
+
 test('Document preview accepts only its own same-origin frame and requested record version',()=>{
   const source={},origin='http://pcn.test',id='PCN-2026-0001',version='1234567890abcdef';
   const expected={source,origin,id,version,request:'1'};
