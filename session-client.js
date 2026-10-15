@@ -1,6 +1,42 @@
 (function () {
   let session = { authenticated: false, user: null, csrfToken: '' };
 
+  let sessionGeneration = 0;
+  let heartbeatTimer = null;
+  let heartbeatPending = false;
+  let heartbeatSuspended = false;
+  let logoutPending = false;
+  const sessionDocument = window.document || (typeof document !== 'undefined' ? document : null);
+  const heartbeatVisible = () => session.authenticated === true && !logoutPending && !heartbeatSuspended
+    && sessionDocument?.visibilityState !== 'hidden' && window.navigator?.onLine !== false;
+  function clearHeartbeat() {
+    if (heartbeatTimer !== null) window.clearTimeout?.(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  function scheduleHeartbeat(delay = 30000) {
+    clearHeartbeat();
+    if (heartbeatVisible() && !heartbeatPending && typeof window.setTimeout === 'function') heartbeatTimer = window.setTimeout(heartbeat, delay);
+  }
+  function clearAuthentication() {
+    sessionGeneration++;
+    session = { authenticated: false, user: null, csrfToken: '' };
+    clearHeartbeat();
+  }
+  async function heartbeat() {
+    heartbeatTimer = null;
+    if (!heartbeatVisible() || heartbeatPending) return;
+    heartbeatPending = true;
+    try { await apiFetch('/api/session'); }
+    catch (_) { /* Network failures retry; authentication failures clear the session in apiFetch. */ }
+    finally { heartbeatPending = false; scheduleHeartbeat(); }
+  }
+  const resumeHeartbeat = () => scheduleHeartbeat(0);
+  sessionDocument?.addEventListener?.('visibilitychange', resumeHeartbeat);
+  window.addEventListener?.('online', resumeHeartbeat);
+  window.addEventListener?.('offline', resumeHeartbeat);
+  window.addEventListener?.('pagehide', () => { heartbeatSuspended = true; clearHeartbeat(); });
+  window.addEventListener?.('pageshow', () => { heartbeatSuspended = false; resumeHeartbeat(); });
+
   function safeReturnTo(value) {
     const fallback = '/create';
     try {
@@ -30,14 +66,18 @@
     headers.set('accept', 'application/json');
     if (options.body !== undefined) headers.set('content-type', 'application/json');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && session.csrfToken) headers.set('X-CSRF-Token', session.csrfToken);
+    const requestGeneration = sessionGeneration;
     const response = await fetch(url.pathname + url.search, { ...options, method, headers, credentials: 'same-origin', mode: 'same-origin', cache: 'no-store' });
     let body;
     try {
       body = await response.json();
     } catch (_) {
+      if (response.status === 401 && requestGeneration === sessionGeneration) clearAuthentication();
       throw new Error('The server returned an unreadable response. Please try again.');
     }
     if (!response.ok || !body.success) {
+      const currentResponse = requestGeneration === sessionGeneration;
+      if (response.status === 401 && currentResponse) clearAuthentication();
       const rawError = typeof body.error === 'string' ? body.error : body.error?.message;
       const isEditConflict = response.status === 409 && ['PATCH', 'PUT', 'DELETE'].includes(method) && /^\/api\/pcns\/[^/]+$/.test(url.pathname);
       const message = isEditConflict ? 'This record changed since you loaded it. Refresh the record before saving again; your edits have not been overwritten.' : rawError || 'API request failed.';
@@ -46,12 +86,16 @@
       error.details = body.details;
       error.code = body.code || body.error?.code;
       const authRoute = url.pathname === '/api/session' || url.pathname.startsWith('/api/auth/');
-      if (response.status === 401 && !authRoute) redirectToLogin();
-      if (error.code === 'PASSWORD_CHANGE_REQUIRED' && !authRoute) redirectToLogin(true);
+      if (response.status === 401 && currentResponse && !authRoute) redirectToLogin();
+      if (error.code === 'PASSWORD_CHANGE_REQUIRED' && currentResponse && !authRoute) redirectToLogin(true);
       throw error;
     }
-    if (body.data && Object.prototype.hasOwnProperty.call(body.data, 'authenticated')) {
-      session = { ...body.data, csrfToken: body.data.csrfToken || '' };
+    if (requestGeneration === sessionGeneration && body.data && Object.prototype.hasOwnProperty.call(body.data, 'authenticated')) {
+      if (body.data.authenticated === true) {
+        if (url.pathname === '/api/auth/login') logoutPending = false;
+        session = { ...body.data, csrfToken: body.data.csrfToken || '' };
+        scheduleHeartbeat();
+      } else clearAuthentication();
     }
     return body.data;
   }
@@ -60,7 +104,6 @@
     try { return await apiFetch('/api/session'); }
     catch (error) {
       if (error.status !== 401) throw error;
-      session = { authenticated: false, user: null, csrfToken: '' };
       return session;
     }
   }
@@ -86,9 +129,15 @@
   }
 
   async function logout() {
-    await apiFetch('/api/auth/logout', { method: 'POST', body: '{}' });
-    session = { authenticated: false, user: null, csrfToken: '' };
-    window.location.assign('/login');
+    sessionGeneration++; logoutPending = true; clearHeartbeat();
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST', body: '{}' });
+      clearAuthentication();
+      window.location.assign('/login');
+    } catch (error) {
+      logoutPending = false; scheduleHeartbeat();
+      throw error;
+    }
   }
 
   function profilePhoto(value) {

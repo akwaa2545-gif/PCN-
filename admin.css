@@ -143,7 +143,8 @@ body.admin-page .users-table td:last-child button { min-height: 36px; margin: 0;
   .users-table td:nth-child(4)::before { content: 'Department'; }
   .users-table td:nth-child(5)::before { content: 'Verified email'; }
   .users-table td:nth-child(6)::before { content: 'Status'; }
-  .users-table td:nth-child(7)::before { content: 'Sign-in'; }
+  .users-table td:nth-child(7)::before { content: 'Account'; }
+  .users-table td:nth-child(8)::before { content: 'Sign-in'; }
   .users-table td:nth-child(2) { order: -1; grid-column: 1 / -1; padding-bottom: 12px; border-bottom: 1px solid #e7ecf2; }
   .users-table td:nth-child(2)::before, .users-table td:last-child::before { display: none; }
   .users-table td:nth-child(5) { grid-column: 1 / -1; }
@@ -393,8 +394,9 @@ body.admin-page .users-group-pending .users-table-wrap { border-top: 3px solid v
   body.admin-page .users-table :is(th, td):nth-child(4) { min-width: 150px; }
   body.admin-page .users-table :is(th, td):nth-child(5) { min-width: 220px; }
   body.admin-page .users-table :is(th, td):nth-child(6) { min-width: 80px; }
-  body.admin-page .users-table :is(th, td):nth-child(7) { min-width: 145px; }
-  body.admin-page .users-table :is(th, td):nth-child(8) { min-width: 200px; }
+  body.admin-page .users-table :is(th, td):nth-child(7) { min-width: 80px; }
+  body.admin-page .users-table :is(th, td):nth-child(8) { min-width: 145px; }
+  body.admin-page .users-table :is(th, td):nth-child(9) { min-width: 200px; }
   .users-table :is(th, td):last-child { position: sticky; right: 0; z-index: 1; box-shadow: -1px 0 0 var(--portal-line); background: #fff; }
   body.admin-page .users-table th:last-child { z-index: 2; background: var(--mes-blue); }
   body.admin-page .users-table td:last-child { display: table-cell; white-space: nowrap; }
@@ -527,3 +529,10 @@ body.admin-page .employee-user-form .employee-mail-result { width: 100%; min-wid
 @media (prefers-reduced-motion: reduce) {
   .employee-mail-spinner { animation: none; }
 }
+
+.users-presence-note { margin: 0 28px 18px; color: #54677a; font-size: 12px; }
+.user-presence-badge { display: inline-flex; align-items: center; width: fit-content; gap: 6px; padding: 4px 8px; border: 1px solid #c9d1d9; border-radius: 0; background: #f1f3f5; color: #465461; font-size: 12px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
+.user-presence-badge::before { width: 6px; height: 6px; background: currentColor; content: ''; }
+.user-presence-online { border-color: #b0d1b9; background: #edf7ef; color: #245f37; }
+.user-presence-unavailable { border-style: dashed; }
+@media (max-width: 700px) { .users-presence-note { margin-inline: 16px; } }

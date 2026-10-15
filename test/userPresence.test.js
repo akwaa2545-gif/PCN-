@@ -99,3 +99,48 @@ test('batch validation uses only observed sessions and exposes only an online/of
   assert.deepEqual(await f.service.userPresence(f.state.users),[{status:'offline'}]);
   assert.deepEqual(f.service.presence.candidates(),[]);
 });
+
+for (const provider of ['employee-code','pcn-local']) {
+  test(`${provider} final successful authentication refreshes presence and source failure clears it`,async () => {
+    const f = fixture();
+    const user = {...f.user,identityProvider:provider,employeeCode:'0012345',normalizedEmployeeCode:'0012345'};
+    f.state.users = [user];
+    f.service.authMode = 'employee-code';
+    f.service.employeeDirectory = {async getByCode() { return {employeeCode:'0012345',displayName:'Employee',isActive:true}; }};
+    const login = await f.service.issueSession(user);
+    f.advance(90000);
+    assert.deepEqual(await f.service.userPresence(f.state.users),[{status:'offline'}]);
+    assert.ok(await f.service.session(login.token));
+    assert.deepEqual(await f.service.userPresence(f.state.users),[{status:'online'}]);
+    if (provider === 'employee-code') {
+      f.service.employeeDirectory = {async getByCode() {throw new Error('source unavailable');}};
+      await assert.rejects(f.service.session(login.token),error => error.statusCode === 503);
+      assert.deepEqual(await f.service.userPresence(f.state.users),[{status:'offline'}]);
+    }
+  });
+}
+
+test('user listing protects presence behind Administrator access and returns no session or credential fields',async t => {
+  const {createApp} = require('../src/httpServer');
+  const {memoryRepository} = require('./helpers/apiHarness');
+  const f = fixture();
+  f.state.users = [...f.state.users,{...f.user,id:'ordinary',username:'ordinary',roles:['supplier'],securityStamp:'ordinary-stamp'}];
+  f.repository.listUsers = async () => f.state.users.map(user => ({...user,securityStamp:'private',passwordHash:'private',tokenHash:'private'}));
+  const app = createApp({repository:memoryRepository(),authService:f.service,authMode:'password',secureCookies:false});
+  await new Promise(resolve => app.listen(0,'127.0.0.1',resolve));
+  t.after(() => new Promise(resolve => {app.close(resolve);app.closeAllConnections();}));
+  const url = `http://127.0.0.1:${app.address().port}/api/admin/users`;
+  assert.equal((await fetch(url)).status,401);
+  const ordinary = await f.service.issueSession(f.state.users[1]);
+  assert.equal((await fetch(url,{headers:{cookie:`pcn_session=${ordinary.token}`}})).status,403);
+  const admin = await f.service.issueSession(f.user);
+  const response = await fetch(url,{headers:{cookie:`pcn_session=${admin.token}`}});
+  assert.equal(response.status,200);
+  const body = await response.json();
+  assert.deepEqual(body.data.map(user => user.presence),[{status:'online'},{status:'online'}]);
+  for (const user of body.data) {
+    for (const key of ['securityStamp','passwordHash','tokenHash','sessionId','csrfToken']) assert.equal(Object.hasOwn(user,key),false);
+  }
+  assert.equal(JSON.stringify(body).includes(admin.token),false);
+  assert.equal(JSON.stringify(body).includes(ordinary.token),false);
+});

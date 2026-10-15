@@ -120,6 +120,17 @@ test('presence batch SQL binds observed hashes and revalidates active accounts, 
   await assert.rejects(repo.validPresenceSessions([{tokenHash:'hostile input'}],now),/presence/i);
 });
 
+test('presence SQL uses bounded batches and rejects excess sessions before querying',async () => {
+  const {repo,state} = fixture([{},{}]);
+  const sessions = Array.from({length:501},(_,index) => ({tokenHash:index.toString(16).padStart(64,'0')}));
+  assert.deepEqual(await repo.validPresenceSessions(sessions,new Date()),[]);
+  assert.equal(state.calls.length,2);
+  assert.equal(Object.keys(state.calls[0].inputs).length,501);
+  assert.equal(Object.keys(state.calls[1].inputs).length,2);
+  await assert.rejects(repo.validPresenceSessions(Array(10001).fill(sessions[0]),new Date()),/presence/i);
+  assert.equal(state.calls.length,2);
+});
+
 test('role changes invalidate old session stamp and roll back missing user', async () => {
   const user={Id:'user',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',AccessVersion:Buffer.from('0011223344556677','hex')};
   const hydrated={recordsets:[[user],[{Name:'qa'}]]};

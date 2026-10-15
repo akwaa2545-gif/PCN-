@@ -281,6 +281,23 @@ class SqlAuthRepository {
     await this.pool.request().input('hash', sql.Char(64), hash).query('UPDATE pcn.Sessions SET RevokedAt=SYSUTCDATETIME() WHERE TokenHash=@hash AND RevokedAt IS NULL');
   }
 
+  async validPresenceSessions(sessions,now) {
+    if (!Array.isArray(sessions) || sessions.length > 10000 || sessions.some(session => !/^[a-f0-9]{64}$/.test(session?.tokenHash))
+      || !(now instanceof Date) || !Number.isFinite(now.getTime())) throw new Error('Invalid presence validation request');
+    let valid = [];
+    // Keep each parameterized batch comfortably below SQL Server's 2100 limit.
+    for (let offset = 0; offset < sessions.length; offset += 500) {
+      const request = this.pool.request().input('presenceNow',sql.DateTime2,now);
+      const parameters = sessions.slice(offset,offset+500).map((session,index) => {
+        request.input(`presence${index}`,sql.Char(64),session.tokenHash);
+        return `@presence${index}`;
+      });
+      const result = await request.query(`SELECT s.TokenHash,s.UserId,s.SecurityStamp,s.ExpiresAt FROM pcn.Sessions s JOIN pcn.Users u ON u.Id=s.UserId WHERE s.TokenHash IN (${parameters.join(',')}) AND s.RevokedAt IS NULL AND s.ExpiresAt>@presenceNow AND u.IsActive=1 AND s.SecurityStamp=u.SecurityStamp`);
+      valid = [...valid,...result.recordset.map(row => ({tokenHash:row.TokenHash,userId:row.UserId,securityStamp:row.SecurityStamp,expiresAt:row.ExpiresAt}))];
+    }
+    return valid;
+  }
+
   async recordLoginFailure(id, now) {
     await this.pool.request().input('id', sql.UniqueIdentifier, id).input('now', sql.DateTime2, now)
       .query('UPDATE pcn.Users SET FailedLoginCount=CASE WHEN LockoutUntil <= @now THEN 1 ELSE FailedLoginCount+1 END, LockoutUntil=CASE WHEN LockoutUntil <= @now THEN NULL WHEN FailedLoginCount+1 >= 5 THEN DATEADD(minute,15,@now) ELSE LockoutUntil END, UpdatedAt=@now WHERE Id=@id');

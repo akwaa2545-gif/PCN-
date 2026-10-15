@@ -113,7 +113,7 @@ test('Add role finds existing local users and edits exact existing access instea
   const write = page.calls.find(call => call.options?.method === 'PATCH');
   assert.equal(write.url, '/api/admin/users/local-id');
   assert.equal(page.calls.some(call => call.options?.method === 'POST'), false);
-  assert.equal(page.firstUserRow().children[6].textContent, 'Employee code');
+  assert.equal(page.firstUserRow().children[7].textContent, 'Employee code');
 });
 
 test('unconfigured source still permits Add role for cached PCN accounts without directory requests', async () => {

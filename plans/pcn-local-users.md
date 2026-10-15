@@ -119,3 +119,13 @@ The user then required Save changes to stay disabled in Edit access when no work
 Pending access also has a decorative gold heading dot, gold count badge with dark text and a thin gold table accent. Text labels convey the same status independently of color; assigned styling is unchanged.
 
 Final verification: all 600 tests passed with 91.63% line, 90.81% branch and 93.80% function coverage. The role-removal repository suite passed its 39 focused cases. Code, JavaScript, security and accessibility reviews passed. The updated popup/edit-mail suite, split/filter/removal/reassignment suite and broad browser smoke all exited 0 without browser errors or outbound requests. A separate zero-write visual check verified the yellow pending indicator at 995-pixel desktop and 390-pixel mobile widths. The local server remained ready during implementation.
+
+## Local user presence — 2026-10-15
+
+The local Users table separates **Status** (Online/Offline) from **Account** (Active/Inactive). Online means at least one valid session was authenticated within the last 90 seconds. Visible connected pages send a same-origin `GET /api/session` heartbeat every 30 seconds; the existing five-second Users refresh displays changes without reloading. Hidden, suspended or disconnected pages can expire to Offline. Missing presence metadata displays Unavailable. Account filtering and access controls retain their existing Active/Inactive meaning.
+
+Presence is tracked per session, so logging out of one browser preserves Online while another recent valid session exists. Each Users read revalidates observed sessions against current active accounts, session expiry/revocation and security stamps. Only `presence.status` is exposed by the existing Administrator/Developer Users endpoint. No tokens, stamps, session counts or activity timestamps are returned.
+
+The tracker is bounded and lives in the current server process; restarting the server clears it until new authenticated activity. This matches the current single-process runtime. Multiple application instances would require shared presence storage. No migration, additional database heartbeat writes or notification email is introduced. This work remains local and is not deployed.
+
+Local verification passed 951/951 unit/API tests with 88.26% line, 90.95% branch and 94.62% function coverage. The isolated `npm run test:user-presence` browser acceptance passed six groups, including multiple sessions, exact 90-second expiry, 30-second heartbeats, automatic updates and preserved filter/focus. Account grants and PCNs remained unchanged; browser errors, external requests and mail calls were zero. Code, JavaScript and security reviews passed.

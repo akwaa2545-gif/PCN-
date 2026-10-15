@@ -224,19 +224,20 @@
               <label for="usersSearchFilter">Search users<input id="usersSearchFilter" type="search" maxlength="200" autocomplete="off" placeholder="Name, employee code or email" /></label>
               <label for="usersRoleFilter">PCN role<select id="usersRoleFilter"><option value="">All roles</option><option value="unassigned">Unassigned</option><option value="admin">Administrator</option><option value="developer">Developer</option><option value="prepared">Prepared</option><option value="checked">Checked</option><option value="approved">Approved</option><option value="legacy">No signing assignment</option></select></label>
               <label for="usersDepartmentFilter">PCN department<select id="usersDepartmentFilter"><option value="">All departments</option><option value="unassigned">Unassigned</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
-              <label for="usersStatusFilter">Status<select id="usersStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+              <label for="usersStatusFilter">Account status<select id="usersStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
               <button id="usersClearFiltersButton" class="ghost-button" type="button">Clear filters</button>
             </div>
             <p id="usersFilterSummary" class="users-filter-summary" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></p>
+            <p class="users-presence-note">Online reflects activity in the last 90 seconds.</p>
             <section class="users-group users-group-pending" aria-labelledby="pendingUsersTitle">
               <div class="users-group-heading"><h3 id="pendingUsersTitle">Pending access</h3><span id="pendingUsersCount"></span></div>
               <p id="pendingUsersEmpty" class="users-empty" hidden></p>
-              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Users pending access table"><table class="users-table"><caption>Users pending access</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="pendingUsersRows"></tbody></table></div>
+              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Users pending access table"><table class="users-table"><caption>Users pending access</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Account</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="pendingUsersRows"></tbody></table></div>
             </section>
             <section class="users-group" aria-labelledby="assignedUsersTitle">
               <div class="users-group-heading"><h3 id="assignedUsersTitle">Assigned PCN users</h3><span id="assignedUsersCount"></span></div>
               <p id="assignedUsersEmpty" class="users-empty" hidden></p>
-              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
+              <div class="users-table-wrap" tabindex="0" role="region" aria-label="Assigned PCN users table"><table class="users-table"><caption>Assigned PCN users</caption><thead><tr><th scope="col">Employee ID</th><th scope="col">Employee</th><th scope="col">PCN role</th><th scope="col">PCN department</th><th scope="col">Verified email</th><th scope="col">Status</th><th scope="col">Account</th><th scope="col">Sign-in</th><th scope="col">Actions</th></tr></thead><tbody id="adminUsersRows"></tbody></table></div>
             </section>
           </section>
         </section>

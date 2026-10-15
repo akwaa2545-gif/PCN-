@@ -107,6 +107,7 @@ function fakeAuthService({ additionalUsers = [] } = {}) {
   return {
     authMode: 'password',
     repository: { async listUsers() { return users.map(safeUser); } },
+    async userPresence(accounts) { return accounts.map(() => ({status:'offline'})); },
     async createUser(input) {
       const created = { ...input, id: `new-${users.length}`, isActive: true };
       users = [...users, created];

@@ -5,6 +5,7 @@ const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeE
 const { isDeveloperAssignment } = require('./signingPermissions');
 const { hasRole } = require('./workflowAccess');
 const { ApiRateLimiter } = require('./apiRateLimit');
+const { UserPresence } = require('./userPresence');
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 const providerOf = user => user?.identityProvider || (user?.directoryId ? 'retired-windows' : 'password');
 const isEmployeeProvider = user => ['employee-code', 'pcn-local'].includes(providerOf(user));
@@ -26,6 +27,7 @@ class AuthService {
   constructor(repository, options = {}) {
     this.repository = repository;
     this.clock = options.clock || (() => new Date());
+    this.presence = new UserPresence({clock:() => this.now().getTime()});
     this.hashPassword = options.passwordHasher || hashPassword;
     this.verifyPassword = options.passwordVerifier || verifyPassword;
     this.dummyHash = null;
@@ -172,7 +174,9 @@ class AuthService {
     const csrfToken = crypto.randomBytes(32).toString('hex');
     const ttl = remember === true ? 30 * 86400000 : 8 * 3600000;
     const expiresAt = new Date(this.now().getTime() + ttl).toISOString();
-    await this.repository.saveSession({ id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt });
+    const session = { id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt };
+    await this.repository.saveSession(session);
+    this.presence.touch(session.tokenHash,session);
     return { user: safeUser(user), token, csrfToken, expiresAt };
   }
   async resolveEmployee(employeeCode, directory = this.employeeDirectory) {
@@ -284,8 +288,19 @@ class AuthService {
   async session(token,{skipEmployeeLookup=false}={}) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) return null;
     const tokenHash = hashToken(token);
+    try {
+      const principal = await this.resolveSession(tokenHash,{skipEmployeeLookup});
+      if (principal) this.presence.touch(tokenHash,{userId:principal.user.id,securityStamp:principal.sessionSecurityStamp,expiresAt:principal.expiresAt});
+      else this.presence.forget(tokenHash);
+      return principal;
+    } catch (error) {
+      this.presence.forget(tokenHash);
+      throw error;
+    }
+  }
+  async resolveSession(tokenHash,{skipEmployeeLookup=false}={}) {
     const session = await this.repository.getSession(tokenHash);
-    if (!session || session.revokedAt || new Date(session.expiresAt) <= this.now()) return null;
+    if (!session || session.revokedAt || !Number.isFinite(new Date(session.expiresAt).getTime()) || new Date(session.expiresAt) <= this.now()) return null;
     const user = await this.repository.getUserById(session.userId);
     if (!user?.isActive || session.securityStamp !== user.securityStamp
       || (this.authMode === 'employee-code' ? !isEmployeeProvider(user) : providerOf(user) !== 'password')) return null;
@@ -293,7 +308,7 @@ class AuthService {
     if (providerOf(user) === 'pcn-local') {
       if (!this.matchesLocalEmployee(user)) return null;
       const latestSession = await this.repository.getSession(tokenHash);
-      if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
+      if (!latestSession || latestSession.revokedAt || !Number.isFinite(new Date(latestSession.expiresAt).getTime()) || new Date(latestSession.expiresAt) <= this.now()
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
       if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesLocalEmployee(latestUser, user.employeeCode)
@@ -308,7 +323,7 @@ class AuthService {
       // Employee lookup can be slow. Re-read grants so concurrent revocation,
       // relinking or a role change cannot authorize the earlier SQL principal.
       const latestSession = await this.repository.getSession(tokenHash);
-      if (!latestSession || latestSession.revokedAt || new Date(latestSession.expiresAt) <= this.now()
+      if (!latestSession || latestSession.revokedAt || !Number.isFinite(new Date(latestSession.expiresAt).getTime()) || new Date(latestSession.expiresAt) <= this.now()
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
       if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesEmployee(latestUser, profile)
@@ -319,8 +334,30 @@ class AuthService {
   }
   async logout(token) {
     if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
+      this.presence.forget(hashToken(token));
       await this.repository.revokeSession(hashToken(token));
     }
+  }
+  async userPresence(users) {
+    const candidates = this.presence.candidates();
+    let valid = [];
+    const now = this.now();
+    if (candidates.length && typeof this.repository.validPresenceSessions === 'function') {
+      valid = await this.repository.validPresenceSessions(candidates,now);
+    } else {
+      // Memory repositories use the same authoritative session/account checks.
+      for (let offset = 0; offset < candidates.length; offset += 8) {
+        const batch = await Promise.all(candidates.slice(offset,offset+8).map(async candidate => {
+          const session = await this.repository.getSession(candidate.tokenHash);
+          if (!session || session.revokedAt || !(new Date(session.expiresAt).getTime() > now.getTime())) return null;
+          const user = await this.repository.getUserById(session.userId);
+          if (!user?.isActive || user.securityStamp !== session.securityStamp) return null;
+          return {...session,tokenHash:candidate.tokenHash};
+        }));
+        valid = [...valid,...batch.filter(Boolean)];
+      }
+    }
+    return this.presence.project(users,candidates,valid);
   }
   async changePassword(token, { currentPassword, newPassword } = {}) {
     if (this.authMode !== 'password') throw new ApiError(403, 'Employee-code sign-in does not use a password');

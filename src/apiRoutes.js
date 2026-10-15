@@ -85,7 +85,11 @@ async function handleApi(req, res, url, context, requestId) {
   const admin = () => { if (!hasRole(user,'admin')) throw new ApiError(403,'Administrator access required'); };
   if (route.startsWith('/api/admin/')) {
     admin();
-    if (route === '/api/admin/users' && method === 'GET') return send((await authService.repository.listUsers()).map(publicAccount));
+    if (route === '/api/admin/users' && method === 'GET') {
+      const accounts = await authService.repository.listUsers();
+      const presence = await authService.userPresence(accounts);
+      return send(accounts.map((account,index) => ({...publicAccount(account),presence:presence[index]})));
+    }
     if (route === '/api/admin/local-users' && method === 'POST') {
       const body = await readJsonBody(req);
       assertBodyKeys(body,['employeeCode','displayName','roles','department','signingStep','mailSelection','developerPassword']);

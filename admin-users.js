@@ -65,6 +65,14 @@
     return badge;
   }
 
+  function userPresenceBadge(user) {
+    const status = ['online', 'offline'].includes(user.presence?.status) ? user.presence.status : 'unavailable';
+    const badge = document.createElement('span');
+    badge.className = `user-presence-badge user-presence-${status}`;
+    badge.textContent = { online: 'Online', offline: 'Offline', unavailable: 'Unavailable' }[status];
+    return badge;
+  }
+
   function userIdentity(user) {
     const identity = document.createElement('div'); identity.className = 'employee-user-identity';
     const name = String(user.displayName || user.mailProfile?.displayName || user.username || user.employeeCode || '').trim();
@@ -483,13 +491,14 @@
           : user.identityProvider === 'retired-windows' ? 'Employee link required' : 'Password maintenance';
         const values = [user.employeeCode || user.username, [user.displayName, user.email].filter(Boolean).join(' · '),
           pcnRole(user) ? optionLabel(els.employeeRole, pcnRole(user)) : user.roles.length ? 'No signing assignment' : 'Not assigned',
-          optionLabel(els.employeeDepartment, user.department), user.mailProfile?.email || 'No verified email', user.isActive ? 'Active' : 'Inactive', signIn];
+          optionLabel(els.employeeDepartment, user.department), user.mailProfile?.email || 'No verified email', '', user.isActive ? 'Active' : 'Inactive', signIn];
         values.forEach((value, index) => {
           const cell = document.createElement('td');
           if (index === 1) cell.appendChild(userIdentity(user));
           else if (index === 2) cell.appendChild(userAccessBadge(value, pcnRole(user), 'role', user.roles.length > 0));
           else if (index === 3) cell.appendChild(userAccessBadge(value, user.department, 'department',
             Boolean(user.department) && String(user.department).toLowerCase() !== 'unassigned'));
+          else if (index === 5) cell.appendChild(userPresenceBadge(user));
           else cell.textContent = value || '—';
           row.appendChild(cell);
         });

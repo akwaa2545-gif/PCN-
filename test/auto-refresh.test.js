@@ -6,10 +6,20 @@ const vm = require('node:vm');
 
 function harness() {
   let now = 0, nextId = 0;
-  const timers = new Map(), listeners = new Map();
+  const timers = new Map(), listeners = new Map(), subscriptions = new Map();
   const document = { visibilityState: 'visible', addEventListener: listen, removeEventListener: unlisten };
-  function listen(name, callback) { listeners.set(name, callback); }
-  function unlisten(name, callback) { if (listeners.get(name) === callback) listeners.delete(name); }
+  function listen(name, callback) {
+    if (!subscriptions.has(name)) {
+      subscriptions.set(name, new Set());
+      listeners.set(name, event => [...subscriptions.get(name)].forEach(listener => listener(event)));
+    }
+    subscriptions.get(name).add(callback);
+  }
+  function unlisten(name, callback) {
+    const callbacks = subscriptions.get(name);
+    callbacks?.delete(callback);
+    if (!callbacks?.size) { subscriptions.delete(name); listeners.delete(name); }
+  }
   const window = { document, addEventListener: listen, removeEventListener: unlisten,
     setTimeout(callback, delay) { const id = ++nextId; timers.set(id, { at: now + delay, callback }); return id; },
     clearTimeout(id) { timers.delete(id); } };
@@ -29,7 +39,8 @@ function harness() {
     listeners.get('visibilitychange')?.();
     await advance(0);
   }
-  return { start: window.PCN_AUTO_REFRESH.start, advance, visible, listeners, timers };
+  return { start: window.PCN_AUTO_REFRESH.start, advance, visible, listeners, timers,
+    listenerCount: () => [...subscriptions.values()].reduce((total, callbacks) => total + callbacks.size, 0) };
 }
 
 test('automatic refresh begins after five seconds and serializes asynchronous work', async () => {
@@ -71,13 +82,14 @@ test('failed reads back off, report the error and return to five seconds after r
 test('stop and pagehide remove timers/listeners and invalidate outstanding results', async () => {
   for (const action of ['stop', 'pagehide']) {
     const h = harness(); let current, resolve, calls = 0;
+    const sharedListeners = h.listenerCount();
     const stop = h.start({ refresh: context => { calls++; current = context.isCurrent; return new Promise(done => { resolve = done; }); } });
     await h.advance(5000); assert.equal(current(), true);
     if (action === 'stop') stop(); else h.listeners.get('pagehide')();
     assert.equal(current(), false);
     resolve(); for (let i = 0; i < 6; i++) await Promise.resolve();
     await h.advance(60000); assert.equal(calls, 1);
-    assert.equal(h.timers.size, 0); assert.equal(h.listeners.size, 0);
+    assert.equal(h.timers.size, 0); assert.equal(h.listenerCount(), sharedListeners);
   }
 });
 

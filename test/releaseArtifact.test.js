@@ -20,6 +20,10 @@ test('Developer Tools assets are included in runtime releases', () => {
   const files = ['developer.html','developer.js','developer.css','src/developerTools.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
 });
+test('authenticated user presence ships with its shared client assets', () => {
+  const files = ['src/userPresence.js','session-client.js','admin-users.js'];
+  assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
+});
 function fixture(changes = {}) {
   const manifest = { ...createManifest({ archive, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1 }), ...changes };
   const bytes = Buffer.from(JSON.stringify(manifest) + '\n');
