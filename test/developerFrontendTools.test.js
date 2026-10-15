@@ -91,6 +91,7 @@ test('structured transaction values use labelled human text and preserve unknown
   assert.doesNotMatch(readable, /\{"|\[\{/);
   assert.equal(tools.readableValue([], 'comments'), 'Empty list');
   assert.equal(tools.readableValue({}, 'comments'), 'Empty object');
+  assert.match(tools.readableValue(JSON.parse('{"constructor":"Retained key"}')), /Constructor \(constructor\): Retained key/);
 });
 
 test('signature booleans read Signed or Not signed while ordinary flags read Yes or No', () => {

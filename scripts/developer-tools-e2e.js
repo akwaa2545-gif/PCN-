@@ -13,14 +13,18 @@ async function main() {
   const repository = memoryRepository();
   repository.getMasterData = async () => ({ ...require('../src/masterData'), versionId: 1 });
   const developer = { id: 'tools-dev-id', username: 'tools-dev', displayName: 'Developer fixture', roles: ['developer'], department: 'developer', signingStep: null, isActive: true };
+  const actor = `user:${developer.id}`;
   const authService = fakeAuthService({ additionalUsers: [developer] });
   const service = new PcnService(repository);
-  let record = await service.create({ ...unsignedPayload, supplierName: 'Tool Supplier', status: 'draft' }, developer, developer);
-  for (let number = 1; number <= 31; number++) record = await service.update(record.id, { version: record.version, reason: `Reason update ${number}` }, developer, developer);
-  record = await service.update(record.id, { version: record.version, reason: '<img src=x onerror="window.injected=true">' }, developer, developer);
-  record = await service.update(record.id, { version: record.version, status: 'submitted' }, developer, developer);
-  record = await service.update(record.id, { version: record.version, internalReview: { signoff: { gscTet: { prepared: true } } } }, developer, developer);
-  const other = await service.create({ ...unsignedPayload, supplierName: 'Second tool supplier', status: 'draft' }, developer, developer);
+  let record = await service.create({ ...unsignedPayload, supplierName: 'Tool Supplier', status: 'draft' }, actor, developer);
+  for (let number = 1; number <= 31; number++) record = await service.update(record.id, { version: record.version, reason: `Reason update ${number}` }, actor, developer);
+  record = await service.update(record.id, { version: record.version, reason: '<img src=x onerror="window.injected=true">' }, actor, developer);
+  const currentCondition = 'A detailed current material condition for comparison. '.repeat(14);
+  record = await service.update(record.id, { version: record.version, changeRows: [{ ...unsignedPayload.changeRows[0], currentCondition,
+    newCondition: 'Updated material condition with a readable explanation.' }] }, actor, developer);
+  record = await service.update(record.id, { version: record.version, status: 'submitted' }, actor, developer);
+  record = await service.update(record.id, { version: record.version, internalReview: { signoff: { gscTet: { prepared: true } } } }, actor, developer);
+  const other = await service.create({ ...unsignedPayload, supplierName: 'Second tool supplier', status: 'draft' }, actor, developer);
   const server = createApp({ repository, service, authService, documents: { list: async () => [] }, publicOrigin: 'http://localhost', secureCookies: false });
   let browser, context, page;
   const releases = [];
@@ -29,7 +33,7 @@ async function main() {
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ headless: true });
-    context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' });
+    context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, serviceWorkers: 'block' });
     await context.route('**/*', route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin !== origin) { report.external.push(url.pathname);return route.abort(); }
@@ -55,6 +59,19 @@ async function main() {
     await page.screenshot({ path: path.resolve('test-results/developer-workflow-desktop.png'), fullPage: true });
     await page.locator('#transactionsTab').click();
     await expect(page.locator('#transactionRows tr')).toHaveCount(25);
+    const layout = await page.locator('#developerMain').boundingBox();
+    assert.ok(layout.width >= 1856, 'Developer Tools uses the wide desktop layout');
+    const actorCell = page.locator('#transactionRows tr').first().locator('td').nth(1);
+    assert.ok(!(await actorCell.innerText()).includes(actor), 'Actor reference is collapsed by default');
+    await actorCell.locator('summary').click();assert.ok((await actorCell.innerText()).includes(actor));
+    await actorCell.locator('summary').click();
+    await page.locator('#transactionSearch').fill('changeRows');
+    await expect(page.locator('#transactionRows')).toContainText(/Current condition/i);
+    const afterCell = page.locator('#transactionRows tr').first().locator('td').nth(5);
+    assert.ok(!(await afterCell.innerText()).includes('"currentCondition"'), 'Structured changes display readable labels');
+    await afterCell.locator('summary').click();
+    assert.ok((await afterCell.innerText()).includes(currentCondition.trim()), 'Expanded value retains all long text');
+    await page.locator('#transactionSearch').fill('');
     await page.locator('#transactionNext').click();await expect(page.locator('#transactionPrevious')).toBeEnabled();
     await page.locator('#transactionSearch').fill('Reason update 31');
     await expect(page.locator('#transactionRows')).toContainText('Reason update 31');

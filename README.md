@@ -121,6 +121,8 @@ Administrator informational PCN update emails are limited to their assigned depa
 
 Active Developer accounts have a **Developer Tools** menu linking to `/developer`. Administrators and other roles cannot use its APIs. Select a PCN, then use **Workflow** to inspect actual Prepared → Checked → Approved signatures, the next action, assigned people and missing document requirements. **Document Transactions** lists recorded saves with time, person, revision, changed field and before/after values; search, UTC date filters and pagination apply to the selected PCN. Earlier unavailable history is identified explicitly. These tools are read-only and do not send mail or change documents. Run `npm run test:developer-tools` for isolated browser acceptance.
 
+Transaction history uses the available page width. Person names are shown first, with references expandable when needed. Structured changes have readable labels; long Before/After values can be expanded without losing their full content.
+
 ### Guided PCN creation (local development)
 
 Clicking the Portal's **Create PCN** label opens the Create page. Hovering over it or activating its separate arrow opens the four shortcuts: **Blank PCN**, **Common change starter**, **Copy existing PCN** or **Resume draft**. Opening these entry choices does not create a record or queue mail. Users table role and department badges show Developer in yellow, Administrator in green and other assigned values in black; unassigned values keep a yellow pending indicator.

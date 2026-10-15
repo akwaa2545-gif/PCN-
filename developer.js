@@ -23,6 +23,42 @@
     if (typeof value === 'object') return JSON.stringify(value);
     return String(value);
   }
+  function humanLabel(key) {
+    const labels = { text: 'Change', optionText: 'Change category', risk: 'Risk', riskLevel: 'Risk level',
+      currentCondition: 'Current condition', newCondition: 'New condition', selectedChange: 'Change',
+      displayName: 'Name', createdAt: 'Created at', updatedAt: 'Updated at' };
+    if (Object.hasOwn(labels, key)) return labels[key];
+    const words = String(key).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase();
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)} (${key})`;
+  }
+  function readableValue(value, path = '') {
+    if (value === undefined) return 'Not recorded';
+    if (value === null) return 'Not set';
+    if (value === '') return 'Empty value';
+    if (typeof value === 'boolean') {
+      const signature = /(?:^|\.)(?:prepared|checked|approved)$/.test(path);
+      return signature ? value ? 'Signed' : 'Not signed' : value ? 'Yes' : 'No';
+    }
+    if (Array.isArray(value)) {
+      if (!value.length) return 'Empty list';
+      return value.map((item, index) => `Item ${index + 1}\n${readableValue(item, `${path}.${index}`)}`).join('\n\n');
+    }
+    if (typeof value === 'object') {
+      const entries = Object.entries(value);
+      if (!entries.length) return 'Empty object';
+      return entries.map(([key, item]) => {
+        const content = readableValue(item, `${path}.${key}`);
+        return `${humanLabel(key)}:${content.includes('\n') ? '\n' : ' '}${content}`;
+      }).join('\n');
+    }
+    return String(value);
+  }
+  function valuePresentation(value) {
+    const full = String(value);
+    const expandable = full.length > 240 || full.split('\n').length > 4;
+    const preview = expandable ? `${full.split('\n').slice(0, 3).join('\n').slice(0, 200)}…` : full;
+    return { full, preview, expandable };
+  }
   function flattenTransactions(items) {
     return (Array.isArray(items) ? items : []).flatMap((item, index) => {
       const common = { revision: item.revision, contentRevision: item.contentRevision,
@@ -31,7 +67,8 @@
       if (item.isBaseline) return [{ ...common, path: '', label: 'History baseline', before: '—', after: 'Earlier field changes are unavailable.' }];
       if (!item.changes?.length) return [{ ...common, path: '', label: 'Saved', before: '—', after: 'No document field changes recorded.' }];
       return item.changes.map(change => ({ ...common, path: change.path || '', label: change.label || change.path || 'Document',
-        before: displayValue(change.before), after: displayValue(change.after) }));
+        before: readableValue(change.before, change.path), after: readableValue(change.after, change.path),
+        searchText: JSON.stringify([change.before, change.after]) }));
     }).sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)
       || Number(b.revision || 0) - Number(a.revision || 0) || a.order - b.order);
   }
@@ -40,7 +77,7 @@
     return rows.filter(row => {
       const date = /^\d{4}-\d{2}-\d{2}/.exec(row.createdAt)?.[0] || '';
       return (!from || date >= from) && (!to || date <= to)
-        && (!text || [row.actor, row.actorReference, row.label, row.path, row.before, row.after, row.revision]
+        && (!text || [row.actor, row.actorReference, row.label, row.path, row.before, row.after, row.revision, row.searchText]
           .some(value => String(value ?? '').toLowerCase().includes(text)));
     });
   }
@@ -96,6 +133,45 @@
       lock(true); el('developerMain').hidden = true;
       status('Developer access required. Sign in with an active Developer account and reload this page.', true);
     }
+    function valueCell(value) {
+      const cell = node('td', undefined, 'developer-value');
+      const content = valuePresentation(displayValue(value));
+      cell.appendChild(node('p', content.preview, 'developer-value-preview'));
+      if (content.expandable) {
+        const details = node('details', undefined, 'developer-value-details');
+        details.appendChild(node('summary', 'Show full value'));
+        details.appendChild(node('div', content.full, 'developer-value-full'));
+        cell.appendChild(details);
+      }
+      return cell;
+    }
+    function actorCell(item) {
+      const cell = node('td', undefined, 'developer-actor');
+      cell.appendChild(node('strong', item.actor));
+      if (item.actorReference && item.actorReference !== item.actor) {
+        const details = node('details', undefined, 'developer-reference');
+        details.appendChild(node('summary', 'User reference'));
+        details.appendChild(node('div', item.actorReference, 'developer-reference-value'));
+        cell.appendChild(details);
+      }
+      return cell;
+    }
+    function dateCell(value) {
+      const cell = node('td', undefined, 'developer-time');
+      const time = Date.parse(value);
+      if (!Number.isFinite(time)) { cell.textContent = 'Not recorded'; return cell; }
+      const date = new Date(time);
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      cell.appendChild(node('span', `${String(date.getUTCDate()).padStart(2, '0')} ${months[date.getUTCMonth()]} ${date.getUTCFullYear()}`, 'developer-time-date'));
+      cell.appendChild(node('span', `${date.toISOString().slice(11, 19)} UTC`, 'developer-time-clock'));
+      return cell;
+    }
+    function revisionCell(item) {
+      const cell = node('td', undefined, 'developer-revision');
+      cell.appendChild(node('span', `Save ${displayValue(item.revision)}`, 'developer-save-badge'));
+      if (item.contentRevision !== undefined && item.contentRevision !== null) cell.appendChild(node('span', `Document ${item.contentRevision}`, 'developer-document-revision'));
+      return cell;
+    }
     function renderTransactions() {
       const filtered = filterTransactions(state.rows, { query: el('transactionSearch').value,
         from: el('transactionFrom').value, to: el('transactionTo').value });
@@ -108,10 +184,9 @@
       }
       for (const item of page.items) {
         const row = node('tr');
-        const actor = item.actorReference && item.actorReference !== item.actor ? `${item.actor}\n${item.actorReference}` : item.actor;
-        const revision = item.contentRevision === undefined || item.contentRevision === null
-          ? item.revision : `${item.revision}\nDocument ${item.contentRevision}`;
-        for (const value of [formatDate(item.createdAt), actor, revision, item.label, item.before, item.after]) row.appendChild(node('td', displayValue(value)));
+        row.appendChild(dateCell(item.createdAt)); row.appendChild(actorCell(item)); row.appendChild(revisionCell(item));
+        row.appendChild(node('td', item.label, 'developer-field'));
+        row.appendChild(valueCell(item.before)); row.appendChild(valueCell(item.after));
         body.appendChild(row);
       }
       el('transactionCount').textContent = `${page.first}–${page.last} of ${page.total} changes · Page ${page.page} of ${page.pages}`;
@@ -260,5 +335,5 @@
     }
     return { refresh, loadDetails, state };
   }
-  return { isDeveloper, requestedPcn, flattenTransactions, filterTransactions, pageTransactions, mount };
+  return { isDeveloper, requestedPcn, readableValue, valuePresentation, flattenTransactions, filterTransactions, pageTransactions, mount };
 });
