@@ -1,6 +1,17 @@
 const { isDeepStrictEqual } = require('node:util');
 const { isInternal } = require('./workflowAccess');
 const { emailList } = require('./integrationService');
+const { departments, resolveNextMailTarget } = require('./mailRouting');
+
+const departmentKeys = new Set(departments.map(department => department.key));
+const isAdministrator = user => Array.isArray(user?.roles)
+  && user.roles.some(role => typeof role === 'string' && role.trim().toLowerCase() === 'admin');
+const scopedReviewPaths = [
+  ['signoff.gscTet', 'gscTet'], ['signoff.prodEngTet', 'prodEngTet'], ['signoff.qaTet', 'qaTet'],
+  ['qateFinal', 'qaTet'], ['tapbu.gsc', 'gscTapbu'], ['tapbu.qa', 'qaTapbu'],
+  ['materialCodeDescription', 'gscTet'], ['docs', 'gscTet'], ['tapbu.need', 'gscTet'],
+  ['tapbu.noNeed', 'gscTet'], ['tapbu.comment', 'gscTet'], ['decision', 'qaTet'], ['supplierNotification', 'gscTet']
+];
 
 const metadata = new Set(['id', 'version', 'createdAt', 'updatedAt', 'submittedAt', 'ownerUserId', 'masterDataVersionId',
   'mailRoutingState', 'mailRoutingPolicyVersion', 'notification', 'workflow', 'workflowProgress', 'documentControl']);
@@ -26,13 +37,28 @@ function meaningfulUpdate(before, after) {
     .map(key => labels[key] || 'PCN details').filter((value, index, list) => list.indexOf(value) === index);
 }
 
-function notificationRecipient(user, record) {
+function notificationDepartmentKeys(before, after) {
+  if ((!before || before.status === 'draft') && after?.status === 'submitted') return ['gscTet'];
+  const reviewValue = (record, path) => comparableDomainValue(path.split('.').reduce((value, key) => value?.[key], record?.internalReview));
+  const explicit = scopedReviewPaths.filter(([path]) => !isDeepStrictEqual(reviewValue(before, path), reviewValue(after, path)))
+    .map(([, department]) => department);
+  const active = record => {
+    const target = resolveNextMailTarget(record);
+    return target?.groupKey === 'supplierNotification' ? 'gscTet' : target?.departmentKey;
+  };
+  const relevant = new Set(explicit.length ? explicit : [active(before), active(after)]);
+  return departments.map(department => department.key).filter(key => relevant.has(key));
+}
+
+function notificationRecipient(user, record, scope = []) {
   if (!record || !['employee-code', 'pcn-local'].includes(user.identityProvider) || !user.isActive || !user.mailVerifiedAt || !user.mailDirectoryId
     || user.mailProfile?.id !== user.mailDirectoryId || (!isInternal(user) && String(record.ownerUserId || '') !== String(user.id))) return null;
+  const administrator = isAdministrator(user);
+  if (administrator && (!departmentKeys.has(user.department) || !Array.isArray(scope) || !scope.includes(user.department))) return null;
   try {
     const email = emailList(user.email);
     if (email.includes(';') || email.toLowerCase() !== String(user.mailProfile.email).toLowerCase()) return null;
-    return { userId: user.id, directoryId: user.mailDirectoryId, email };
+    return { userId: user.id, directoryId: user.mailDirectoryId, email, ...(administrator ? { department: user.department } : {}) };
   } catch { return null; }
 }
 
@@ -48,12 +74,15 @@ function batchRecipients(recipients) {
 }
 
 function filterPendingUpdates(payload, users, record) {
+  const savedScope = payload.updateSnapshot?.audiencePolicyVersion === 1 && Array.isArray(payload.updateSnapshot?.departmentKeys)
+    ? payload.updateSnapshot.departmentKeys.filter(key => departmentKeys.has(key)) : [];
   const valid = (payload.updateSnapshot?.recipients || []).filter(snapshot => {
     const user = users.find(entry => entry.id === snapshot.userId);
-    const recipient = user && notificationRecipient(user, record);
+    const recipient = user && notificationRecipient(user, record, savedScope);
+    if (isAdministrator(user) && recipient?.department !== snapshot.department) return false;
     return recipient && recipient.directoryId === snapshot.directoryId && recipient.email.toLowerCase() === String(snapshot.email).toLowerCase();
   });
   return { ...payload, to: valid.length ? emailList(valid.map(entry => entry.email).join('; ')) : '' };
 }
 
-module.exports = { meaningfulUpdate, notificationRecipient, batchRecipients, filterPendingUpdates };
+module.exports = { meaningfulUpdate, notificationDepartmentKeys, notificationRecipient, batchRecipients, filterPendingUpdates };

@@ -3,7 +3,7 @@ const sql = require('mssql');
 const { ApiError } = require('./apiError');
 const { emailList } = require('./integrationService');
 const { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage } = require('./notificationTemplate');
-const { meaningfulUpdate, notificationRecipient, batchRecipients } = require('./notificationUpdates');
+const { meaningfulUpdate, notificationDepartmentKeys, notificationRecipient, batchRecipients } = require('./notificationUpdates');
 const { actions, departments, legacyDefinitions, normalizeMailRouting, resolveNextMailTarget } = require('./mailRouting');
 const { routeGroups } = require('./workflowAccess');
 const { lockUserMailRouting, readUserMailAssignments, readGeneralNotificationUsers, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
@@ -33,24 +33,26 @@ class NotificationService {
     const updateSummary = meaningfulUpdate(before, proposed).join('; ');
     const prepared = await this.prepareAction(tx, before, proposed, updateSummary);
     if (!prepared.plan || prepared.record.mailRoutingPolicyVersion !== 2) return prepared;
-    const update = await this.prepareUpdate(tx, prepared.record, prepared.plan, updateSummary);
+    const update = await this.prepareUpdate(tx, prepared.record, prepared.plan, updateSummary, before);
     return { ...prepared, plan: { ...prepared.plan, update } };
   }
 
-  async prepareUpdate(tx, record, actionPlan, updateSummary) {
+  async prepareUpdate(tx, record, actionPlan, updateSummary, before) {
     if (!updateSummary) return { queued: false, jobCount: 0, reason: 'no_change' };
     const configured = this.mailConfigurationStatus ? this.mailConfigurationStatus() === 'configured' : Boolean(this.mailUrl);
     if (!configured) return { queued: false, jobCount: 0, reason: 'mail_not_configured' };
     const excluded = new Set(actionPlan.queued ? actionPlan.payload.to.split(';').map(email => email.trim().toLowerCase()) : []);
+    const departmentKeys = notificationDepartmentKeys(before, record);
     const users = await readGeneralNotificationUsers(tx);
-    const audience = users.map(user => notificationRecipient(user, record)).filter(recipient => recipient && !excluded.has(recipient.email.toLowerCase()));
+    const audience = users.map(user => notificationRecipient(user, record, departmentKeys)).filter(recipient => recipient && !excluded.has(recipient.email.toLowerCase()));
     const batches = batchRecipients(audience);
     if (!batches.length) return { queued: false, jobCount: 0, reason: 'no_verified_recipients' };
     try {
       const message = buildPcnUpdateNotificationMessage(record, { pcnUrl: this.pcnLink(record.id), updateSummary, status: record.status });
       return { queued: true, jobCount: batches.length, batches: batches.map(recipients => ({
         to: emailList(recipients.map(recipient => recipient.email).join('; ')), subject: notificationSubject(record, `[PCN Update] ${record.id} - ${record.status}`),
-        message, senderName: 'Supplier PCN Workflow', notificationKind: 'pcn_update', updateSnapshot: { pcnId: record.id, recipients }
+        message, senderName: 'Supplier PCN Workflow', notificationKind: 'pcn_update', updateSnapshot: {
+          pcnId: record.id, audiencePolicyVersion: 1, departmentKeys, recipients }
       })) };
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;

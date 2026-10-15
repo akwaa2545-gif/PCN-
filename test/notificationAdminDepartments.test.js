@@ -46,6 +46,9 @@ test('generic edits use union of before and after active departments; blank defa
   assert.deepEqual(notificationDepartmentKeys({ ...base, status: 'closed' }, { ...base, status: 'closed', materialName: 'changed' }), []);
   assert.deepEqual(notificationDepartmentKeys(qa, { ...qa, internalReview: { ...qa.internalReview, docs: { greenProcurement: false },
     signoff: { ...qa.internalReview.signoff, qaTet: { comment: '' } } } }), ['qaTet']);
+  const tapbu = { ...base, riskLevel: 'RL1', internalReview: { signoff: { gscTet: signed, prodEngTet: signed, qaTet: signed },
+    tapbu: { need: true, gsc: signed } } };
+  assert.deepEqual(notificationDepartmentKeys(tapbu, { ...tapbu, riskLevel: 'RL0' }), ['qaTet', 'qaTapbu']);
   const done = { ...base, status: 'approved', internalReview: { signoff: { gscTet: signed, prodEngTet: signed, qaTet: signed }, qateFinal: { signoff: signed } } };
   assert.deepEqual(notificationDepartmentKeys(done, { ...done, materialName: 'changed' }), ['gscTet']);
 });
@@ -61,13 +64,13 @@ test('only actual Administrators require a known matching department, even when 
   assert(notificationRecipient(admin('review', null, { roles: ['reviewer'] }), base, []));
 });
 
-function transaction(users, savedPayload) {
+function transaction(users, savedPayload, settings = { schemaVersion: 2, groups: [] }) {
   const calls = [];
   return { calls, begin: async () => {}, commit: async () => calls.push('commit'), rollback: async () => {}, request() {
     const inputs = {};
     return { input(name, type, value) { inputs[name] = value; return this; }, async query(query) {
       calls.push({ query, inputs });
-      if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: '{"schemaVersion":2,"groups":[]}' }] };
+      if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
       if (query.includes('u.MailProfileJson')) return { recordset: users.map(user => ({ Id: user.id, EmployeeCode: user.id,
         IsActive: user.isActive, IdentityProvider: user.identityProvider, DepartmentKey: user.department, SigningStep: user.signingStep,
         Email: user.email, MailDirectoryId: user.mailDirectoryId, MailVerifiedAt: user.mailVerifiedAt,
@@ -95,6 +98,22 @@ test('general update queue saves changed scope and Administrator department, exc
   assert.deepEqual(dedup.batches[0].updateSnapshot.recipients.map(entry => entry.userId), ['dev']);
   const prepared = await service.prepare(tx, base, after);
   assert.deepEqual(prepared.plan.update.batches[0].updateSnapshot.departmentKeys, ['gscTet'], 'prepare forwards prior record');
+});
+
+test('GSC Approved updates GSC Administrators while next-action mail still routes to Prod.Eng Prepared', async () => {
+  const before = { ...base, internalReview: { signoff: { gscTet: { prepared: true, checked: true } } } };
+  const after = { ...before, internalReview: { signoff: { gscTet: signed } } };
+  const gsc = admin('gsc', 'gscTet');
+  const production = admin('production', 'prodEngTet');
+  const tx = transaction([gsc, production, admin('qa', 'qaTet')], undefined, { schemaVersion: 2,
+    groups: [{ key: 'department.prodEngTet.prepared', emails: production.email, recipients: [] }] });
+  const service = new NotificationService(null, { mailUrl: 'https://mail.example.test' });
+  const prepared = await service.prepare(tx, before, after);
+  assert.equal(prepared.plan.queued, true);
+  assert.equal(prepared.plan.payload.to, production.email);
+  assert.equal(prepared.plan.nextGroupKey, 'department.prodEngTet.prepared');
+  assert.equal(prepared.plan.update.batches[0].to, gsc.email);
+  assert.deepEqual(prepared.plan.update.batches[0].updateSnapshot.departmentKeys, ['gscTet']);
 });
 
 test('queued scope is immutable; reassignment, promotion and old scopeless Administrator entries are dropped', () => {

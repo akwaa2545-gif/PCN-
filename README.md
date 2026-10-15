@@ -113,6 +113,10 @@ The server checks schema and master data before listening. Use `NODE_ENV=product
 
 `npm run start:windows` is an additional Windows credential launcher. Use `npm start` with the runtime's configurable credential location or environment configuration.
 
+### Administrator update emails (local development)
+
+Administrator informational PCN update emails are limited to their assigned department's changes. Unassigned Administrators no longer receive every update. Pending update recipients are rechecked against their saved department and event scope before sending; next-action workflow emails retain their existing routing.
+
 ### Developer Tools (local development)
 
 Active Developer accounts have a **Developer Tools** menu linking to `/developer`. Administrators and other roles cannot use its APIs. Select a PCN, then use **Workflow** to inspect actual Prepared → Checked → Approved signatures, the next action, assigned people and missing document requirements. **Document Transactions** lists recorded saves with time, person, revision, changed field and before/after values; search, UTC date filters and pagination apply to the selected PCN. Earlier unavailable history is identified explicitly. These tools are read-only and do not send mail or change documents. Run `npm run test:developer-tools` for isolated browser acceptance.
