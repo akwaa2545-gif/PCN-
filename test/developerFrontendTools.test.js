@@ -52,8 +52,8 @@ test('pagination clamps stale pages and handles empty results', () => {
 
 function page(fetch, user = { isActive: true, roles: ['developer'], department: 'developer', signingStep: null }) {
   const nodes = new Map(), calls = [];
-  function element() {
-    return { value: '', hidden: false, disabled: false, textContent: '', children: [], events: {}, attributes: {},
+  function element(tag = 'div') {
+    return { tagName: tag.toUpperCase(), value: '', hidden: false, disabled: false, textContent: '', children: [], events: {}, attributes: {},
       appendChild(child) { this.children.push(child); }, replaceChildren() { this.children = []; },
       setAttribute(key, value) { this.attributes[key] = value; },
       addEventListener(key, callback) { this.events[key] = callback; }, focus() { this.focused = true; } };
@@ -75,6 +75,64 @@ test('unauthorized and malformed Developer sessions never fetch document data', 
     assert.equal(fixture.get('developerMain').hidden, true);
     assert.ok(fixture.get('developerStatus').textContent);
   }
+});
+
+test('structured transaction values use labelled human text and preserve unknown keys and values', () => {
+  const value = [{ text: 'Process change', risk: 'RL2', currentCondition: 'Old process', newCondition: 'New process', optionText: 'Category', customDetail: { lot: 'L001', enabled: true } }];
+  const readable = tools.readableValue(value, 'changeRows');
+  assert.match(readable, /Item 1/);
+  assert.match(readable, /Change: Process change/);
+  assert.match(readable, /Risk: RL2/);
+  assert.match(readable, /Current condition: Old process/);
+  assert.match(readable, /New condition: New process/);
+  assert.match(readable, /Custom detail \(customDetail\)/);
+  assert.match(readable, /Lot \(lot\): L001/);
+  assert.match(readable, /Enabled \(enabled\): Yes/);
+  assert.doesNotMatch(readable, /\{"|\[\{/);
+  assert.equal(tools.readableValue([], 'comments'), 'Empty list');
+  assert.equal(tools.readableValue({}, 'comments'), 'Empty object');
+});
+
+test('signature booleans read Signed or Not signed while ordinary flags read Yes or No', () => {
+  assert.equal(tools.readableValue(true, 'internalReview.signoff.gscTet.prepared'), 'Signed');
+  assert.equal(tools.readableValue(false, 'internalReview.gsc.checked'), 'Not signed');
+  assert.equal(tools.readableValue(true, 'isTestDocument'), 'Yes');
+  assert.equal(tools.readableValue(false, 'internalReview.tapbu.need'), 'No');
+});
+
+test('long values retain their complete literal text behind an expandable preview and remain fully searchable', () => {
+  const literal = 'Long text '.repeat(60) + '<img src=x onerror=alert(1)> final words';
+  const presentation = tools.valuePresentation(literal);
+  assert.equal(presentation.expandable, true);
+  assert.equal(presentation.full, literal);
+  assert.ok(presentation.preview.length < literal.length);
+  assert.equal(tools.valuePresentation('Short value').expandable, false);
+  const rows = tools.flattenTransactions([{ revision: 1, changes: [{ path: 'changeRows', before: [], after: [{ customDetail: literal }] }] }]);
+  assert.equal(tools.filterTransactions(rows, { query: 'customDetail' }).length, 1);
+  assert.equal(tools.filterTransactions(rows, { query: 'final words' }).length, 1);
+});
+
+test('transaction rendering keeps actor references out of the primary name and reveals complete safe values', async () => {
+  const reference = 'c1ec2bfd-09d2-4b61-8aef-cedfe9f93fc8';
+  const literal = 'Value '.repeat(60) + '<script>literal</script>';
+  const fixture = page(url => url === '/api/developer/pcns' ? { items: [{ id: 'PCN-2026-0001' }] }
+    : { ...record('PCN-2026-0001'), transactions: { items: [{ revision: 12, contentRevision: 3, actor: 'Jane Reviewer', actorReference: reference,
+      createdAt: '2026-10-15T13:12:11Z', changes: [{ path: 'reason', label: 'Reason', before: 'Old', after: literal }] }] } });
+  const controller = await tools.mount(fixture.root);
+  await controller.loadDetails('PCN-2026-0001');
+  const row = fixture.get('transactionRows').children[0];
+  assert.equal(row.children[1].children[0].textContent, 'Jane Reviewer');
+  assert.equal(row.children[1].children[1].tagName, 'DETAILS');
+  assert.equal(row.children[1].children[1].children[0].textContent, 'User reference');
+  assert.equal(row.children[1].children[1].children[1].textContent, reference);
+  assert.equal(row.children[0].children[0].textContent, '15 Oct 2026');
+  assert.equal(row.children[0].children[1].textContent, '13:12:11 UTC');
+  assert.equal(row.children[2].children[0].textContent, 'Save 12');
+  assert.equal(row.children[2].children[1].textContent, 'Document 3');
+  const after = row.children[5];
+  assert.equal(after.children[1].tagName, 'DETAILS');
+  assert.equal(after.children[1].children[0].textContent, 'Show full value');
+  assert.equal(after.children[1].children[1].textContent, literal);
 });
 
 test('late PCN responses cannot overwrite a newer selection or expose stale transactions', async () => {
