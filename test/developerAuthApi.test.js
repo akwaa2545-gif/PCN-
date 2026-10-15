@@ -10,6 +10,18 @@ async function harness(t,roles=['admin'],mode='employee-code'){
  return {request,state,target,secret,accountPassword};
 }
 test('Developer HTTP login is ordinary and rejects the assignment-password field',async t=>{const f=await harness(t,['developer']);const login=await f.request('/api/auth/login',{method:'POST',body:{employeeCode:'1234567'}});assert.equal(login.status,200);assert.equal(login.data.data.user.department,'developer');assert.equal((await f.request('/api/admin/users')).status,200);assert.equal((await f.request('/api/auth/login',{method:'POST',body:{employeeCode:'1234567',developerPassword:f.secret}})).status,400);assert.equal(JSON.stringify(login.data).includes(f.secret),false);});
+
+test('Administrator HTTP cannot change or remove Developer access even with the assignment password',async t=>{
+ const f=await harness(t);Object.assign(f.target,{roles:['developer'],department:'developer',signingStep:null});
+ await f.request('/api/auth/login',{method:'POST',body:{employeeCode:'1234567'}});
+ const path=`/api/admin/users/${f.target.id}`;
+ for(const patch of [{roles:['developer'],department:'developer',developerPassword:f.secret},{roles:['admin'],department:'it',isActive:false}]){
+  const result=await f.request(path,{method:'PATCH',body:{signingStep:null,isActive:true,version:f.target.version,...patch}});
+  assert.equal(result.status,403);assert.match(result.data.error,/only a Developer/i);
+ }
+ const removed=await f.request(`${path}/roles`,{method:'DELETE',body:{version:f.target.version}});
+ assert.equal(removed.status,403);assert.equal(f.state.writes.length,0);
+});
 test('assignment errors are inline 400s; correct password is write-only and Administrator session survives',async t=>{
  const f=await harness(t);await f.request('/api/auth/login',{method:'POST',body:{employeeCode:'1234567'}});const body={roles:['developer'],department:'developer',signingStep:null,isActive:true,version:f.target.version};const path=`/api/admin/users/${f.target.id}`;
  const missing=await f.request(path,{method:'PATCH',body});assert.equal(missing.status,400);assert.equal(missing.data.code,'DEVELOPER_PASSWORD_REQUIRED');

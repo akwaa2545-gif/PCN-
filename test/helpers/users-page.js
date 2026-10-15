@@ -55,7 +55,7 @@ async function usersPage(assignedUsers = [], options = {}) {
     PCN_AUTO_REFRESH: { start(options) { autoRefresh = options; return () => {}; } },
     location: { hash: '#users' }, addEventListener(name, handler) { windowEvents[name] = handler; }, confirm: (message) => { confirmations.push(message); return pageOptions.confirm !== false; },
     PCN_SESSION: {
-      require: async () => pageOptions.unauthorized ? null : ({ authenticated: true, user: { roles: ['admin'] } }),
+      require: async () => pageOptions.unauthorized ? null : ({ authenticated: true, user: pageOptions.user || { roles: ['admin'] } }),
       async fetch(url, options) {
         calls.push({ url, options });
         if (pageOptions.fetch) {
