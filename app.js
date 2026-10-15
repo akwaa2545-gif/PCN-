@@ -557,7 +557,7 @@
     const draftAllowed = !state.activeRequest.id || ['draft','supplier_action'].includes(savedStatus);
     if (mode === 'draft' && !draftAllowed) return;
     if (mode === 'draft') state.activeRequest = {...state.activeRequest,status:savedStatus === 'supplier_action' ? savedStatus : 'draft'};
-    else if (savedStatus === 'draft') state.activeRequest = {...state.activeRequest,status:'submitted'};
+    else if (['draft','supplier_action'].includes(savedStatus)) state.activeRequest = {...state.activeRequest,status:'submitted'};
 
     if (!state.apiReady) {
       state.message = "Cannot save until the PCN data has loaded from the server. Refresh the page and try again.";
