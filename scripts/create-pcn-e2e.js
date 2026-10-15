@@ -152,7 +152,12 @@ async function main() {
     page.on('pageerror', error => report.errors.push(error.message));
     if(entryMenuOnly){
       await page.goto(`${origin}/admin`);
-      const trigger=page.getByRole('button',{name:'Create PCN',exact:true}),menu=page.locator('#createStartOptions');
+      const createLink=page.getByRole('link',{name:'Create PCN',exact:true});
+      await expect(createLink).toHaveAttribute('href','/create');await createLink.click();
+      await expect(page).toHaveURL(`${origin}/create`);await expect(page.locator('#createEntry')).toBeVisible();
+      assert.equal((await system.repository.list()).length,0);assert.deepEqual(system.jobs,[]);
+      await page.goto(`${origin}/admin`);
+      const trigger=page.getByRole('button',{name:'Choose how to start a PCN',exact:true}),menu=page.locator('#createStartOptions');
       await expect(trigger).toHaveAttribute('aria-expanded','false');
       await expect(menu).toBeHidden();await trigger.hover();await expect(menu).toBeVisible();
       await expect(menu.locator('a')).toHaveText(['Blank PCN','Common change starter','Copy existing PCN','Resume draft']);
@@ -163,7 +168,9 @@ async function main() {
       await expect(menu.locator('a').first()).toBeFocused();await page.keyboard.press('Escape');
       await expect(menu).toBeHidden();await expect(trigger).toBeFocused();
       await trigger.click();await expect(menu).toBeVisible();await page.locator('#adminRefreshButton').click();await expect(menu).toBeHidden();
-      checked('Create dropdown supports hover without gaps, keyboard opening, Escape, click and outside dismissal');
+      await createLink.focus();await page.keyboard.press('Enter');await expect(page).toHaveURL(`${origin}/create`);
+      await page.goto(`${origin}/admin`);await createLink.hover();await expect(menu).toBeVisible();await page.mouse.move(1,500);
+      checked('Create PCN click and Enter open the Create page while the separate dropdown supports hover, keyboard and dismissal');
       const choices=[['Blank PCN','#createEditor'],['Common change starter','#starterOption'],['Copy existing PCN','#templatePcnId'],['Resume draft','#entryChoices']];
       for(const [label,target]of choices){
         await page.goto(`${origin}/admin`);await trigger.hover();await menu.getByRole('link',{name:label,exact:true}).click();
@@ -178,7 +185,8 @@ async function main() {
       await page.screenshot({path:path.resolve('test-results/create-pcn-entry-menu-mobile.png')});
       await menu.getByRole('link',{name:'Copy existing PCN',exact:true}).click();await expect(page.locator('#templatePcnId')).toBeFocused();
       await page.goto(`${origin}/create?start=unrecognized`);await expect(page.locator('#createEntry')).toBeVisible();await expect(page.locator('#createEditor')).toBeHidden();
-      checked('Small-screen click navigation fits the viewport and unknown start choices safely keep the entry chooser');
+      await page.goto(`${origin}/admin`);await createLink.click();await expect(page).toHaveURL(`${origin}/create`);
+      checked('Small-screen Create navigation and separate dropdown fit the viewport; unknown choices keep the entry chooser');
       await page.setViewportSize({width:1440,height:1000});await page.goto(`${origin}/admin#users`);
       const assignedRows=page.locator('#adminUsersRows tr');
       const developerRow=assignedRows.filter({hasText:'Developer badge fixture'}),checkerRow=assignedRows.filter({hasText:'Checked badge fixture'});
