@@ -43,6 +43,7 @@
       const message = isEditConflict ? 'This record changed since you loaded it. Refresh the record before saving again; your edits have not been overwritten.' : rawError || 'API request failed.';
       const error = new Error(message);
       error.status = response.status;
+      error.details = body.details;
       error.code = body.code || body.error?.code;
       const authRoute = url.pathname === '/api/session' || url.pathname.startsWith('/api/auth/');
       if (response.status === 401 && !authRoute) redirectToLogin();

@@ -9510,3 +9510,36 @@ body.pcn-page .document-recovery-offer button:focus-visible { outline:2px solid 
   body.pcn-page .form-action-dock #submitButton { flex:1; min-width:0; width:auto; }
   body.pcn-page .form-action-dock #saveDraftButton { flex:0 0 auto; width:auto; }
 }
+
+/* Required information after a rejected PCN save. */
+body.pcn-page .app-feedback-area:has(.has-missing-items:not([hidden])) {
+  position: relative;
+  z-index: auto;
+  right: auto;
+  bottom: auto;
+  width: auto;
+  margin: 16px clamp(12px, 2vw, 28px);
+}
+body.pcn-page .app-notice.has-missing-items {
+  display: block;
+  pointer-events: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 18px 20px;
+  line-height: 1.5;
+}
+.app-notice.has-missing-items::before { display: none; }
+.app-notice.has-missing-items > strong { display: block; margin-bottom: 4px; font-size: 16px; }
+.app-notice.has-missing-items > span { display: block; font-size: 13px; font-weight: 400; }
+.app-notice-missing { display: grid; gap: 0; margin: 12px 0 0; padding: 0; list-style: none; }
+.app-notice-missing[hidden] { display: none; }
+.app-notice-missing li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid #ecd5d5; }
+.app-notice-missing li > span { min-width: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.app-notice-missing button { flex: 0 0 auto; min-height: 36px; padding: 6px 12px; border: 1px solid #c5d4e4; border-radius: 4px; background: #fff; color: #00457c; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.app-notice-missing button:hover { background: #edf4fa; border-color: #00457c; }
+.app-notice-missing button:focus-visible { outline: 2px solid #0067b9; outline-offset: 3px; }
+@media (max-width: 480px) {
+  body.pcn-page .app-notice.has-missing-items { padding: 16px; }
+  .app-notice-missing li { align-items: flex-start; gap: 10px; }
+  .app-notice-missing button { min-height: 44px; max-width: 120px; white-space: normal; }
+}

@@ -158,6 +158,7 @@
       "appNotice",
       "appNoticeTitle",
       "appNoticeMessage",
+      "appNoticeMissing",
       "appToastStack",
       "pcnSaveOverlay",
       "pcnUpdateSuccess",
@@ -609,7 +610,7 @@
     } catch (error) {
       state.activeRequest = {...state.activeRequest,status:state.savedRecord?.status || savedStatus};
       state.message = error.message;
-      showNotice("error", "Save failed", error.message);
+      showSaveError(error);
     } finally {
       els.submitButton.disabled = false;
       document.body.classList.remove("is-saving");
@@ -867,7 +868,9 @@
   function focusDocumentField(path) {
     switchView('submission');
     const normalized=String(path || '').replace(/^internalReview\./,'');
-    let control=document.getElementById(normalized === 'sampleSubmittedDate' ? 'sampleWhen' : normalized);
+    let control=normalized === 'sampleSubmitted' ? document.querySelector('input[name="sampleSubmittedChoice"]')
+      : document.getElementById(normalized === 'sampleSubmittedDate' ? 'sampleWhen' : normalized);
+    if (!control && normalized === 'selectedChange' && !document.querySelector("input[name='changeOption']:checked")) control=document.querySelector("input[name='changeOption']");
     if(!control) control=Array.from(document.querySelectorAll('[data-internal-field]')).find(item=>item.dataset.internalField===normalized);
     if(!control && ['currentCondition','newCondition','selectedChange'].includes(normalized)) {
       const row=document.querySelector("input[name='changeOption']:checked")?.closest('.option-row');
@@ -2097,6 +2100,40 @@
     return JSON.parse(JSON.stringify(value || {}));
   }
 
+  function showSaveError(error) {
+    const missing = error.status === 400 && Array.isArray(error.details?.missing)
+      ? error.details.missing.filter(item => item && typeof item.label === 'string' && typeof item.field === 'string').slice(0, 20) : [];
+    if (!missing.length || !els.appNoticeMissing) {
+      showNotice('error', 'Save failed', error.message);
+      return;
+    }
+    showNotice('error', `Complete ${missing.length} required ${missing.length === 1 ? 'item' : 'items'}`,
+      'Your edits are kept. Complete the items below, then save again.');
+    for (const item of missing) {
+      const attachment = item.field.startsWith('internalReview.docs.');
+      const row = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${attachment ? 'Upload ' : ''}${item.label.slice(0, 200)}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = attachment ? 'Go to attachment' : 'Go to field';
+      button.setAttribute('aria-label', `${button.textContent}: ${item.label.slice(0, 200)}`);
+      button.addEventListener('click', () => {
+        const attachmentsTab = attachment && document.getElementById('dw-tab-documents');
+        if (attachmentsTab) {
+          attachmentsTab.click();
+          document.getElementById('dw-tab-documents')?.scrollIntoView({ block: 'center' });
+        } else focusDocumentField(item.field);
+      });
+      row.append(label, button);
+      els.appNoticeMissing.append(row);
+    }
+    els.appNoticeMissing.hidden = false;
+    els.appNotice.classList.add('has-missing-items');
+    els.appNotice.focus({ preventScroll: true });
+    els.appNotice.scrollIntoView({ block: 'nearest' });
+  }
+
   function showNotice(type, title, message) {
     if (!els.appNotice || !els.appNoticeTitle || !els.appNoticeMessage) {
       return;
@@ -2104,6 +2141,10 @@
 
     els.appNotice.hidden = false;
     els.appNotice.className = `app-notice app-notice-${type}`;
+    if (els.appNoticeMissing) {
+      els.appNoticeMissing.replaceChildren();
+      els.appNoticeMissing.hidden = true;
+    }
     els.appNoticeTitle.textContent = title;
     els.appNoticeMessage.textContent = message;
     els.appNotice.setAttribute("role", type === "error" ? "alert" : "status");

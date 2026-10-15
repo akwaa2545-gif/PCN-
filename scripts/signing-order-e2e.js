@@ -157,26 +157,35 @@ async function main() {
     await expect(page.locator('#appNotice')).toBeVisible();
     await expect(page.locator('#appNotice')).toHaveAttribute('role', 'alert');
     await expect(page.locator('#appNoticeTitle')).toHaveText('Complete 5 required items');
-    await expect(page.locator('#appNoticeMessage')).toHaveText('Your changes are kept. Complete the items below, then save again.');
+    await expect(page.locator('#appNoticeMessage')).toHaveText('Your edits are kept. Complete the items below, then save again.');
     const missingItems = page.locator('#appNoticeMissing li');
     await expect(missingItems).toHaveCount(missingLabels.length);
     for (const [index, label] of missingLabels.entries()) {
       await expect(missingItems.nth(index)).toContainText(label);
-      await expect(missingItems.nth(index).getByRole('button', { name: 'Go to field', exact: true })).toBeEnabled();
+      await expect(missingItems.nth(index).getByRole('button', { name: /^Go to field:/ })).toBeEnabled();
     }
     await expect(page.locator('#appNoticeMissing')).not.toContainText('Supplier name');
-    await missingItems.nth(0).getByRole('button', { name: 'Go to field', exact: true }).click();
+    await page.locator('#appNotice').scrollIntoViewIfNeeded();
+    assert.equal(await page.locator('#appNotice').evaluate(node => node.scrollHeight <= node.clientHeight), true, 'Desktop checklist shows every required item without internal scrolling');
+    await page.locator('#appNotice').screenshot({ path: path.resolve('test-results/missing-save-fields-desktop.png') });
+    await missingItems.nth(0).getByRole('button', { name: /^Go to field:/ }).click();
     await expect(page.locator('#reason')).toBeFocused();
-    await missingItems.nth(1).getByRole('button', { name: 'Go to field', exact: true }).click();
+    await missingItems.nth(1).getByRole('button', { name: /^Go to field:/ }).click();
     const missingConditionRow = page.locator('.option-row').filter({ has: page.locator('input[name=changeOption]:checked') });
     await expect(missingConditionRow.getByLabel(/Current condition/)).toBeFocused();
     await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#appNotice').scrollIntoViewIfNeeded();
     await expect(missingItems).toHaveCount(missingLabels.length);
-    await expect(page.locator('#appNoticeMessage')).toHaveText('Your changes are kept. Complete the items below, then save again.');
+    await expect(page.locator('#appNoticeMessage')).toHaveText('Your edits are kept. Complete the items below, then save again.');
     assert.equal(await page.locator('#appNotice').evaluate(node => {
       const bounds = node.getBoundingClientRect();
-      return bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight && node.scrollWidth <= node.clientWidth;
-    }), true, 'Missing-field checklist fits mobile viewport without truncation');
+      return bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight
+        && node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight
+        && [...node.querySelectorAll('#appNoticeMissing li')].every(item => {
+          const row = item.getBoundingClientRect();
+          return row.left >= bounds.left && row.right <= bounds.right && row.top >= bounds.top && row.bottom <= bounds.bottom;
+        });
+    }), true, 'All five missing-field rows fit mobile viewport without truncation or internal scrolling');
     await page.locator('#appNotice').screenshot({ path: path.resolve('test-results/missing-save-fields-mobile.png') });
     await page.setViewportSize({ width: 1440, height: 1000 });
     assert.deepEqual(await repository.findById(record.id), incompleteBefore, 'Incomplete returned PCN cannot resubmit');

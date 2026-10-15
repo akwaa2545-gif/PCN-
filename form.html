@@ -27,9 +27,10 @@
 
       <div class="app-feedback-area">
         <div class="app-toast-stack" id="appToastStack" aria-live="polite" aria-atomic="true"></div>
-        <div class="app-notice" id="appNotice" role="status" aria-live="polite" aria-atomic="true" hidden>
+        <div class="app-notice" id="appNotice" role="status" aria-live="polite" aria-atomic="true" tabindex="-1" hidden>
           <strong id="appNoticeTitle"></strong>
           <span id="appNoticeMessage"></span>
+          <ul id="appNoticeMissing" class="app-notice-missing" hidden></ul>
         </div>
       </div>
       <div class="pcn-save-overlay" id="pcnSaveOverlay" aria-live="polite" aria-label="Saving PCN" hidden>
