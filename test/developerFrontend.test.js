@@ -25,48 +25,94 @@ test('Developer assignment keeps distinct role and matching department without s
   assert.throws(() => api.editBody({ ...user, mailProfile: null }, 'developer', 'developer', null, true, false), /verified work email/i);
 });
 
-test('Create user automatically pairs Developer department and preserves verified email guard on edit', async () => {
+
+const developerUser = { id: 'developer-user', employeeCode: '0012345', username: '0012345', displayName: 'Developer User', roles: ['developer'], department: 'developer', signingStep: null, mailProfile: verifiedMail, version: '0011223344556677', isActive: true, identityProvider: 'employee-code' };
+function selectDeveloper(page) { page.element('employeeRole').value = 'developer'; page.element('employeeRole').events.change(); }
+function enterDeveloperPassword(page, value = 'assignment-fixture') { page.element('employeeDeveloperPassword').value = value; page.element('employeeDeveloperPassword').events.input(); }
+function editDeveloper(page) { page.firstUserRow().lastElementChild.firstElementChild.firstElementChild.events.click(); }
+
+test('Developer assignment password appears in Access settings and blocks Create until entered', async () => {
   const page = await usersPage();
   page.openManual();
-  page.element('employeeManualCode').value = '0012345';
-  page.element('employeeManualName').value = 'Developer User';
-  page.element('employeeRole').value = 'developer';
-  page.element('employeeRole').events.change();
+  page.element('employeeManualCode').value = '0012345'; page.element('employeeManualName').value = 'Developer User';
+  selectDeveloper(page);
   assert.equal(page.element('employeeDepartment').value, 'developer');
   assert.equal(page.element('employeeDepartment').disabled, true);
+  assert.equal(page.element('employeeCreateButton').disabled, true, 'Developer assignment requires its password');
+  assert.equal(page.element('employeeDeveloperPasswordField').hidden, false);
+  assert.equal(page.element('employeeDeveloperPassword').required, true);
+  enterDeveloperPassword(page);
   assert.equal(page.element('employeeCreateButton').disabled, false);
   await page.element('employeeUserForm').events.submit({ preventDefault() {} });
   const write = page.calls.find(call => call.options?.method === 'POST');
   assert.equal(write.url, '/api/admin/local-users');
-  assert.deepEqual(JSON.parse(write.options.body), { employeeCode: '0012345', displayName: 'Developer User', roles: ['developer'], department: 'developer', signingStep: null });
-});
-
-test('Developer edits retain exact access, filters recognise the role, and switching away requires a new department', async () => {
-  const user = { id: 'developer-user', employeeCode: '0012345', username: '0012345', displayName: 'Developer User',
-    roles: ['developer'], department: 'developer', signingStep: null, mailProfile: verifiedMail, version: '0011223344556677', isActive: true, identityProvider: 'employee-code' };
-  const page = await usersPage([user]);
-  page.element('usersRoleFilter').value = 'developer'; page.element('usersRoleFilter').events.change();
-  assert.equal(page.element('adminUsersRows').children.length, 1);
-  const row = page.firstUserRow();
-  assert.equal(row.children[2].textContent, 'developer');
-  row.lastElementChild.firstElementChild.firstElementChild.events.click();
-  assert.equal(page.element('employeeRole').value, 'developer');
-  assert.equal(page.element('employeeDepartment').disabled, true);
-  assert.equal(page.element('employeeCreateButton').disabled, false);
-  page.element('employeeRole').value = 'admin'; page.element('employeeRole').events.change();
-  assert.equal(page.element('employeeDepartment').value, '');
-  assert.equal(page.element('employeeDepartment').disabled, false);
-  assert.equal(page.element('employeeCreateButton').disabled, true);
-  page.element('employeeDepartment').value = 'it'; page.element('employeeDepartment').events.change();
-  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
-  assert.match(page.confirmations[0], /Remove Developer access/);
-  assert.deepEqual(JSON.parse(page.calls.find(call => call.options?.method === 'PATCH').options.body).roles, ['admin']);
+  assert.deepEqual(JSON.parse(write.options.body), { employeeCode: '0012345', displayName: 'Developer User', roles: ['developer'], department: 'developer', signingStep: null, developerPassword: 'assignment-fixture' });
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  assert.equal(page.element('employeeDeveloperPasswordField').hidden, true);
   const html = fs.readFileSync('admin.html', 'utf8');
+  assert.match(html, /id="employeeDeveloperPassword"[^>]*type="password"/);
   for (const id of ['employeeRole', 'employeeDepartment', 'usersRoleFilter', 'usersDepartmentFilter']) {
-    assert.match(html.match(new RegExp(`<select id="${id}"[^>]*>[\\s\\S]*?<\\/select>`))[0], /<option value="developer">Developer<\/option>/);
+    assert.match(html.match(new RegExp('<select id="' + id + '"[^>]*>[\\s\\S]*?<\\/select>'))[0], /<option value="developer">Developer<\/option>/);
   }
 });
 
+test('Existing Developer requires the assignment password on Edit and preserves verified email requirements', async () => {
+  const page = await usersPage([developerUser]); editDeveloper(page);
+  assert.equal(page.element('employeeRole').value, 'developer');
+  assert.equal(page.element('employeeDeveloperPasswordField').hidden, false);
+  assert.equal(page.element('employeeCreateButton').disabled, true);
+  enterDeveloperPassword(page);
+  assert.equal(page.element('employeeCreateButton').disabled, false);
+  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
+  const body = JSON.parse(page.calls.find(call => call.options?.method === 'PATCH').options.body);
+  assert.deepEqual(body.roles, ['developer']); assert.equal(body.department, 'developer');
+  assert.equal(body.developerPassword, 'assignment-fixture'); assert.equal(body.version, developerUser.version);
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  const noMail = await usersPage([{ ...developerUser, mailProfile: null }]); editDeveloper(noMail);
+  enterDeveloperPassword(noMail);
+  assert.equal(noMail.element('employeeCreateButton').disabled, true, 'the password does not replace verified work email');
+});
+
+test('Wrong assignment password clears only the password and preserves the Edit draft for retry', async () => {
+  const page = await usersPage([developerUser], { fetch(url, options) { if (options?.method === 'PATCH') throw Object.assign(new Error('Developer password invalid'), { status: 400 }); } });
+  editDeveloper(page); enterDeveloperPassword(page, 'incorrect-fixture');
+  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  assert.equal(page.element('employeeCreateButton').disabled, true);
+  assert.equal(page.element('employeeUserDialog').open, true);
+  assert.equal(page.element('employeeRole').value, 'developer');
+  assert.equal(page.element('employeeDeveloperPasswordField').hidden, false);
+  assert.match(page.element('employeeDialogMessage').textContent, /password invalid/);
+  enterDeveloperPassword(page);
+  assert.equal(page.element('employeeCreateButton').disabled, false);
+});
+
+test('Developer password clears when changing role, canceling, switching accounts or changing manual identity', async () => {
+  const other = { ...developerUser, id: 'other-user', employeeCode: '0012346', username: '0012346', displayName: 'Other User' };
+  const page = await usersPage([developerUser, other]); editDeveloper(page); enterDeveloperPassword(page);
+  page.element('employeeRole').value = 'admin'; page.element('employeeRole').events.change();
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  assert.equal(page.element('employeeDeveloperPasswordField').hidden, true);
+  assert.equal(page.element('employeeDeveloperPassword').required, false);
+  assert.equal(page.element('employeeDepartment').value, '');
+  page.element('employeeDepartment').value = 'it'; page.element('employeeDepartment').events.change();
+  await page.element('employeeUserForm').events.submit({ preventDefault() {} });
+  const write = page.calls.find(call => call.options?.method === 'PATCH');
+  assert.equal(Object.hasOwn(JSON.parse(write.options.body), 'developerPassword'), false);
+  assert.match(page.confirmations[0], /Remove Developer access/);
+  editDeveloper(page); enterDeveloperPassword(page);
+  page.element('employeeCancelButton').events.click();
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  page.element('adminUsersRows').children[1].lastElementChild.firstElementChild.firstElementChild.events.click();
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  assert.equal(page.element('employeeCreateButton').disabled, true);
+  page.element('employeeCancelButton').events.click();
+  page.openManual(); page.element('employeeManualCode').value = '0012345'; page.element('employeeManualName').value = 'Developer User';
+  selectDeveloper(page); enterDeveloperPassword(page);
+  page.element('employeeManualCode').value = '0012347'; page.element('employeeManualCode').events.input();
+  assert.equal(page.element('employeeDeveloperPassword').value, '');
+  assert.equal(page.element('employeeCreateButton').disabled, true);
+});
 async function loginPage(mode = 'employee-code', response) {
   const nodes = new Map();
   function element(id) {
@@ -86,117 +132,20 @@ async function loginPage(mode = 'employee-code', response) {
   await initialize();
   return { element, calls, redirects, events: lifecycle, sessionEvents: events, async submit(id) { element(id).events.submit({ preventDefault() {} }); await new Promise(setImmediate); } };
 }
-function challenge() { return Object.assign(new Error('Developer password required'), { code: 'DEVELOPER_PASSWORD_REQUIRED' }); }
 
-test('Employee Developer challenge sends password only after challenge and clears failed and successful submissions', async () => {
-  const page = await loginPage('employee-code', (body, count) => { if (count === 1) throw challenge(); if (count === 2) throw new Error('Sign-in failed'); return { authenticated: true, user: { roles: ['developer'] } }; });
-  page.element('employeeCode').value = '0012345';
-  await page.submit('employeeLoginForm');
-  assert.deepEqual(page.calls[0], { employeeCode: '0012345' });
-  assert.equal(page.element('employeeDeveloperChallenge').hidden, false);
-  assert.equal(page.element('employeeDeveloperPassword').required, true);
-  assert.equal(page.element('employeeDeveloperPassword').focused, true);
-  page.element('employeeDeveloperPassword').value = 'fixture-first';
-  await page.submit('employeeLoginForm');
-  assert.equal(page.calls[1].developerPassword, 'fixture-first');
-  assert.equal(page.element('employeeDeveloperPassword').value, '');
-  assert.equal(page.element('employeeDeveloperChallenge').hidden, false);
-  page.element('employeeDeveloperPassword').value = 'fixture-second';
-  await page.submit('employeeLoginForm');
-  assert.equal(page.element('employeeDeveloperPassword').value, '');
-  assert.deepEqual(page.redirects, ['/admin']);
-});
-
-test('Changing employee code and cancelling reset Developer challenge and discard the password', async () => {
-  const page = await loginPage('employee-code', () => { throw challenge(); });
-  page.element('employeeCode').value = '0012345';
-  await page.submit('employeeLoginForm');
-  page.element('employeeDeveloperPassword').value = 'fixture-value';
-  page.element('employeeCode').value = '001234';
-  page.element('employeeCode').events.input();
-  assert.equal(page.element('employeeDeveloperChallenge').hidden, true);
-  assert.equal(page.element('employeeDeveloperPassword').value, '');
-  page.element('employeeCode').value = '0012345';
-  await page.submit('employeeLoginForm');
-  page.element('employeeDeveloperPassword').value = 'fixture-value';
-  page.element('employeeDeveloperCancel').events.click();
-  assert.equal(page.element('employeeDeveloperChallenge').hidden, true);
-  assert.equal(page.element('employeeDeveloperPassword').value, '');
-  assert.equal(page.element('employeeCode').value, '');
-});
-
-test('Password maintenance login includes the same server-requested Developer challenge without exposing the secret', async () => {
-  const page = await loginPage('password', (body, count) => { if (count === 1) throw challenge(); return { authenticated: true, user: { roles: ['developer'] } }; });
-  page.element('username').value = 'maintenance'; page.element('password').value = 'account-fixture';
-  await page.submit('loginForm');
-  assert.equal(page.element('passwordDeveloperChallenge').hidden, false);
-  page.element('passwordDeveloperPassword').value = 'challenge-fixture'; page.element('password').value = 'account-fixture';
-  await page.submit('loginForm');
-  assert.equal(page.calls[1].developerPassword, 'challenge-fixture');
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-  assert.deepEqual(page.redirects, ['/admin']);
+test('Developer signs in through the ordinary employee-code or maintenance form without an assignment password', async () => {
+  for (const mode of ['employee-code', 'password']) {
+    const page = await loginPage(mode, () => ({ authenticated: true, user: { roles: ['developer'] } }));
+    if (mode === 'employee-code') page.element('employeeCode').value = '0012345';
+    else { page.element('username').value = 'maintenance'; page.element('password').value = 'account-fixture'; }
+    await page.submit(mode === 'employee-code' ? 'employeeLoginForm' : 'loginForm');
+    assert.deepEqual(page.redirects, ['/admin']);
+    assert.equal(Object.hasOwn(page.calls[0], 'developerPassword'), false);
+  }
   const html = fs.readFileSync('login.html', 'utf8');
-  assert.match(html, /id="employeeDeveloperPassword"[^>]*type="password"/);
-  assert.match(html, /id="passwordDeveloperPassword"[^>]*type="password"/);
+  assert.doesNotMatch(html, /DeveloperPassword|DeveloperChallenge|Developer password/);
+  assert.doesNotMatch(fs.readFileSync('login.js', 'utf8'), /developerPassword|DEVELOPER_PASSWORD_REQUIRED/);
 });
-
-test('Developer challenge clears on setup retry, username change and leaving the login page', async () => {
-  const page = await loginPage('password', () => { throw challenge(); });
-  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
-  await page.submit('loginForm');
-  page.element('passwordDeveloperPassword').value = 'fixture-value';
-  page.element('username').value = 'other-user'; page.element('username').events.input();
-  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-  await page.submit('loginForm');
-  page.element('passwordDeveloperPassword').value = 'fixture-value';
-  await page.element('authRetryButton').events.click();
-  await new Promise(setImmediate);
-  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
-  assert.equal(page.element('passwordDeveloperPassword').required, false);
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-  await page.submit('loginForm');
-  page.element('passwordDeveloperPassword').value = 'fixture-value';
-  page.events.pagehide();
-  assert.equal(page.element('passwordDeveloperChallenge').hidden, true);
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-});
-
-test('Pending maintenance login locks identity and discards a challenge for an identity that changed', async () => {
-  let rejectLogin;
-  const pending = new Promise((resolve, reject) => { rejectLogin = reject; });
-  const page = await loginPage('password', () => pending);
-  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
-  await page.submit('loginForm');
-  const identityLocked = page.element('username').disabled;
-  page.element('username').value = 'other-user';
-  page.element('username').events.input();
-  rejectLogin(challenge());
-  await new Promise(setImmediate);
-  assert.equal(page.element('passwordDeveloperChallenge').hidden, true, 'a delayed challenge must not apply to another identity');
-  assert.equal(page.element('passwordDeveloperPassword').required, false);
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-  assert.equal(identityLocked, true, 'the identity cannot be edited while its login is pending');
-  assert.equal(page.element('username').disabled, false);
-  assert.deepEqual(page.redirects, []);
-});
-
-test('Pending maintenance login discards a success for an identity that changed', async () => {
-  let resolveLogin;
-  const pending = new Promise(resolve => { resolveLogin = resolve; });
-  const page = await loginPage('password', () => pending);
-  page.element('username').value = 'first-user'; page.element('password').value = 'fixture-value';
-  await page.submit('loginForm');
-  page.element('username').value = 'other-user';
-  page.element('username').events.input();
-  resolveLogin({ authenticated: true, user: { username: 'first-user', roles: ['developer'] } });
-  await new Promise(setImmediate);
-  assert.deepEqual(page.redirects, [], 'a stale sign-in cannot open the Portal as a different identity');
-  assert.deepEqual(page.sessionEvents, ['logout'], 'the stale authenticated session is cleared');
-  assert.equal(page.element('passwordDeveloperPassword').value, '');
-  assert.equal(page.element('password').value, '');
-});
-
 test('Developer opens Administrator frontend pages and can sign every valid form step', async () => {
   const window = { location: { origin: 'http://pcn.example', pathname: '/admin', search: '', hash: '' } };
   vm.runInNewContext(fs.readFileSync('session-client.js', 'utf8'), { window, Headers, URL,

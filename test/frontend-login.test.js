@@ -40,8 +40,7 @@ test('employee form shows seven PIN-style digit slots and retains explicit passw
   assert.ok(employeeForm.indexOf('id="employeeAuthMessage"') < employeeForm.indexOf('type="submit"'));
   assert.equal((employeeForm.match(/class="employee-pin-slot"/g) || []).length, 7);
   assert.match(employeeForm, /class="employee-lock-icon"/);
-  assert.match(employeeForm, /id="employeeDeveloperChallenge"[^>]*hidden/);
-  assert.match(employeeForm, /id="employeeDeveloperPassword"[^>]*type="password"/);
+  assert.doesNotMatch(employeeForm, /type="password"/);
   assert.doesNotMatch(employeeForm, /Remember me/);
   assert.doesNotMatch(html, /windowsLoginForm|Continue with Windows|SamAccountName/);
   assert.match(html, /id="loginForm" hidden/);
