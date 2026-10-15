@@ -154,7 +154,7 @@ body.admin-page :is(.admin-table, .users-table) :is(th, td),
 body.admin-page :is(.admin-table, .users-table) :is(th, td) * { font-size: 14px !important; line-height: 1.5; }
 body.admin-page :is(.admin-table, .users-table) td { font-weight: 400; }
 body.admin-page :is(.admin-table, .users-table) small { font-size: 12px !important; }
-body.admin-page .admin-table td:is([data-column="supplierName"], [data-column="materialName"]) { font-size: 16px !important; }
+body.admin-page .admin-table td:is([data-column="supplierName"], [data-column="materialName"]) { font-size: 16px !important; font-weight: 600; }
 .rd-code-link { display: inline-flex; align-items: center; min-height: 28px; color: #004583; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
 .rd-code-cell .rd-test-badge { margin: 0; }
 .rd-code-cell .rd-open-button { white-space: nowrap; }
