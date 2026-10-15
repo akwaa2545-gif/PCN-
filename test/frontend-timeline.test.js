@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function portal(fetch) {
+function portal(fetch, { initialTab = 'history' } = {}) {
   const nodes = new Map();
   const element = id => {
     if (!nodes.has(id)) nodes.set(id, {
@@ -17,7 +17,7 @@ function portal(fetch) {
     });
     return nodes.get(id);
   };
-  const window = { location: { hash: '#records' }, PCN_SESSION: { fetch: async (...args) => ({ items: await fetch(...args), capabilities: {} }) }, selections: [] };
+  const window = { location: { hash: '#records' }, PCN_SESSION: { fetch: async (...args) => args[0].endsWith('/workflow-summary') ? fetch(...args) : ({ items: await fetch(...args), capabilities: {} }) }, selections: [] };
   const document = { addEventListener() {}, activeElement: element('eye'),
     querySelector(selector) { return selector === 'dialog[open]' && element('pcnTimelineDialog').open ? element('pcnTimelineDialog') : null; },
     body: { classList: { add() {}, remove() {} } } };
@@ -27,16 +27,17 @@ function portal(fetch) {
       showAdminToast = () => {};
       loadDetail = async id => window.selections.push(id);
       window.TEST = { state, els, openTimeline, loadTimeline, closeTimeline, selectTimelineRevision,
-        initializeTimeline, chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline,
+        switchTimelineTab: typeof switchTimelineTab === 'function' ? switchTimelineTab : undefined, selectTimelineDepartment: typeof selectTimelineDepartment === 'function' ? selectTimelineDepartment : undefined, initializeTimeline, chronologicalTimeline, timelineSummary, canAutoRefresh, getTimeline: () => timeline,
         timelineEntries: typeof timelineEntries === 'function' ? timelineEntries : undefined };
     })();`);
+  vm.runInNewContext(fs.readFileSync(require.resolve('../records.js'), 'utf8'), { window, document, Date });
   vm.runInNewContext(source, { window, document, Date });
   const html = fs.readFileSync(require.resolve('../admin.html'), 'utf8');
   for (const match of html.matchAll(/id="([^"]+)"/g)) window.TEST.els[match[1]] = element(match[1]);
   window.TEST.state.user = { roles: ['qa'] }; window.TEST.state.isLoading = false;
   element('adminRemoveDialog').hidden = true;
   window.TEST.initializeTimeline();
-  return { ...window.TEST, window, element };
+  return { ...window.TEST, openTimeline: initialTab === 'history' ? (record, opener) => window.TEST.openTimeline(record, opener, 'history') : window.TEST.openTimeline, window, element };
 }
 
 const revisions = [
@@ -248,4 +249,73 @@ test('selected details show form and signing changes first while omitting techni
   assert.ok(details.indexOf('Checked Name') < details.indexOf('Revision Reason'));
   assert.ok(details.indexOf('New supplier') < details.indexOf('Revision Reason'));
   assert.equal(page.getTimeline().revisions[0].changes.length, changes.length, 'The stored API history is preserved');
+});
+
+
+const departmentSummary = (id = 'one', overrides = {}) => ({ id, version: '0011223344556677', status: 'qa_review', stages: [
+  { key: 'gscTet', label: 'GSC/TET', completed: 3, total: 3, state: 'completed', currentStep: null, steps: ['prepared', 'checked', 'approved'].map(action => ({ action, label: action[0].toUpperCase() + action.slice(1), completed: true, person: 'GSC signer', signedAt: '2026-10-15' })) },
+  { key: 'qaTet', label: 'QA/TET', completed: 1, total: 3, state: 'current', currentStep: 'Checked', steps: [
+    { action: 'prepared', label: 'Prepared', completed: true, person: '<img src=x>Actual preparer', signedAt: '2026-10-15' },
+    { action: 'checked', label: 'Checked', completed: false, person: null, signedAt: null },
+    { action: 'approved', label: 'Approved', completed: false, person: null, signedAt: null }] }
+], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET ? Checked', terminal: false }, ...overrides });
+
+test('default timeline groups one department point per stage and loads audit history only when requested', async () => {
+  const calls = [];
+  const page = portal(async url => { calls.push(url); return url.endsWith('/workflow-summary') ? departmentSummary() : revisions; }, { initialTab: 'summary' });
+  await page.openTimeline({ id: 'one', version: 'stale-list-version' }, page.element('eye'));
+  assert.deepEqual(calls, ['/api/pcns/one/workflow-summary']);
+  const track = page.element('pcnTimelineTrack').innerHTML;
+  assert.equal((track.match(/data-workflow-stage=/g) || []).length, 2);
+  assert.match(track, /QA\/TET/); assert.match(track, /1\/3 signed/); assert.match(track, /Waiting for Checked/);
+  assert.doesNotMatch(track, /data-revision|Time not recorded|Actual preparer/);
+  assert.equal(page.getTimeline().summary.version, '0011223344556677');
+  const details = page.element('pcnTimelineDetails').innerHTML;
+  assert.ok(details.indexOf('Prepared') < details.indexOf('Checked'));
+  assert.ok(details.indexOf('Checked') < details.indexOf('Approved'));
+  assert.match(details, /&lt;img src=x&gt;Actual preparer/); assert.doesNotMatch(details, /<img/);
+  assert.match(details, /2026-10-15/); assert.match(details, /Waiting for signature/);
+  await page.switchTimelineTab('history');
+  assert.equal(calls.at(-1), '/api/pcns/one/revisions');
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /Old &amp; Co/);
+  await page.switchTimelineTab('summary');
+  assert.equal(calls.at(-1), '/api/pcns/one/workflow-summary');
+  const key = key => page.element('pcnTimelineTrack').events.keydown({ key, preventDefault() {} });
+  key('Home'); assert.equal(page.getTimeline().selectedDepartment, 'gscTet');
+  key('End'); assert.equal(page.getTimeline().selectedDepartment, 'qaTet');
+  page.closeTimeline(); assert.equal(page.element('eye').focused, true);
+});
+
+test('department timeline rejects malformed or foreign snapshots and never invents terminal waiting steps', async () => {
+  let snapshot = departmentSummary('different');
+  const page = portal(async () => snapshot, { initialTab: 'summary' });
+  await page.openTimeline({ id: 'one' });
+  assert.match(page.element('pcnTimelineMessage').textContent, /invalid response/);
+  assert.equal(page.element('pcnTimelineTrack').innerHTML, '');
+  snapshot = departmentSummary('one', { status: 'rejected', stages: departmentSummary().stages.map(stage => ({ ...stage, state: stage.completed === 3 ? 'completed' : 'stopped', currentStep: null })), nextAction: { stage: null, signingStep: null, label: 'Review ended with rejection', terminal: true } });
+  await page.loadTimeline();
+  assert.match(page.element('pcnTimelineMessage').textContent, /Review ended with rejection/);
+  assert.match(page.element('pcnTimelineTrack').innerHTML, /Review stopped/);
+  assert.doesNotMatch(page.element('pcnTimelineTrack').innerHTML, /Waiting for Checked/);
+});
+
+test('summary and history tab switches ignore late successful data but authorization loss clears every tab', async () => {
+  const pending = [];
+  const page = portal(url => new Promise((resolve, reject) => pending.push({ url, resolve, reject })), { initialTab: 'summary' });
+  const summary = page.openTimeline({ id: 'one' });
+  const history = page.switchTimelineTab('history');
+  pending[1].resolve(revisions); await history;
+  pending[0].resolve(departmentSummary()); await summary;
+  assert.match(page.element('pcnTimelineTrack').innerHTML, /data-revision/);
+  assert.doesNotMatch(page.element('pcnTimelineTrack').innerHTML, /data-workflow-stage/);
+  const nextSummary = page.switchTimelineTab('summary');
+  page.closeTimeline(); pending[2].resolve(departmentSummary()); await nextSummary;
+  assert.equal(page.element('pcnTimelineTrack').innerHTML, '');
+  const denied = page.openTimeline({ id: 'one' });
+  const newerHistory = page.switchTimelineTab('history');
+  pending[3].reject(Object.assign(new Error('Access denied'), { status: 403 })); await denied;
+  pending[4].resolve(revisions); await newerHistory;
+  assert.equal(page.getTimeline().record, null); assert.equal(page.getTimeline().summary, null);
+  assert.equal(page.element('pcnTimelineDialog').open, false);
+  assert.equal(page.canAutoRefresh(), false);
 });

@@ -138,7 +138,7 @@ test('malformed timeline response is not cached and Retry issues a new authorize
     return url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1'};
   });
   page.controller.setRecords([{id:'PCN-1'}]); await page.button('Quick view').emit('click');
-  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  await page.find('rdPreviewTab-history').emit('click'); await settle();
   const content = page.find('rdPreviewContent');
   assert.match(content.children[0].textContent,/invalid response/);
   await page.button('Retry',content).emit('click');
@@ -275,4 +275,23 @@ test('Open uses the original route once without resolving it through the code an
   const quickView = page.button('Quick view');
   assert.equal(quickView.title, 'Quick view PCN-1');
   assert.match(quickView.innerHTML, /<svg/);
+});
+
+
+test('Quick view timeline reads a coherent department snapshot and keeps revision history secondary', async () => {
+  const calls = [];
+  const snapshot = { id: 'PCN-1', version: 'fresh', status: 'qa_review', stages: [{ key: 'qaTet', label: 'QA/TET', completed: 1, total: 3, state: 'current', currentStep: 'Checked', steps: [
+    { action: 'prepared', label: 'Prepared', completed: true, person: 'Actual preparer', signedAt: '2026-10-15' },
+    { action: 'checked', label: 'Checked', completed: false, person: null, signedAt: null },
+    { action: 'approved', label: 'Approved', completed: false, person: null, signedAt: null }] }], nextAction: { stage: 'qaTet', signingStep: 'checked', label: 'QA/TET ? Checked', terminal: false } };
+  const page = controllerPage(async url => { calls.push(url); return url.endsWith('/workflow-summary') ? snapshot : url.endsWith('/progress') ? { steps: [] } : { id: 'PCN-1', version: 'stale' }; });
+  page.controller.setRecords([{ id: 'PCN-1', version: 'stale' }]); await page.button('Quick view').emit('click');
+  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  assert.equal(calls.at(-1), '/api/pcns/PCN-1/workflow-summary');
+  assert.equal(calls.some(url => url.endsWith('/revisions')), false);
+  const content = page.find('rdPreviewContent');
+  const text = content.querySelectorAll().map(item => item.textContent).join(' ');
+  assert.match(text, /QA\/TET/); assert.match(text, /1\/3 signed/); assert.match(text, /Waiting for Checked/);
+  assert.match(text, /Actual preparer/); assert.match(text, /2026-10-15/);
+  assert.equal(content.querySelectorAll().filter(item => item.dataset.workflowStage).length, 1);
 });
