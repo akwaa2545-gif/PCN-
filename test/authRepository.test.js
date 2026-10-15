@@ -150,3 +150,14 @@ test('maintenance user creation holds the shared assignment lock and reauthorize
   assert.match(state.calls[2].query,/INSERT pcn.Users/);
   assert.equal(state.committed,true);
 });
+
+test('identity linking rechecks current Developer grant under the assignment lock before transferring an account',async()=>{
+  const {repo,state}=fixture([{recordset:[{LockResult:0}]},{recordset:[{Id:'target',IdentityProvider:'password',EmployeeCode:null,IsActive:true,HasDeveloperRole:1}]}]);
+  await assert.rejects(repo.linkEmployeeIdentity('target',{employeeCode:'7654321',displayName:'Chosen Employee',isActive:true}),error=>error.statusCode===409&&/Remove Developer access/.test(error.message));
+  assert.equal(state.rolledBack,true);
+  assert.equal(state.committed,false);
+  assert.match(state.calls[0].query,/sp_getapplock/);
+  assert.equal(state.calls[0].inputs.mode,'Exclusive');
+  assert.match(state.calls[1].query,/pcn.UserRoles/);
+  assert.equal(state.calls.some(call=>/UPDATE pcn\.(?:Users|Sessions)|INSERT pcn\./.test(call.query)),false);
+});
