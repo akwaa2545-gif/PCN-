@@ -34,7 +34,7 @@ function buildChecks(record, attachments = []) {
 function assertCompletion(record, attachments = [], { requiredFilesOnly = false } = {}) {
   const missing = buildChecks(record, attachments).items.filter(item => item.blocking && !item.complete
     && (!requiredFilesOnly || item.attachment));
-  if (missing.length) throw new ApiError(400, 'Complete required document information before advancing the PCN',
+  if (missing.length) throw new ApiError(400, `Complete required document information before advancing the PCN. Still missing: ${missing.map(item => item.label).join('; ')}.`,
     { missing: missing.map(({key,label,field}) => ({key,label,field})) });
 }
 
