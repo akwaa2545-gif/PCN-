@@ -147,6 +147,7 @@ async function main() {
     record = await repository.update(record.id, current => ({ ...current, status: 'supplier_action' }), 'incomplete-returned-fixture', record.version);
     await load();
     const incompleteBefore = await repository.findById(record.id), incompleteJobs = jobs.length;
+    const documentTopBeforeMissing = await page.locator('main.workspace').evaluate(node => node.getBoundingClientRect().top + scrollY);
     const incompleteResponse = await saveReturned(false, 400);
     const incompleteError = await incompleteResponse.json();
     const missingLabels = ['Reason for change', 'Current condition', 'New condition', 'Target start date or lot', 'Sample submission choice'];
@@ -154,6 +155,16 @@ async function main() {
     assert.equal(incompleteError.error, `Complete required document information before advancing the PCN. Still missing: ${missingLabels.join('; ')}.`);
     const allLabels = ['Supplier name', 'Material / chemical name', 'Change description', ...missingLabels, 'Sample submission date'];
     assert.deepEqual(allLabels.filter(label => incompleteError.error.includes(label)), missingLabels, 'Save error names exactly the missing information');
+    const missingPopup = await page.locator('.app-feedback-area').evaluate(node => {
+      const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
+      return { position: style.position, left: parseFloat(style.left), right: style.right, bottom: parseFloat(style.bottom), width: bounds.width };
+    });
+    assert.equal(missingPopup.position, 'fixed', 'Missing items stay in the notification popup');
+    assert(missingPopup.left >= 12 && missingPopup.left <= 30, 'Notification popup uses the original left margin');
+    assert.equal(missingPopup.right, 'auto');
+    assert(missingPopup.bottom >= 90 && missingPopup.width <= 420, 'Notification popup stays above the action dock and remains compact');
+    const documentTopAfterMissing = await page.locator('main.workspace').evaluate(node => node.getBoundingClientRect().top + scrollY);
+    assert.equal(Math.round(documentTopAfterMissing), Math.round(documentTopBeforeMissing), 'Missing-item popup does not push the document layout');
     await expect(page.locator('#appNotice')).toBeVisible();
     await expect(page.locator('#appNotice')).toHaveAttribute('role', 'alert');
     await expect(page.locator('#appNoticeTitle')).toHaveText('Complete 5 required items');
