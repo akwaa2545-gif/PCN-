@@ -131,6 +131,14 @@ test('static HEAD and security headers work while malformed paths and write meth
   assert.equal((await api.request('/create', { method: 'POST', body: {} })).status, 405);
 });
 
+test('table Semibold font is served locally with its font MIME type', async t => {
+  const api = await startApi(t);
+  const response = await api.request('/SegoeUI-Semibold.ttf', { method: 'HEAD' });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'font/ttf');
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+});
+
 test('only the document preview can be framed by the same origin', async t => {
   const api = await startApi(t);
   const preview = await api.request('/document-preview?id=PCN-2026-0001&version=0000000000000001');
