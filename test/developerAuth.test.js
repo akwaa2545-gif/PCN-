@@ -47,3 +47,18 @@ test('retained Developer edit needs password; demotion and role removal do not',
  const f=fixture('pcn-local',{developerPasswordHash:undefined});await assert.rejects(operation('edit',f),e=>e.statusCode===400&&e.code==='DEVELOPER_PASSWORD_REQUIRED');assert.deepEqual((await operation('edit',f,{roles:['admin'],department:'it'})).roles,['admin']);assert.deepEqual((await f.service.removeEmployeeRoles({userId:f.state.user.id,version:f.state.user.version},'user:administrator-id',actor)).roles,[]);
 });
 test('malformed Developer pair cannot be assigned',async()=>{const f=fixture();for(const extra of [{department:'it'},{roles:['developer','admin']},{signingStep:'checked'}])await assert.rejects(operation('employee',f,{...extra,developerPassword:secret}),e=>e.statusCode===400);assert.equal(f.state.writes.length,0);});
+
+test('password account creation forwards the original trusted actor principal after all password verification',async()=>{
+ const f=fixture();const principal={...actor,version:'0011223344556677'};Object.defineProperty(principal,'sessionSecurityStamp',{value:'stamp'});
+ let received;
+ f.service.repository.createUser=async(account,actorName,user)=>{received={account,actorName,user};return {...f.state.user,...account};};
+ await f.service.createUser({username:'new-developer',password,roles:['developer'],department:'developer',signingStep:null,developerPassword:secret},'user:administrator-id',principal);
+ assert.equal(received.user,principal);assert.equal(received.user.sessionSecurityStamp,'stamp');assert.equal(received.actorName,'user:administrator-id');assert.equal(received.account.developerPassword,undefined);
+});
+
+test('Developer access must be removed before changing the linked employee identity',async()=>{
+ const f=fixture('employee-code');let linked=false;
+ f.service.repository.linkEmployeeIdentity=async()=>{linked=true;return f.state.user;};
+ await assert.rejects(f.service.linkEmployee({userId:f.state.user.id,employeeCode:'7654321'},f.directory,'user:administrator-id',actor),e=>e.statusCode===409&&/Remove Developer access/.test(e.message));
+ assert.equal(f.state.lookups.length,0);assert.equal(linked,false);
+});

@@ -125,3 +125,28 @@ test('deactivating a user routes through versioned edit and revokes sessions ato
   assert.equal(update.inputs.active,false);assert.equal(state.committed,true);
   assert.ok(state.calls.some(call=>/UPDATE pcn.Sessions/.test(call.query)));
 });
+
+for (const change of [ { IsActive:false }, { SecurityStamp:'revoked' }, { AccessVersion:Buffer.from('8899aabbccddeeff','hex') } ]) {
+  test(`maintenance user creation rejects a stale actor before INSERT (${Object.keys(change)[0]})`,async()=>{
+    const principal={id:'12345678-1234-1234-1234-123456789012',version:'0011223344556677',roles:['admin']};
+    Object.defineProperty(principal,'sessionSecurityStamp',{value:'stamp'});
+    const current={IsActive:true,SecurityStamp:'stamp',AccessVersion:Buffer.from(principal.version,'hex'),...change};
+    const {repo,state}=fixture([{recordset:[{LockResult:0}]},{recordset:[current]}]);
+    await assert.rejects(repo.createUser({username:'new-developer',email:null,passwordHash:'fixture-hash',roles:['developer'],department:'developer',signingStep:null,mustChangePassword:true},'user:administrator',principal),error=>error.statusCode===401);
+    assert.equal(state.rolledBack,true);
+    assert.equal(state.calls.some(call=>/INSERT pcn\.(?:Users|UserRoles)/.test(call.query)),false);
+  });
+}
+
+test('maintenance user creation holds the shared assignment lock and reauthorizes the original principal before writing',async()=>{
+  const principal={id:'12345678-1234-1234-1234-123456789012',version:'0011223344556677',roles:['admin']};
+  Object.defineProperty(principal,'sessionSecurityStamp',{value:'stamp'});
+  const {repo,state}=fixture([{recordset:[{LockResult:0}]},{recordset:[{IsActive:true,SecurityStamp:'stamp',AccessVersion:Buffer.from(principal.version,'hex')}]},{},{},{recordsets:[[{Id:'new-user',Username:'new-developer',DepartmentKey:'developer'}],[{Name:'developer'}]]}]);
+  await repo.createUser({username:'new-developer',email:null,passwordHash:'fixture-hash',roles:['developer'],department:'developer',signingStep:null,mustChangePassword:true},'user:administrator',principal);
+  assert.match(state.calls[0].query,/sp_getapplock/);
+  assert.equal(state.calls[0].inputs.mode,'Shared');
+  assert.match(state.calls[1].query,/SELECT IsActive,SecurityStamp,AccessVersion/);
+  assert.equal(state.calls[1].inputs.id,principal.id);
+  assert.match(state.calls[2].query,/INSERT pcn.Users/);
+  assert.equal(state.committed,true);
+});
