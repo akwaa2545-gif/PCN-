@@ -123,6 +123,31 @@ async function main() {
     const admin = await open(); const { page } = admin;
     await codeLogin(admin, fixture.administrator.employeeCode);
     await page.locator('#adminUsersButton').click(); await expect(page.locator('#adminUsersRows')).toContainText('Source Developer Fixture');
+    for (const action of ['edit', 'remove']) {
+      const button = page.locator(`[data-user-id="${fixture.source.id}"][data-user-action="${action}"]`);
+      await expect(button).toBeDisabled();
+      await expect(button).toHaveAttribute('title', /Only a Developer/);
+    }
+    const beforeProtection = fixture.getUsers();
+    const protectionResults = await page.evaluate(async ({ target, assignmentPassword }) => {
+      const session = await window.PCN_SESSION.load();
+      const call = async (suffix, method, body) => {
+        const response = await fetch(`/api/admin/users/${target.id}${suffix}`, { method,
+          headers: { 'content-type': 'application/json', 'x-csrf-token': session.csrfToken }, body: JSON.stringify(body) });
+        return response.status;
+      };
+      return [await call('', 'PATCH', { roles: ['developer'], department: 'developer', signingStep: null,
+        isActive: false, version: target.version, developerPassword: assignmentPassword }),
+      await call('/roles', 'DELETE', { version: target.version })];
+    }, { target: fixture.source, assignmentPassword: fixture.developerPassword });
+    assert.deepEqual(protectionResults, [403, 403]);
+    assert.deepEqual(fixture.getUsers(), beforeProtection);
+    await page.screenshot({ path: path.resolve('test-results/developer-admin-protected.png') });
+    report.checks.push('Administrator sees disabled Developer Edit/Remove actions; direct authenticated PATCH with assignment password and DELETE roles return 403 without account changes');
+    await page.evaluate(() => window.PCN_SESSION.logout());
+    await page.goto(`${admin.origin}/login`);
+    await codeLogin(admin, fixture.source.employeeCode);
+    await page.locator('#adminUsersButton').click();
     const password = page.locator('#employeeDeveloperPassword'), dialog = page.locator('#employeeUserDialog'), save = page.locator('#employeeCreateButton');
     const submit = async (method, pathname, status) => {
       const pending = page.waitForResponse(response => new URL(response.url()).pathname === pathname && response.request().method() === method);
@@ -208,7 +233,7 @@ async function main() {
     assert.equal((await local.page.request.get(`${local.origin}/api/admin/users`)).status(), 401);
     assert.deepEqual(get(fixture.local.employeeCode).roles, []);
     assert.deepEqual(fixture.getUsers().find(user => user.id === fixture.ordinary.id), originalOrdinary);
-    report.checks.push('Developer signs in with employee code and has real Administrator API authority; demotion/removal need no assignment password and removal revokes the active session');
+    report.checks.push('Developer can manage other Developer access; demotion/removal need no assignment password and role removal revokes the target session');
 
     const source = await open(); await codeLogin(source, fixture.source.employeeCode);
     assert.equal((await source.page.request.get(`${source.origin}/api/admin/users`)).status(), 200);

@@ -25,7 +25,7 @@ function operation(kind,f,extra={}){
  const {service,state,directory}=f;const base={roles:['developer'],department:'developer',signingStep:null,...extra};
  if(kind==='employee')return service.createEmployee({employeeCode:'1234567',...base},directory,'user:administrator-id',actor);
  if(kind==='local'){state.local=true;return service.createLocalEmployee({employeeCode:'1234567',displayName:'Developer Person',...base},directory,'user:administrator-id',actor);}
- if(kind==='edit')return service.updateEmployee({userId:state.user.id,isActive:true,version:state.user.version,...base},'user:administrator-id',actor);
+ if(kind==='edit')return service.updateEmployee({userId:state.user.id,isActive:true,version:state.user.version,...base},'user:developer-id',{...actor,roles:['developer'],department:'developer',signingStep:null});
  return service.createUser({username:'new-developer',password,...base},'user:administrator-id',actor);
 }
 for(const kind of ['employee','local','edit','password']){
@@ -43,8 +43,8 @@ test('Developer assignment validates input and throttles actor across target acc
  for(let i=0;i<5;i++){f.state.user={...f.state.user,id:crypto.randomUUID()};await assert.rejects(operation('edit',f,{developerPassword:crypto.randomBytes(8).toString('hex')}),e=>e.statusCode===400);}
  await assert.rejects(operation('edit',f,{developerPassword:secret}),e=>e.statusCode===429);assert.equal(f.state.writes.length,0);
 });
-test('retained Developer edit needs password; demotion and role removal do not',async()=>{
- const f=fixture('pcn-local',{developerPasswordHash:undefined});await assert.rejects(operation('edit',f),e=>e.statusCode===400&&e.code==='DEVELOPER_PASSWORD_REQUIRED');assert.deepEqual((await operation('edit',f,{roles:['admin'],department:'it'})).roles,['admin']);assert.deepEqual((await f.service.removeEmployeeRoles({userId:f.state.user.id,version:f.state.user.version},'user:administrator-id',actor)).roles,[]);
+test('Developer actor needs password to retain Developer access; demotion and role removal do not',async()=>{
+ const f=fixture('pcn-local',{developerPasswordHash:undefined});await assert.rejects(operation('edit',f),e=>e.statusCode===400&&e.code==='DEVELOPER_PASSWORD_REQUIRED');assert.deepEqual((await operation('edit',f,{roles:['admin'],department:'it'})).roles,['admin']);assert.deepEqual((await f.service.removeEmployeeRoles({userId:f.state.user.id,version:f.state.user.version},'user:developer-id',{...actor,roles:['developer'],department:'developer',signingStep:null})).roles,[]);
 });
 test('malformed Developer pair cannot be assigned',async()=>{const f=fixture();for(const extra of [{department:'it'},{roles:['developer','admin']},{signingStep:'checked'}])await assert.rejects(operation('employee',f,{...extra,developerPassword:secret}),e=>e.statusCode===400);assert.equal(f.state.writes.length,0);});
 

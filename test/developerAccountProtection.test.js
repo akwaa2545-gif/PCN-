@@ -81,11 +81,12 @@ test('locked SQL guard permits valid Developer principal while retaining version
 });
 
 test('Administrator sees protected Developer actions; disabled handlers cannot open or remove access', async () => {
-  const page = await usersPage([developer]);
+  const page = await usersPage([{ ...developer, identityProvider: 'pcn-local' }]);
   const buttons = page.firstUserRow().lastElementChild.firstElementChild.children;
   const edit = buttons.find(button => button.getAttribute('data-user-action') === 'edit');
   const remove = buttons.find(button => button.getAttribute('data-user-action') === 'remove');
-  for (const button of [edit, remove]) {
+  const link = buttons.find(button => button.getAttribute('data-user-action') === 'link');
+  for (const button of [edit, remove, link]) {
     assert.equal(button.disabled, true);
     assert.match(button.getAttribute('title'), /only a Developer/i);
     await button.events.click();

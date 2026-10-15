@@ -89,7 +89,7 @@
       'pendingUsersRows', 'pendingUsersCount', 'assignedUsersCount', 'pendingUsersEmpty', 'assignedUsersEmpty',
       'usersSearchFilter', 'usersRoleFilter', 'usersDepartmentFilter', 'usersStatusFilter', 'usersClearFiltersButton', 'usersFilterSummary'];
     const els = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
-    let state = { authorized: false, loaded: false, configured: false, busy: false, manual: false, users: [], selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
+    let state = { authorized: false, viewer: null, loaded: false, configured: false, busy: false, manual: false, users: [], selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
     let viewGeneration = 0;
     let timer;
     let controller;
@@ -383,7 +383,7 @@
       } finally { if (controller === request) controller = null; }
     }
     function beginLink(user, opener) {
-      if (!state.authorized || !state.configured || state.busy) return;
+      if (!state.authorized || !state.configured || state.busy || developerAccessProtected(user)) return;
       clearSelection(false);
       state = { ...state, linkUser: user };
       els.employeeFormTitle.textContent = `Link employee to ${user.displayName || user.username}`;
@@ -397,7 +397,7 @@
       openUserDialog(els.employeeSearch, opener);
     }
     function beginEdit(user, opener) {
-      if (!state.authorized || state.busy) return;
+      if (!state.authorized || state.busy || developerAccessProtected(user)) return;
       clearSelection(false);
       state = { ...state, editUser: user };
       els.employeeFormTitle.textContent = 'Edit access';
@@ -448,6 +448,13 @@
       empty.textContent = allUsers.length ? 'No users match the selected filters.'
         : pending ? 'No users are waiting for access.' : 'No users have assigned PCN roles.';
     }
+    function developerAccessProtected(user) {
+      const roles = value => (Array.isArray(value?.roles) ? value.roles : []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
+      const viewerRoles = roles(state.viewer);
+      const developerViewer = state.viewer?.isActive !== false && viewerRoles.length === 1 && viewerRoles[0] === 'developer'
+        && state.viewer.department === 'developer' && state.viewer.signingStep == null;
+      return roles(user).includes('developer') && !developerViewer;
+    }
     function renderUsers() {
       els.adminUsersRows.replaceChildren();
       els.pendingUsersRows.replaceChildren();
@@ -481,7 +488,9 @@
           link.setAttribute('aria-label', `Link employee to ${user.displayName || user.username}`);
           link.setAttribute('data-user-id', user.id);
           link.setAttribute('data-user-action', 'link');
-          link.disabled = !state.configured || state.busy;
+          const protectedLink = developerAccessProtected(user);
+          link.disabled = !state.configured || state.busy || protectedLink;
+          if (protectedLink) link.setAttribute('title', 'Only a Developer can change access for a Developer account');
           link.addEventListener('click', () => beginLink(user, link));
           actions.appendChild(link);
         }
@@ -489,18 +498,22 @@
         edit.setAttribute('aria-label', `${user.roles.length ? 'Edit user' : 'Add role for'} ${user.displayName || user.username}, ${user.employeeCode || user.username}`);
         edit.setAttribute('data-user-id', user.id);
         edit.setAttribute('data-user-action', 'edit');
-        edit.disabled = state.busy; edit.addEventListener('click', () => beginEdit(user, edit)); actions.appendChild(edit);
+        const protectedAccess = developerAccessProtected(user);
+        edit.disabled = state.busy || protectedAccess;
+        if (protectedAccess) edit.setAttribute('title', 'Only a Developer can change access for a Developer account');
+        edit.addEventListener('click', () => beginEdit(user, edit)); actions.appendChild(edit);
         if (user.roles.length) {
           const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'ghost-button remove-user-role'; remove.textContent = 'Remove role';
           remove.setAttribute('aria-label', `Remove role for ${user.displayName || user.username}, ${user.employeeCode || user.username} (all PCN roles)`);
-          remove.setAttribute('data-user-id', user.id); remove.setAttribute('data-user-action', 'remove'); remove.disabled = state.busy;
+          remove.setAttribute('data-user-id', user.id); remove.setAttribute('data-user-action', 'remove'); remove.disabled = state.busy || protectedAccess;
+          if (protectedAccess) remove.setAttribute('title', 'Only a Developer can change access for a Developer account');
           remove.addEventListener('click', () => removeUserRoles(user)); actions.appendChild(remove);
         }
         (user.roles.length ? els.adminUsersRows : els.pendingUsersRows).appendChild(row);
       });
     }
     async function removeUserRoles(user) {
-      if (!state.authorized || state.busy || !user.roles.length || window.location.hash !== '#users') return;
+      if (!state.authorized || state.busy || developerAccessProtected(user) || !user.roles.length || window.location.hash !== '#users') return;
       if (!/^[a-f0-9]{16}$/.test(user.version || '')) { message('Reload users before removing this assignment.', true); return; }
       const identity = `${user.displayName || user.username} (${user.employeeCode || user.username})`;
       const access = !user.isActive ? ' The account remains inactive.' : ['employee-code', 'pcn-local'].includes(user.identityProvider)
@@ -727,7 +740,7 @@
     try {
       const session = await window.PCN_SESSION.require('admin');
       if (!session) return;
-      state = { ...state, authorized: true };
+      state = { ...state, authorized: true, viewer: session.user };
       await loadUsers();
       window.PCN_AUTO_REFRESH?.start({ refresh: refreshUsersQuietly, canRefresh: canAutoRefresh, intervalMs: 5000 });
     } catch (error) { message(error.message); }

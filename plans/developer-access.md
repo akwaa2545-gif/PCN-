@@ -18,6 +18,12 @@ The last-active-employee-Administrator guard still counts actual Administrator g
 
 An account with Developer access must have that access removed before it can be linked to a different employee identity. The server rejects a direct link with HTTP 409 and makes no writes. The supported sequence is Remove role, link the employee, then reassign Developer using the shared assignment password. SQL password-maintenance account creation also revalidates the trusted acting account under the shared assignment lock.
 
+## Protecting existing Developer accounts
+
+Only an active account with the valid exclusive Developer assignment can edit access, deactivate, demote or remove roles from an existing Developer. Administrator attempts receive HTTP 403 before password/mail work, and the SQL transaction repeats the check against the current target after validating the acting session under the assignment lock. Target promotion races and stale forms cannot bypass it. The Administrator UI disables Edit, Remove role and identity linking for these accounts. Identity linking already rejects any current Developer until its role has been removed by an authorized Developer.
+
+Administrator creation of a new Developer grant remains available with the required assignment password. A Developer retaining an existing Developer assignment must still enter that password. Authorized demotion/removal still requires no assignment password; existing revocation and last-Administrator safeguards remain.
+
 ## Password verification in access settings
 
 Every Add role, Create user or Edit access save whose resulting assignment is Developer requires the shared Developer password. This includes editing an account that already has Developer and retaining that assignment. The server verifies the password before persisting the assignment; a browser flag or previously successful save cannot substitute for verification.
@@ -89,3 +95,8 @@ JavaScript/TypeScript, general code and security reviews approved the corrected 
 The final full-application smoke run passed **120/120 checks** with exit code 0: seven email, sixteen signoff, eighteen unsaved-document and seventy-nine main application checks. This includes native unsaved-change protection; fixture/browser/server cleanup completed. Reviewed harness changes verify the conditional Developer password input is hidden, disabled and empty during ordinary sign-in, and add bounded fixture waits and diagnostics. An earlier stalled run's cause was not established; the successful final run supplies the acceptance evidence.
 
 Migration 007 application and local readiness evidence above remain valid independently of this password-flow correction. The Developer hash remains configured only in the ignored local environment file. No source push or application deployment was performed.
+
+
+## Existing-account protection verification
+
+The follow-up service, locked SQL, API and UI tests verify Administrator refusal for current Developer edits, deactivation, demotion, role removal and identity-link controls. Authorized Developer management, new grants and assignment-password checks remain covered. All 105 focused checks and nine isolated Developer browser groups pass; the combined full-suite results are recorded in `plans/create-pcn-experience.md`. No operational account, role or mail data was changed, and no deployment occurred.

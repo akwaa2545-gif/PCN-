@@ -1,4 +1,6 @@
 (function () {
+  const documentPreview = window.location?.pathname === '/document-preview';
+  let previewIdentity;
   const demoRequest = {
     status: "submitted",
     changeForm: "rawMaterial",
@@ -71,7 +73,7 @@
     pcns: [],
     activeRequest: { ...demoRequest },
     pendingWorkflowNotifications: new Set(),
-    viewOnly: false,
+    viewOnly: documentPreview,
     apiReady: false,
     savedSubmissionSnapshot: null,
     skipNextUnload: false,
@@ -97,20 +99,32 @@
     cacheElements();
     bindEvents();
     try {
+      if (documentPreview) {
+        document.body.classList.add('document-preview-only');
+        previewIdentity = readPreviewIdentity();
+      }
       const session = await window.PCN_SESSION.require();
-      if (!session) return;
+      if (!session) {
+        if (documentPreview) notifyPreviewParent('error', 'Sign in to preview this document.');
+        return;
+      }
       state.user = session.user;
-      state.viewOnly = ['employee-code', 'pcn-local'].includes(session.user?.identityProvider) && !session.user?.roles?.length;
+      state.viewOnly = documentPreview || ['employee-code', 'pcn-local'].includes(session.user?.identityProvider) && !session.user?.roles?.length;
       if (state.viewOnly && !getPcnIdFromPath()) {
         window.location.assign('/records');
         return;
       }
-      window.PCN_SESSION.mountProfile(session.user, error => {
+      if (!documentPreview) window.PCN_SESSION.mountProfile(session.user, error => {
         state.skipNextUnload = false;
         showNotice("error", "Sign out failed", error.message);
       });
       await loadFromApi();
       renderAll();
+      if (documentPreview) {
+        stampDocumentPreview();
+        notifyPreviewParent('ready');
+        return;
+      }
       if (window.PCN_DOCUMENT_BRIDGE) {
         documentUI = window.PCN_DOCUMENT_BRIDGE.mount({getContext:documentContext,apiFetch,
           notify:showNotice,prepareRestore:renderAll,finishRestore:finishDocumentRestore,onMutationBusy:setDocumentMutationBusy,
@@ -120,9 +134,41 @@
       window.PCN_AUTO_REFRESH?.start({refresh:pollSavedRecord,canRefresh:canPollSavedRecord,intervalMs:5000,
         onError:handleRemoteRefreshError});
     } catch (error) {
-      showNotice("error", "Unable to load portal", error.message);
+      if (documentPreview) notifyPreviewParent('error', error.message);
+      else showNotice("error", "Unable to load portal", error.message);
     } finally {
       document.body.classList.remove("is-loading");
+    }
+  }
+
+  function readPreviewIdentity() {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    const version = params.get('version');
+    if (params.getAll('id').length !== 1 || params.getAll('version').length !== 1
+      || !/^PCN-\d{4}-\d{4}$/i.test(id || '') || !/^[a-f0-9]{16}$/i.test(version || '')) {
+      throw new Error('A valid PCN number and saved version are required to preview this document.');
+    }
+    return {id:id.toUpperCase(),version:version.toLowerCase()};
+  }
+
+  function notifyPreviewParent(status, message) {
+    if (!documentPreview || !window.parent || window.parent === window) return;
+    const params = new URLSearchParams(window.location.search);
+    const payload = {type:'pcn-document-preview',state:status,id:previewIdentity?.id || '',version:previewIdentity?.version || '',
+      ...(params.has('request') ? {request:params.get('request')} : {}),...(message ? {message:String(message)} : {})};
+    window.parent.postMessage(payload, window.location.origin);
+  }
+
+  function stampDocumentPreview() {
+    const stamp = window.PCN_DOCUMENT_BRIDGE?.exportStamp?.(state.activeRequest, false);
+    if (!stamp) return;
+    const identity = document.getElementById('documentPrintIdentity');
+    if (identity) identity.textContent = `${stamp.id} · Content revision ${stamp.revision} · ${stamp.status}`;
+    const watermark = document.getElementById('documentPrintWatermark');
+    if (watermark) {
+      watermark.textContent = stamp.watermark;
+      watermark.hidden = !stamp.watermark;
     }
   }
 
@@ -307,10 +353,13 @@
       state.statusDefinitions = master.statusDefinitions || [];
       state.adminItems = master.adminItems || [];
       populateSelectors();
-      state.pcns = await apiFetch("/api/pcns");
-      const routePcnId = getPcnIdFromPath();
+      if (!documentPreview) state.pcns = await apiFetch("/api/pcns");
+      const routePcnId = documentPreview ? previewIdentity.id : getPcnIdFromPath();
       if (routePcnId) {
         state.activeRequest = await apiFetch(`/api/pcns/${encodeURIComponent(routePcnId)}`);
+        if (documentPreview && (state.activeRequest.id !== previewIdentity.id || state.activeRequest.version !== previewIdentity.version)) {
+          throw new Error('This document changed after the preview was requested. Close the preview and open it again.');
+        }
         state.message = state.viewOnly ? `Viewing ${routePcnId}. This account has read-only access.` : `Loaded ${routePcnId}. Changes will update this PCN.`;
         showNotice("success", "PCN loaded", state.message);
       } else {
@@ -323,6 +372,7 @@
     } catch (error) {
       state.apiReady = false;
       state.message = error.message;
+      if (documentPreview) throw error;
       els.submitButton.disabled = true;
       showNotice("error", "Unable to load PCN data", error.message);
     }

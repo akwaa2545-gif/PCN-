@@ -246,9 +246,10 @@ class AuthService {
     if(typeof body.version!=='string'||!/^[a-fA-F0-9]{16}$/.test(body.version))throw new ApiError(400,'The current account version is required');
     if(typeof body.isActive!=='boolean'||!Object.hasOwn(body,'signingStep'))throw new ApiError(400,'Complete account assignments are required');
     this.validateAssignments(body);
-    await this.verifyDeveloperAssignment(body,actor,user);
     const prior=await this.repository.getUserById(body.userId);
     if(!prior)throw new ApiError(404,'User not found');
+    this.assertDeveloperAccountManagement(prior,user);
+    await this.verifyDeveloperAssignment(body,actor,user);
     if(body.signingStep!==null&&!isEmployeeProvider(prior))throw new ApiError(400,'Link an employee before assigning a signing step');
     const mail=await this.resolveMail(body.mailSelection,prior);
     if (!mail.mailDirectoryId || !mail.mailVerifiedAt || !mail.mailProfile) throw new ApiError(400,'Select a verified work email before saving access');
@@ -259,7 +260,15 @@ class AuthService {
     assertFields(body,['userId','version']);
     const userId = normalizeUserId(body.userId);
     if (typeof body.version !== 'string' || !/^[a-fA-F0-9]{16}$/.test(body.version)) throw new ApiError(400,'The current account version is required');
+    const prior = await this.repository.getUserById(userId);
+    if (!prior) throw new ApiError(404,'User not found');
+    this.assertDeveloperAccountManagement(prior,user);
     return safeUser(await this.repository.removeEmployeeRoles(userId,{version:body.version},actor,user));
+  }
+  assertDeveloperAccountManagement(target,user) {
+    if (this.isDeveloper(target) && (!user || user.isActive === false || !isDeveloperAssignment(user))) {
+      throw new ApiError(403,'Only a Developer can change access for a Developer account');
+    }
   }
   async linkEmployee(body = {}, directory = this.employeeDirectory,actor='administrator',user) {
     assertFields(body,['userId','employeeCode']);

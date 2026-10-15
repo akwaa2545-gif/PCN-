@@ -57,7 +57,7 @@ test('Developer assignment password appears in Access settings and blocks Create
 });
 
 test('Existing Developer requires the assignment password on Edit and preserves verified email requirements', async () => {
-  const page = await usersPage([developerUser]); editDeveloper(page);
+  const page = await usersPage([developerUser], { user: developerUser }); editDeveloper(page);
   assert.equal(page.element('employeeRole').value, 'developer');
   assert.equal(page.element('employeeDeveloperPasswordField').hidden, false);
   assert.equal(page.element('employeeCreateButton').disabled, true);
@@ -68,13 +68,13 @@ test('Existing Developer requires the assignment password on Edit and preserves 
   assert.deepEqual(body.roles, ['developer']); assert.equal(body.department, 'developer');
   assert.equal(body.developerPassword, 'assignment-fixture'); assert.equal(body.version, developerUser.version);
   assert.equal(page.element('employeeDeveloperPassword').value, '');
-  const noMail = await usersPage([{ ...developerUser, mailProfile: null }]); editDeveloper(noMail);
+  const noMail = await usersPage([{ ...developerUser, mailProfile: null }], { user: developerUser }); editDeveloper(noMail);
   enterDeveloperPassword(noMail);
   assert.equal(noMail.element('employeeCreateButton').disabled, true, 'the password does not replace verified work email');
 });
 
 test('Wrong assignment password clears only the password and preserves the Edit draft for retry', async () => {
-  const page = await usersPage([developerUser], { fetch(url, options) { if (options?.method === 'PATCH') throw Object.assign(new Error('Developer password invalid'), { status: 400 }); } });
+  const page = await usersPage([developerUser], { user: developerUser, fetch(url, options) { if (options?.method === 'PATCH') throw Object.assign(new Error('Developer password invalid'), { status: 400 }); } });
   editDeveloper(page); enterDeveloperPassword(page, 'incorrect-fixture');
   await page.element('employeeUserForm').events.submit({ preventDefault() {} });
   assert.equal(page.element('employeeDeveloperPassword').value, '');
@@ -89,7 +89,7 @@ test('Wrong assignment password clears only the password and preserves the Edit 
 
 test('Developer password clears when changing role, canceling, switching accounts or changing manual identity', async () => {
   const other = { ...developerUser, id: 'other-user', employeeCode: '0012346', username: '0012346', displayName: 'Other User' };
-  const page = await usersPage([developerUser, other]); editDeveloper(page); enterDeveloperPassword(page);
+  const page = await usersPage([developerUser, other], { user: developerUser }); editDeveloper(page); enterDeveloperPassword(page);
   page.element('employeeRole').value = 'admin'; page.element('employeeRole').events.change();
   assert.equal(page.element('employeeDeveloperPassword').value, '');
   assert.equal(page.element('employeeDeveloperPasswordField').hidden, true);

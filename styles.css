@@ -9549,3 +9549,59 @@ body.pcn-page .app-notice.has-missing-items {
 .document-test-badge[hidden] { display:none; }
 .queue-test-badge { margin:4px 0; padding:2px 6px; border-width:1px; font-size:10px; }
 @media print { body.pcn-page .document-test-badge:not([hidden]) { display:block!important; padding:3mm; border:2px solid #743a00; color:#743a00; background:#fff0c2; text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+
+/* The embedded preview uses the same official sheet and hides application controls. */
+body.pcn-page.document-preview-only {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  background: #fff;
+}
+body.pcn-page.document-preview-only .app-shell {
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+body.pcn-page.document-preview-only :is(.topbar,.tabs,.summary-panel,.app-feedback-area,.pcn-create-intro,.form-action-dock,.document-recovery-offer,.submission-skeleton,.summary-skeleton,.pcn-save-overlay,.pcn-update-success,.pcn-unsaved-dialog,.signature-tooltip) {
+  display: none !important;
+}
+body.pcn-page.document-preview-only .workspace-normal {
+  display: block !important;
+  min-width: 0;
+  max-width: none;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+body.pcn-page.document-preview-only .form-panel {
+  width: 100% !important;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  overflow-x: auto;
+}
+body.pcn-page.document-preview-only .view {
+  display: none !important;
+}
+body.pcn-page.document-preview-only #submissionView {
+  display: block !important;
+  width: 100%;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+body.pcn-page.document-preview-only #pcnForm {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+body.pcn-page.document-preview-only .document-print-header {
+  display: block;
+  padding: 8px 12px;
+  color: #173550;
+  font: 12px/1.5 "Segoe UI", sans-serif;
+  text-align: right;
+}
+body.pcn-page.document-preview-only #submissionView .supplier-sheet {
+  min-width: 900px;
+}

@@ -19,6 +19,12 @@
   }
   function testFillMode({savedRecord,hasContent}) { return savedRecord?.id ? 'confirm-new' : hasContent ? 'confirm-replace' : 'fill'; }
   function retryMode(status,record) { return status==='conflict'&&record?.id?'reload':'retry'; }
+  function isPreviewMessage(event,expected) {
+    const data=event?.data;
+    return Boolean(expected && event.origin===expected.origin && event.source===expected.source &&
+      data?.type==='pcn-document-preview' && ['ready','error'].includes(data.state) &&
+      data.id===expected.id && data.version===expected.version && data.request===expected.request);
+  }
   function canReuseClientKey({key,record,freshIdentity}) { return !record&&!freshIdentity&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(key || ''); }
   function remainingErrors(errors,checks) {
     return errors.filter(issue=>{const check=checks.items.find(item=>item.key===issue.key);return !check || !check.complete;});
@@ -97,6 +103,7 @@
     const state = {master:null,user:null,document:null,savedRecord:null,stage:'details',editable:true,
       canSetRequirements:false,scannerConfigured:false,documents:[],busy:false,errors:[],clientDraftKey:null,preflight:null};
     let autosave,documents,recovery,recoveryOffer,submission,receiptTimer,receiptPolls=0;
+    let previewGeneration=0,previewExpected=null,previewTimer;
     const entryGuard=createEntryGuard(),receiptGuard=createEntryGuard();
     const api = (path,options) => root.PCN_SESSION.fetch(path,options);
     function node(tag,text,className) {
@@ -407,17 +414,53 @@
         const action=button('Use this starter',async()=>{const {form,option}=options[Number(select.value)];await begin(model.selectChange({...model.blank(state.master),changeForm:form.id},option),null,{freshIdentity:true});changed(state.document);},'create-button create-primary');action.id='useStarter';container.append(label,action);select.focus();
       }
     }
+    function resetPreview() {
+      previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);
+      const frame=$('documentPreviewFrame');frame.hidden=true;frame.removeAttribute('src');
+      setBusy(false);$('previewDocument').focus({preventScroll:true});
+    }
+    function closePreview() { if($('documentPreviewDialog').open)$('documentPreviewDialog').close(); }
+    function receivePreviewMessage(event) {
+      if(!$('documentPreviewDialog').open || !isPreviewMessage(event,previewExpected))return;
+      root.clearTimeout(previewTimer);
+      const status=$('documentPreviewStatus'),frame=$('documentPreviewFrame');
+      if(event.data.state==='ready'){status.hidden=true;frame.hidden=false;}
+      else{previewExpected=null;frame.hidden=true;status.hidden=false;status.dataset.state='error';status.textContent=typeof event.data.message==='string'?event.data.message:'The document could not be loaded. Close this preview and try again.';}
+    }
     async function preview() {
       if(!state.savedRecord&&!model.hasMeaningfulContent(state.document,state.master)){notify('info','Add document details first','Enter some details before saving a draft for preview.');return;}
-      const popup=root.open('about:blank','_blank');if(popup)popup.opener=null;
+      if($('documentPreviewDialog').open)return;
+      const request=++previewGeneration,dialog=$('documentPreviewDialog'),frame=$('documentPreviewFrame'),status=$('documentPreviewStatus');
+      previewExpected=null;frame.hidden=true;status.hidden=false;status.dataset.state='loading';status.textContent='Saving your draft for preview…';
+      dialog.showModal();$('closeDocumentPreview').focus();
       setBusy(true);
-      try{const record=await autosave.flush({force:true});if(!record?.id)throw new Error('Add document details and save a draft before previewing.');const url=`/form.html?id=${encodeURIComponent(record.id)}`;
-        if(popup)popup.location.replace(url);else notify('info','Preview ready','Allow popups to open the official PCN document in another tab.');
-      }catch(error){popup?.close();report(error);}finally{setBusy(false);}
+      try{
+        const record=await autosave.flush({force:true});
+        if(request!==previewGeneration || !dialog.open)return;
+        if(!/^PCN-\d{4}-\d{4}$/.test(record?.id || '') || !/^[a-f0-9]{16}$/i.test(record?.version || ''))throw new Error('Save a draft before previewing the document.');
+        const version=record.version.toLowerCase();
+        previewExpected={source:frame.contentWindow,origin:root.location.origin,id:record.id,version,request:String(request)};
+        status.textContent='Loading PCN document…';
+        frame.src=`/document-preview?id=${encodeURIComponent(record.id)}&version=${encodeURIComponent(version)}&request=${request}`;
+        previewTimer=root.setTimeout(()=>{
+          if(request!==previewGeneration || !dialog.open)return;
+          previewExpected=null;status.dataset.state='error';status.textContent='The preview is taking too long. Close it and try again.';
+        },20000);
+      }catch(error){
+        if(request===previewGeneration && dialog.open){status.dataset.state='error';status.textContent=error.message || 'The document could not be loaded.';}
+      }finally{if(request===previewGeneration)setBusy(false);}
     }
     function bind() {
       $('confirmCancel').addEventListener('click',()=>$('createConfirm').close('cancel'));$('confirmAccept').addEventListener('click',()=>$('createConfirm').close('confirm'));
       $('dismissNotice').addEventListener('click',()=>$('createNotice').hidden=true);
+      $('closeDocumentPreview').addEventListener('click',closePreview);
+      $('documentPreviewDialog').addEventListener('close',resetPreview);
+      $('documentPreviewDialog').addEventListener('cancel',event=>{event.preventDefault();closePreview();});
+      $('documentPreviewFrame').addEventListener('load',()=>{
+        if(!$('documentPreviewDialog').open || !previewExpected)return;
+        try{$('documentPreviewFrame').contentDocument?.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();closePreview();}});}catch{/* Cross-origin redirects remain hidden until a valid preview message. */}
+      });
+      root.addEventListener('message',receivePreviewMessage);
       $('startBlank').addEventListener('click',()=>begin(model.blank(state.master)));
       $('startCommon').addEventListener('click',()=>entryChoices('starter'));$('startCopy').addEventListener('click',()=>entryChoices('copy'));$('startResume').addEventListener('click',()=>entryChoices('resume'));
       $('testDocument').addEventListener('click',fillTest);$('fillTestDocument').addEventListener('click',fillTest);$('newDocument').addEventListener('click',newDocument);$('receiptNew').addEventListener('click',newDocument);
@@ -467,7 +510,7 @@
       finally{doc.querySelectorAll('#createEntry button').forEach(control=>control.disabled=!state.master);}
     }
     void init();
-    return {getState:()=>state,destroy(){entryGuard.next();receiptGuard.next();autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);}};
+    return {getState:()=>state,destroy(){entryGuard.next();receiptGuard.next();previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);root.removeEventListener('message',receivePreviewMessage);closePreview();$('documentPreviewFrame').removeAttribute('src');autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);}};
   }
-  return Object.freeze({completion,stageForIssue,testFillMode,retryMode,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,savedDocument,notificationLabel,createSubmission,mount});
+  return Object.freeze({completion,stageForIssue,testFillMode,retryMode,isPreviewMessage,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,savedDocument,notificationLabel,createSubmission,mount});
 });

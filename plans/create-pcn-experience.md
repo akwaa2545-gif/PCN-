@@ -15,7 +15,7 @@ The page includes all seven requested improvements: live completion, inline erro
 - Keep the current stage's controls in one readable central column. A desktop summary shows required-item completion; on mobile the summary is a compact expandable region.
 - Keep **Save draft**, **Back** and **Continue** in a persistent action bar. Only the final stage has **Submit PCN**. Opening Create, changing a stage, previewing, using a template or filling test values never submits.
 - Display errors beside their fields, with field associations for assistive technology. Preserve the compact bottom-right checklist notification; it must not insert a large block above or move the form.
-- Offer **Preview document** as a secondary action. It uses the official sheet with existing DRAFT/unsaved indications, without a second editable copy.
+- Offer **Preview document** as a native modal on Create. Flush the draft, then render only the official sheet read-only in a same-origin frame, including TESTING DOC and DRAFT identity. Close or Escape restores focus to Preview document; no new tab opens.
 
 ### Stage contents
 
@@ -168,3 +168,10 @@ Tests use memory/fake SQL and loopback browser servers with fake integrations. T
 - Windows release packaging/extraction checks: **11/11 passed**, including all creation assets and private-file exclusions.
 - Code, JavaScript and security reviews approved the implementation. Follow-up regressions cover in-flight edits, stale entry/receipt responses, readonly requirements, document note/caret preservation, fresh testing/copy identities and consistent SQL creation lock order.
 - Local readiness returned `ready`. No migration, push, deployment, private configuration change or operational notification was performed.
+
+
+## Follow-up: document-only popup preview
+
+The dedicated `/document-preview?id=...&version=...&request=...` route reuses the official form renderer. It verifies the exact saved identity/version and forces read-only mode before loading; it skips profile, workspace, recovery, record-list reads and polling. Only this exact GET/HEAD route permits same-origin framing; normal pages and APIs retain DENY and frame-ancestors none. The parent accepts readiness/errors only from its own frame, origin and matching per-open request. Loading/error content stays hidden, and closing or errors invalidate stale messages. Focused desktop/mobile popup checks and the full Create browser suite pass with no operational SQL or mail.
+
+Follow-up verification: **878/878 unit/API tests passed**, with **87.68% line, 90.99% branch and 95.12% function coverage**. Focused popup desktop/mobile checks pass, including error/late-ready handling, and the updated full Create suite passes 14 journeys. Evidence: `test-results/preview-developer-final-coverage.log`, `create-pcn-preview-final.log` and `create-pcn-browser-final.log`. Code, JavaScript and security reviewers approved the changes.

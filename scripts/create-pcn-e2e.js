@@ -156,6 +156,104 @@ async function main() {
     await expect(page.locator('#createEditor')).toBeVisible();
     checked('Dedicated blank Create page opens without allocating a PCN or sending notifications');
     await page.screenshot({ path: path.resolve('test-results/create-pcn-desktop.png'), fullPage: true });
+    const verifyDocumentPreview = async (id, stress = false) => {
+      const dialog = page.locator('#documentPreviewDialog'), frameElement = page.locator('#documentPreviewFrame');
+      const status = page.locator('#documentPreviewStatus'), previewButton = page.locator('#previewDocument');
+      const originalUrl = page.url(), originalPages = context.pages().length;
+      let pending = null, release = () => {};
+      const holdPreview = async route => {
+        pending = new URL(route.request().url());
+        await new Promise(resolve => { release = resolve; releases.push(resolve); });
+        return route.continue();
+      };
+      await context.route(`${origin}/document-preview?*`, holdPreview);
+      await previewButton.click();
+      await expect(dialog).toBeVisible();
+      assert.equal(await dialog.evaluate(node => node.tagName), 'DIALOG');
+      await expect(status).toBeVisible(); await expect(status).toContainText(/loading/i);
+      await expect(frameElement).toBeHidden();
+      await expect.poll(() => pending !== null).toBe(true);
+      const firstRequest = pending;
+      const canonical = await system.repository.findById(id);
+      assert.equal(firstRequest.searchParams.get('id'), id);
+      assert.equal(firstRequest.searchParams.get('version'), canonical.version);
+      assert(firstRequest.searchParams.get('request'), 'Every preview has a readiness generation');
+      assert.equal(page.url(), originalUrl); assert.equal(context.pages().length, originalPages);
+      assert.equal(canonical.status, 'draft'); assert.equal(require('../src/documentControl').hasSignatures(canonical), false);
+      release();
+      await expect(frameElement).toBeVisible(); await expect(status).toBeHidden();
+      const frame = page.frameLocator('#documentPreviewFrame');
+      await expect(frame.locator('body')).toHaveClass(/document-preview-only/);
+      await expect(frame.locator('.supplier-sheet')).toBeVisible();
+      await expect(frame.locator('#supplierName')).toHaveValue(canonical.supplierName);
+      await expect(frame.locator('#documentTestBadge')).toBeVisible();
+      await expect(frame.locator('#documentPrintIdentity')).toContainText('DRAFT');
+      for (const chrome of ['.topbar', '.tabs', '.summary-panel', '.form-action-dock', '#appNotice']) await expect(frame.locator(chrome)).toBeHidden();
+      assert.equal(await frame.locator('.supplier-sheet input:enabled, .supplier-sheet select:enabled, .supplier-sheet textarea:enabled, .supplier-sheet button:enabled').count(), 0);
+      assert.equal(await frameElement.getAttribute('sandbox'), 'allow-scripts allow-same-origin');
+      await page.screenshot({ path: path.resolve('test-results/create-pcn-preview-desktop.png') });
+      await frame.locator('body').press('Escape');
+      await expect(dialog).toBeHidden(); await expect(previewButton).toBeFocused();
+      checked('Native same-page preview flushes edits, waits for readiness and shows only the disabled official testing draft; child Escape restores focus');
+      if (stress) {
+        pending = null;
+        await previewButton.click(); await expect(status).toBeVisible(); await expect(frameElement).toBeHidden();
+        await expect.poll(() => pending !== null).toBe(true);
+        assert.notEqual(pending.searchParams.get('request'), firstRequest.searchParams.get('request'));
+        assert.equal(pending.searchParams.get('version'), firstRequest.searchParams.get('version'));
+        const child = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame());
+        assert(child, 'Native preview owns one child frame');
+        await child.evaluate(({ origin, id, version, request }) => parent.postMessage({ type: 'pcn-document-preview', state: 'ready', id, version, request }, origin),
+          { origin, id, version: canonical.version, request: firstRequest.searchParams.get('request') });
+        await expect(frameElement).toBeHidden(); await expect(status).toBeVisible();
+        release(); await expect(frameElement).toBeVisible(); await expect(status).toBeHidden();
+        const postFromChild = async payload => {
+          const barrier = crypto.randomUUID();
+          await page.evaluate(token => {
+            window.previewTestBarrier = new Promise(resolve => {
+              const listener = event => {
+                if (event.data?.type !== 'preview-test-barrier' || event.data.token !== token) return;
+                removeEventListener('message', listener); resolve();
+              };
+              addEventListener('message', listener);
+            });
+          }, barrier);
+          await child.evaluate(({ payload, origin, barrier }) => {
+            parent.postMessage(payload, origin);
+            parent.postMessage({ type: 'preview-test-barrier', token: barrier }, origin);
+          }, { payload, origin, barrier });
+          await page.evaluate(() => window.previewTestBarrier);
+        };
+        const currentIdentity = { type: 'pcn-document-preview', id, version: canonical.version, request: pending.searchParams.get('request') };
+        await postFromChild({ ...currentIdentity, state: 'error', message: 'Synthetic preview failed after loading' });
+        await expect(status).toContainText('Synthetic preview failed after loading'); await expect(frameElement).toBeHidden();
+        await postFromChild({ ...currentIdentity, state: 'ready' });
+        await expect(status).toBeVisible(); await expect(status).toContainText('Synthetic preview failed after loading');
+        await expect(frameElement).toBeHidden();
+        await page.locator('#closeDocumentPreview').click(); await expect(dialog).toBeHidden(); await expect(previewButton).toBeFocused();
+        await page.locator('#supplierName').fill('TEST Preview reopened latest edit');
+        pending = null;
+        await previewButton.click(); await expect.poll(() => pending !== null).toBe(true);
+        release(); await expect(frameElement).toBeVisible();
+        await expect(frame.locator('#supplierName')).toHaveValue('TEST Preview reopened latest edit');
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+        assert.equal(await dialog.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight; }), true);
+        await expect(page.locator('#closeDocumentPreview')).toBeVisible();
+        await page.screenshot({ path: path.resolve('test-results/create-pcn-preview-mobile.png') });
+        await page.locator('#closeDocumentPreview').click(); await expect(previewButton).toBeFocused();
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        pending = null;
+        await previewButton.click(); await expect.poll(() => pending !== null).toBe(true);
+        await page.locator('#closeDocumentPreview').click();
+        release();
+        await expect(dialog).toBeHidden(); await expect(frameElement).toBeHidden();
+        assert.equal(page.url(), originalUrl); assert.equal(context.pages().length, originalPages);
+        checked('Reopening ignores old-generation and error-following readiness, reloads current saved edits, fits mobile and cannot reveal a closed stale preview');
+      }
+      await context.unroute(`${origin}/document-preview?*`, holdPreview);
+      assert.deepEqual(system.jobs, []);
+    };
     if (previewOnly) {
       const model = require('../create-model'), master = require('../src/masterData');
       const created = await system.creationService.create({ clientDraftKey: crypto.randomUUID(),
@@ -163,13 +261,11 @@ async function main() {
         { id: 'create-admin-id', roles: ['admin'], isActive: true });
       await page.goto(`${origin}/create?draft=${created.record.id}`);
       await expect(page.locator('#createEditor')).toBeVisible();
-      const url = page.url(), pageCount = context.pages().length;
       await page.locator('#supplierName').fill('TEST Preview latest unsaved edit');
-      await page.locator('#previewDocument').click();
-      await expect(page.locator('#documentPreviewDialog')).toBeVisible();
-      assert.equal(page.url(), url); assert.equal(context.pages().length, pageCount);
+      await verifyDocumentPreview(created.record.id, true);
+      assert.equal((await system.repository.findById(created.record.id)).supplierName, 'TEST Preview reopened latest edit');
       assert.deepEqual(system.jobs, []);
-      checked('Preview opens a native in-page dialog without changing the creation URL or opening another tab');
+      assert.deepEqual(report.submissions, []); assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []);
       report.status = 'passed'; return;
     }
     if (identityOnly) {
@@ -352,10 +448,9 @@ async function main() {
     assert.equal(system.jobs.length, 0);
     checked('Actual versioned uploads show pending/unavailable scan, block submission, support removal, and require a trusted clean replacement');
 
-    const popupPromise = context.waitForEvent('page');
-    await page.locator('#previewDocument').click();
-    const preview = await popupPromise; preview.setDefaultTimeout(10000);
-    await preview.waitForURL(`**/form.html?id=${testing.id}`);
+    await verifyDocumentPreview(testing.id);
+    const preview = await context.newPage(); preview.setDefaultTimeout(10000);
+    await preview.goto(`${origin}/form.html?id=${testing.id}`);
     await expect(preview.locator('#appNoticeTitle')).toContainText('PCN loaded');
     await expect(preview.getByText('TESTING DOC', { exact: true }).first()).toBeVisible();
     assert.equal(await preview.locator('.supplier-sheet').count(), 1);
@@ -366,7 +461,7 @@ async function main() {
     await preview.pdf({ path: path.resolve('test-results/create-pcn-testing-official.pdf'), printBackground: true, preferCSSPageSize: true });
     await preview.close();
     assert.equal(system.jobs.length, 0);
-    checked('Official preview and PDF retain the genuine sheet, DRAFT protection and persistent TESTING DOC without submitting');
+    checked('Separate official Print/PDF export retains the genuine sheet, DRAFT protection and persistent TESTING DOC without submitting');
 
     await page.locator('[data-stage="review"]').click();
     await expect(page.locator('#nextActionLabel')).toContainText(/GSC\/TET.*Prepared/);

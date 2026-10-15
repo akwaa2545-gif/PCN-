@@ -39,6 +39,10 @@ function createRequestHandler(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; font-src 'self'; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     try {
       const url = new URL(req.url, 'http://localhost');
+      if (url.pathname === '/document-preview' && ['GET','HEAD'].includes(req.method)) {
+        res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+        res.setHeader('Content-Security-Policy', String(res.getHeader('Content-Security-Policy')).replace("frame-ancestors 'none'", "frame-ancestors 'self'").replace("form-action 'self'", "form-action 'none'"));
+      }
       if (url.pathname.startsWith('/api/')) {
         const clientAddress = getClientAddress(req, {trustProxy:context.trustProxy});
         rateLimiter.check(req, {clientAddress});
@@ -64,6 +68,7 @@ async function serveStatic(req, res, url, rootDir) {
   if (route === '/login') file = 'login.html';
   if (route === '/records') file = 'records.html';
   if (route === '/create') file = 'create.html';
+  if (route === '/document-preview') file = 'form.html';
   if (/^\/P(?:CN|NC)-\d{4}-\d{3,4}$/i.test(route)) file = 'form.html';
   if (!assets.has(file)) throw new ApiError(404, 'File not found');
   let content;

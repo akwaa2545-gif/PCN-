@@ -4,14 +4,14 @@ const ui = require('../create');
 
 test('Document preview accepts only its own same-origin frame and requested record version',()=>{
   const source={},origin='http://pcn.test',id='PCN-2026-0001',version='1234567890abcdef';
-  const expected={source,origin,id,version};
-  const data={type:'pcn-document-preview',state:'ready',id,version};
+  const expected={source,origin,id,version,request:'1'};
+  const data={type:'pcn-document-preview',state:'ready',id,version,request:'1'};
   const event={source,origin,data};
   assert.equal(ui.isPreviewMessage(event,expected),true);
   assert.equal(ui.isPreviewMessage({...event,data:{...data,state:'error'}},expected),true);
   for(const invalid of [{...event,source:{}},{...event,origin:'http://elsewhere.test'},
     {...event,data:{...data,id:'PCN-2026-0002'}},{...event,data:{...data,version:'0000000000000000'}},
-    {...event,data:{...data,type:'other'}},{...event,data:{...data,state:'pending'}},{...event,data:null}]) {
+    {...event,data:{...data,request:'old'}},{...event,data:{...data,type:'other'}},{...event,data:{...data,state:'pending'}},{...event,data:null}]) {
     assert.equal(ui.isPreviewMessage(invalid,expected),false);
   }
   assert.equal(ui.isPreviewMessage(event,null),false);

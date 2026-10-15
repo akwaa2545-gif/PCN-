@@ -4,6 +4,7 @@ const { ApiError } = require('./apiError');
 const { employeeRoles, normalizeEmployeeCode, validateEmployeeAccount, validateLocalEmployeeAccount, validateEmployeeIdentity, validateVerifiedMail, validateUserAssignment } = require('./employeeAccounts');
 const {lockUserMailRouting,readUserMailAssignments,applyUserMailRouting,assertCurrentUser}=require('./userMailRouting');
 const {normalizeMailRouting}=require('./mailRouting');
+const {isDeveloperAssignment}=require('./signingPermissions');
 function mapProfile(row) {
   if(!row.MailDirectoryId||!row.MailVerifiedAt||!row.MailProfileJson)return null;
   try {
@@ -102,6 +103,10 @@ class SqlAuthRepository {
       await assertCurrentUser(transaction,user);
       const prior=await this.userQuery(transaction.request().input('id',sql.UniqueIdentifier,id),'u.Id=@id');
       if(!prior)throw new ApiError(404,'User not found');
+      const developerTarget=prior.roles.some(role=>String(role).replace(/[^a-z]/gi,'').toLowerCase()==='developer');
+      if(developerTarget&&(!user||user.isActive===false||!isDeveloperAssignment(user))){
+        throw new ApiError(403,'Only a Developer can change access for a Developer account');
+      }
       const account=roleRemoval?{...prior,roles:[],department:null,signingStep:null,version:input.version}:input;
       if(prior.version!==account.version.toLowerCase())throw new ApiError(409,'Account changed. Reload and try again');
       if(roleRemoval&&!prior.roles.length)throw new ApiError(409,'This user has no assigned roles');
