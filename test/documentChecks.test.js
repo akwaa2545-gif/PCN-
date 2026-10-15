@@ -7,6 +7,40 @@ const full = { id:'PCN-2026-0001',status:'submitted',ownerUserId:'supplier',risk
   materialName:'Copper',selectedChange:'Tolerance',reason:'Quality',currentCondition:'Old',newCondition:'New',
   desiredStart:'Lot 42',sampleSubmitted:'no',internalReview:{} };
 const admin = {id:'admin',roles:['admin'],isActive:true};
+test('completion errors list every missing blocking label and omit completed or advisory fields', () => {
+  const record = { ...full, supplierName: '', materialName: '', selectedChange: '', reason: '',
+    currentCondition: '', newCondition: '', desiredStart: '', sampleSubmitted: 'pending',
+    internalReview: { docs: { hazardousReport: true, greenProcurement: true } } };
+  const expected = ['Supplier name', 'Material / chemical name', 'Change description', 'Reason for change',
+    'Current condition', 'New condition', 'Target start date or lot', 'Sample submission choice', 'Green Procurement declaration'];
+  const attachments = [{ requirementName: 'hazardousReport', scanStatus: 'clean' }];
+  assert.throws(() => assertCompletion(record, attachments), error => {
+    assert.equal(error.statusCode, 400);
+    assert.deepEqual(error.details.missing.map(item => item.label), expected);
+    assert.ok(error.message.includes(`Still missing: ${expected.join('; ')}`));
+    assert.equal(error.message.includes("Supplier's Hazardous substance tested Report"), false);
+    assert.equal(error.message.includes('Sample submission date'), false);
+    return true;
+  });
+  assert.throws(() => assertCompletion({ ...full, reason: '', sampleSubmitted: 'yes', sampleSubmittedDate: '' }), error => {
+    assert.ok(error.message.includes('Still missing: Reason for change'));
+    assert.equal(error.message.includes('Supplier name'), false);
+    assert.equal(error.message.includes('Sample submission date'), false);
+    return true;
+  });
+});
+test('file-only completion errors name only missing blocking attachments', () => {
+  const record = { ...full, reason: '', sampleSubmitted: 'yes', sampleSubmittedDate: '',
+    internalReview: { docs: { hazardousReport: true, greenProcurement: true } } };
+  assert.throws(() => assertCompletion(record, [{ requirementName: 'hazardousReport', scanStatus: 'clean' }], { requiredFilesOnly: true }), error => {
+    assert.deepEqual(error.details.missing, [{ key: 'greenProcurement', label: 'Green Procurement declaration', field: 'internalReview.docs.greenProcurement' }]);
+    assert.ok(error.message.includes('Still missing: Green Procurement declaration'));
+    assert.equal(error.message.includes('Reason for change'), false);
+    assert.equal(error.message.includes('Sample submission date'), false);
+    assert.equal(error.message.includes("Supplier's Hazardous substance tested Report"), false);
+    return true;
+  });
+});
 test('next action starts with Prepared and fills historical gaps before later steps', () => {
   assert.equal(buildAction(full, admin).signingStep, 'prepared');
   const historical = { ...full, internalReview: { signoff: { gscTet: { approved: true, approvedName: 'Original' } } } };

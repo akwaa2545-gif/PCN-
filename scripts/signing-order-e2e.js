@@ -141,14 +141,35 @@ async function main() {
     await saveReturned();
     assert.equal(jobs.length, beforeReturnedJobs + 1, 'An unchanged extra save never repeats the handoff');
     report.checks.push('Returned PCN Save draft retains Supplier Action without action mail; normal save resubmits and queues Checked once, preserving Prepared identity');
-    record = await service.create({ ...unsignedPayload, supplierName: '', status: 'draft', internalReview: {} }, admin.displayName, admin);
+    record = await service.create({ ...unsignedPayload, reason: '', currentCondition: '', newCondition: '', desiredStart: '', sampleSubmitted: 'pending',
+      changeRows: unsignedPayload.changeRows.map(row => ({ ...row, currentCondition: '', newCondition: '' })),
+      status: 'draft', internalReview: {} }, admin.displayName, admin);
     record = await repository.update(record.id, current => ({ ...current, status: 'supplier_action' }), 'incomplete-returned-fixture', record.version);
     await load();
     const incompleteBefore = await repository.findById(record.id), incompleteJobs = jobs.length;
-    await saveReturned(false, 400);
+    const incompleteResponse = await saveReturned(false, 400);
+    const incompleteError = await incompleteResponse.json();
+    const missingLabels = ['Reason for change', 'Current condition', 'New condition', 'Target start date or lot', 'Sample submission choice'];
+    assert.deepEqual(incompleteError.details.missing.map(item => item.label), missingLabels);
+    assert.equal(incompleteError.error, `Complete required document information before advancing the PCN. Still missing: ${missingLabels.join('; ')}.`);
+    const allLabels = ['Supplier name', 'Material / chemical name', 'Change description', ...missingLabels, 'Sample submission date'];
+    assert.deepEqual(allLabels.filter(label => incompleteError.error.includes(label)), missingLabels, 'Save error names exactly the missing information');
+    await expect(page.locator('#appNotice')).toBeVisible();
+    await expect(page.locator('#appNotice')).toHaveAttribute('role', 'alert');
+    await expect(page.locator('#appNoticeMessage')).toHaveText(incompleteError.error);
+    for (const label of missingLabels) await expect(page.locator('#appNoticeMessage')).toContainText(label);
+    await expect(page.locator('#appNoticeMessage')).not.toContainText('Supplier name');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('#appNoticeMessage')).toHaveText(incompleteError.error);
+    assert.equal(await page.locator('#appNotice').evaluate(node => {
+      const bounds = node.getBoundingClientRect();
+      return bounds.left >= 0 && bounds.right <= innerWidth && node.scrollWidth <= node.clientWidth;
+    }), true, 'Missing-field alert fits mobile viewport without truncation');
+    await page.locator('#appNotice').screenshot({ path: path.resolve('test-results/missing-save-fields-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 1000 });
     assert.deepEqual(await repository.findById(record.id), incompleteBefore, 'Incomplete returned PCN cannot resubmit');
     assert.equal(jobs.length, incompleteJobs, 'Rejected incomplete resubmission queues no action mail');
-    report.checks.push('Incomplete returned PCN normal save is rejected with unchanged record and no handoff');
+    report.checks.push('Incomplete returned PCN save announces exactly the five missing fields in an alert, leaving completed fields, record and handoff unchanged');
     record = firstRecord; csrf = await login('admin'); await load();
     await patch({ status: 'submitted' });
     assert.equal(jobs.at(-1).to, 'prepared@example.test');

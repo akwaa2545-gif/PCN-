@@ -3,6 +3,28 @@ const assert = require('node:assert/strict');
 const { startApi, unsignedPayload, fakeAuthService } = require('./helpers/apiHarness');
 const { meaningfulUpdate } = require('../src/notificationUpdates');
 
+test('failed creation and draft submission list missing field labels without persisting the failed PATCH', async t => {
+  const api = await startApi(t);
+  const admin = await api.login('admin');
+  const incomplete = { ...unsignedPayload, reason: '', desiredStart: '', sampleSubmitted: 'pending', internalReview: {} };
+  const expected = ['Reason for change', 'Target start date or lot', 'Sample submission choice'];
+  const rejected = await api.request('/api/pcns', { method: 'POST', session: admin, body: incomplete });
+  assert.equal(rejected.status, 400);
+  assert.deepEqual(rejected.body.details.missing.map(item => item.label), expected);
+  assert.ok(rejected.body.error.includes(`Still missing: ${expected.join('; ')}`));
+  assert.equal(rejected.body.error.includes('Supplier name'), false);
+  assert.deepEqual(await api.repository.list(), []);
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: { ...incomplete, status: 'draft' } });
+  assert.equal(created.status, 201);
+  const before = await api.repository.findById(created.body.data.id);
+  const response = await api.request(`/api/pcns/${before.id}`, { method: 'PATCH', session: admin,
+    body: { version: before.version, status: 'submitted' } });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body.details.missing.map(item => item.label), expected);
+  assert.ok(response.body.error.includes(`Still missing: ${expected.join('; ')}`));
+  assert.deepEqual(await api.repository.findById(before.id), before);
+});
+
 test('revision metadata alone is silent while actual document content retains notifications', () => {
   const before={status:'submitted',supplierName:'Supplier'};
   assert.deepEqual(meaningfulUpdate(before,{...before,documentControl:{contentRevision:2,signatureBindings:{}}}),[]);
