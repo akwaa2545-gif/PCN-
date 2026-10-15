@@ -157,11 +157,10 @@ async function main() {
     assert.deepEqual(allLabels.filter(label => incompleteError.error.includes(label)), missingLabels, 'Save error names exactly the missing information');
     const missingPopup = await page.locator('.app-feedback-area').evaluate(node => {
       const style = getComputedStyle(node), bounds = node.getBoundingClientRect();
-      return { position: style.position, left: parseFloat(style.left), right: style.right, bottom: parseFloat(style.bottom), width: bounds.width };
+      return { position: style.position, rightGap: innerWidth - bounds.right, bottom: innerHeight - bounds.bottom, width: bounds.width };
     });
     assert.equal(missingPopup.position, 'fixed', 'Missing items stay in the notification popup');
-    assert(missingPopup.left >= 12 && missingPopup.left <= 30, 'Notification popup uses the original left margin');
-    assert.equal(missingPopup.right, 'auto');
+    assert(missingPopup.rightGap >= 12 && missingPopup.rightGap <= 30, 'Notification popup uses the selected right margin');
     assert(missingPopup.bottom >= 90 && missingPopup.width <= 420, 'Notification popup stays above the action dock and remains compact');
     const documentTopAfterMissing = await page.locator('main.workspace').evaluate(node => node.getBoundingClientRect().top + scrollY);
     assert.equal(Math.round(documentTopAfterMissing), Math.round(documentTopBeforeMissing), 'Missing-item popup does not push the document layout');
@@ -179,6 +178,8 @@ async function main() {
     await page.locator('#appNotice').scrollIntoViewIfNeeded();
     assert.equal(await page.locator('#appNotice').evaluate(node => node.scrollHeight <= node.clientHeight), true, 'Desktop checklist shows every required item without internal scrolling');
     await page.locator('#appNotice').screenshot({ path: path.resolve('test-results/missing-save-fields-desktop.png') });
+    await page.screenshot({ path: path.resolve('test-results/missing-save-popup-desktop.png') });
+    await page.screenshot({ path: path.resolve('test-results/missing-save-popup-full-page.png'), fullPage: true });
     await missingItems.nth(0).getByRole('button', { name: /^Go to field:/ }).click();
     await expect(page.locator('#reason')).toBeFocused();
     await missingItems.nth(1).getByRole('button', { name: /^Go to field:/ }).click();
@@ -198,6 +199,7 @@ async function main() {
         });
     }), true, 'All five missing-field rows fit mobile viewport without truncation or internal scrolling');
     await page.locator('#appNotice').screenshot({ path: path.resolve('test-results/missing-save-fields-mobile.png') });
+    await page.screenshot({ path: path.resolve('test-results/missing-save-popup-mobile.png') });
     await page.setViewportSize({ width: 1440, height: 1000 });
     assert.deepEqual(await repository.findById(record.id), incompleteBefore, 'Incomplete returned PCN cannot resubmit');
     assert.equal(jobs.length, incompleteJobs, 'Rejected incomplete resubmission queues no action mail');
