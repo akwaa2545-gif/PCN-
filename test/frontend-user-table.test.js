@@ -155,3 +155,38 @@ test('pending access with confirmed mail still requires an explicit role and dep
   await page.element('employeeUserForm').events.submit({ preventDefault() {} });
   assert.deepEqual(JSON.parse(page.calls.find(call => call.options?.method === 'PATCH').options.body).roles, ['admin']);
 });
+
+
+test('Users show observed presence separately from account access in both tables', async () => {
+  const page = await usersPage([account('pending-online', [], { presence: { status: 'online' } }),
+    account('assigned-offline', ['qa'], { presence: { status: 'offline' } }),
+    account('inactive-online', ['qa'], { isActive: false, presence: { status: 'online' } }),
+    account('legacy', ['qa']), account('malformed', [], { presence: { status: 'maybe' } })]);
+  const rows = [...page.element('pendingUsersRows').children, ...page.element('adminUsersRows').children];
+  const cells = id => rows.find(row => row.children[0].textContent === '1234567' && row.children[1].querySelectorAll('*').some(node => node.textContent === id)).children;
+  assert.equal(cells('pending-online')[5].firstElementChild.textContent, 'Online');
+  assert.match(cells('pending-online')[5].firstElementChild.className, /user-presence-online/);
+  assert.equal(cells('assigned-offline')[5].firstElementChild.textContent, 'Offline');
+  assert.equal(cells('inactive-online')[5].firstElementChild.textContent, 'Online');
+  assert.equal(cells('inactive-online')[6].textContent, 'Inactive');
+  assert.equal(cells('legacy')[5].firstElementChild.textContent, 'Unavailable');
+  assert.equal(cells('malformed')[5].firstElementChild.textContent, 'Unavailable');
+  filter(page, 'usersStatusFilter', 'inactive');
+  assert.equal(page.element('adminUsersRows').children.length, 1, 'account status remains the existing filter');
+});
+
+test('presence-only changes refresh the Users badge and preserve filters and focused action', async () => {
+  let current = [account('assigned', ['qa'], { presence: { status: 'offline' } })];
+  const page = await usersPage(current, { fetch(url) { if (url === '/api/admin/users') return current; } });
+  filter(page, 'usersSearchFilter', 'assigned'); filter(page, 'usersStatusFilter', 'active');
+  const original = page.element('adminUsersRows').firstElementChild;
+  const edit = action(page, 'adminUsersRows', 'assigned', 'edit'); edit.focus();
+  await page.autoRefresh.refresh();
+  assert.equal(page.element('adminUsersRows').firstElementChild, original, 'unchanged presence does not repaint');
+  current = [{ ...current[0], presence: { status: 'online' } }];
+  await page.autoRefresh.refresh();
+  assert.equal(page.element('adminUsersRows').firstElementChild.children[5].firstElementChild.textContent, 'Online');
+  assert.equal(page.document.activeElement, action(page, 'adminUsersRows', 'assigned', 'edit'));
+  assert.equal(page.element('usersSearchFilter').value, 'assigned');
+  assert.equal(page.element('usersStatusFilter').value, 'active');
+});
