@@ -169,6 +169,9 @@ test('reset cancels only unclaimed jobs; valid recompletion gets a new identity'
   const cancellation = tx.calls.find(call => call.query.includes("Status=N'cancelled'"));
   assert.match(cancellation.query, /Status=N'pending'/);
   assert.equal(cancellation.inputs.eventKey, `${base.id}:${first.record.mailRoutingState.activationId}:handoff`);
+  const unrelated = await notifications.prepare(tx, reset.record, { ...reset.record, updatedAt: '2026-10-15T10:00:00Z' });
+  assert.equal(unrelated.plan.queued, false, 'An unchanged save after reset cannot re-adopt and send another notice');
+  assert.equal(unrelated.record.mailRoutingState?.signingOrderVersion, 2);
   const again = await notifications.prepare(tx, reset.record, { ...reset.record, internalReview: first.record.internalReview });
   assert.notEqual(again.record.mailRoutingState.activationId, first.record.mailRoutingState.activationId);
   assert.equal(again.plan.queued, true);
