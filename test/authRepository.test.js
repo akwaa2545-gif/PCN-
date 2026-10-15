@@ -101,6 +101,25 @@ test('SQL sessions persist hash instead of token and hydrate expiry', async () =
   assert.match(state.calls.at(-1).query,/FailedLoginCount=0/);
 });
 
+test('presence batch SQL binds observed hashes and revalidates active accounts, expiry, revocation and stamps',async () => {
+  const hash = 'a'.repeat(64);
+  const now = new Date('2026-10-15T08:00:00Z');
+  const {repo,state} = fixture([{recordset:[{TokenHash:hash,UserId:'one',SecurityStamp:'stamp',ExpiresAt:new Date(now.getTime()+10000)}]}]);
+  assert.deepEqual(await repo.validPresenceSessions([{tokenHash:hash}],now),[{tokenHash:hash,userId:'one',securityStamp:'stamp',expiresAt:new Date(now.getTime()+10000)}]);
+  const call = state.calls[0];
+  assert.equal(call.inputs.presence0,hash);
+  assert.equal(call.inputs.presenceNow,now);
+  assert.equal(call.query.includes(hash),false);
+  assert.match(call.query,/JOIN pcn\.Users/);
+  assert.match(call.query,/IsActive=1/);
+  assert.match(call.query,/RevokedAt IS NULL/);
+  assert.match(call.query,/ExpiresAt>@presenceNow/);
+  assert.match(call.query,/s\.SecurityStamp=u\.SecurityStamp/);
+  assert.deepEqual(await repo.validPresenceSessions([],now),[]);
+  assert.equal(state.calls.length,1);
+  await assert.rejects(repo.validPresenceSessions([{tokenHash:'hostile input'}],now),/presence/i);
+});
+
 test('role changes invalidate old session stamp and roll back missing user', async () => {
   const user={Id:'user',IdentityProvider:'employee-code',IsActive:true,DepartmentKey:'qaTet',AccessVersion:Buffer.from('0011223344556677','hex')};
   const hydrated={recordsets:[[user],[{Name:'qa'}]]};
