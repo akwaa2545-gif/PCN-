@@ -1,0 +1,76 @@
+.developer-page { background: #f4f7fa; color: #173452; margin: 0; }
+.developer-page [hidden] { display: none !important; }
+.developer-topbar { padding: 15px 28px; gap: 20px; background: #063f7b; }
+.developer-brand { color: white; display: flex; align-items: center; gap: 22px; text-decoration: none; }
+.developer-brand img { width: 122px; height: auto; }
+.developer-brand span { display: grid; gap: 3px; }
+.developer-brand strong { font-size: 20px; }
+.developer-brand small { font-size: 10px; letter-spacing: .06em; }
+.developer-main { width: min(1440px, calc(100% - 56px)); margin: 30px auto 60px; }
+.developer-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 25px; }
+.developer-heading h1 { margin: 8px 0; font-size: 28px; color: #003f7f; }
+.developer-heading p, .developer-panel > p { color: #536d87; line-height: 1.5; }
+.developer-badge { background: #ffcc32; color: #152d47; padding: 5px 10px; font-weight: 700; font-size: 12px; display: inline-block; }
+.developer-status { width: min(1440px, calc(100% - 56px)); margin: 18px auto; line-height: 1.5; }
+.developer-status:empty { display: none; }
+.developer-status[data-state="error"] { padding: 14px 18px; border-left: 4px solid #b52d37; background: #fff2f2; color: #8c202b; box-sizing: border-box; }
+.developer-button { min-height: 42px; background: #fff; color: #003f7f; border: 1px solid #bccddd; border-radius: 0; padding: 10px 18px; font: inherit; font-weight: 700; cursor: pointer; }
+.developer-button-primary { background: #ffcc32; color: #132c49; border-color: #ffcc32; }
+.developer-button:disabled { cursor: default; color: #697b8d; background: #e4eaf0; border-color: #e4eaf0; }
+.developer-page button:focus-visible, .developer-page input:focus-visible, .developer-page select:focus-visible, .developer-table-scroll:focus-visible { outline: 3px solid #0074d4; outline-offset: 3px; }
+.developer-picker { background: #fff; border: 1px solid #d4deea; padding: 22px; }
+.developer-picker h2, .developer-panel h2 { margin: 0 0 18px; font-size: 19px; color: #173452; }
+.developer-picker-fields { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; }
+.developer-page label { display: grid; gap: 8px; font-size: 13px; font-weight: 700; min-width: 0; }
+.developer-page input, .developer-page select { width: 100%; box-sizing: border-box; min-height: 44px; padding: 11px 12px; font: inherit; background: white; color: #173452; border: 1px solid #bccddd; border-radius: 0; }
+.developer-tabs { display: flex; border: 1px solid #d4deea; border-bottom: 0; margin-top: 24px; background: #eef2f6; }
+.developer-tabs button { padding: 18px 22px; border: 0; border-bottom: 4px solid transparent; border-radius: 0; color: #506a84; font: inherit; font-weight: 700; background: transparent; cursor: pointer; }
+.developer-tabs button[aria-selected="true"] { background: white; color: #003f7f; border-bottom-color: #f0b900; }
+.developer-panel { border: 1px solid #d4deea; background: #fff; padding: 26px; min-width: 0; }
+.developer-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.developer-summary-card { background: #f4f7fa; border-top: 3px solid #003f7f; padding: 18px; overflow-wrap: anywhere; }
+.developer-summary-card h3 { font-size: 12px; color: #536d87; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 10px; }
+.developer-summary-card strong { color: #003f7f; font-size: 18px; line-height: 1.5; }
+.developer-summary-card p { margin: 8px 0 0; line-height: 1.5; }
+.developer-stages { display: grid; gap: 18px; margin-top: 24px; }
+.developer-stage { border: 1px solid #d4deea; }
+.developer-stage h3 { margin: 0; padding: 14px 18px; background: #003f7f; color: white; font-size: 15px; }
+.developer-stage ol { list-style: none; padding: 20px; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.developer-step { border-left: 3px solid #c5d0db; padding-left: 14px; min-width: 0; overflow-wrap: anywhere; }
+.developer-step[data-state="completed"] { border-color: #23834e; }
+.developer-step[data-state="current"] { border-color: #e4ab00; background: #fffbeb; padding: 10px 14px; }
+.developer-step h4 { margin: 0 0 10px; font-size: 15px; }
+.developer-step p { margin: 8px 0; font-size: 13px; line-height: 1.5; }
+.developer-step-state { color: #536d87; font-weight: 700; }
+.developer-checks { margin-top: 24px; line-height: 1.7; }
+.developer-checks ul { padding-left: 22px; }
+.developer-filters { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 16px; margin-bottom: 10px; }
+.developer-date-note { font-size: 12px; }
+.developer-table-scroll { overflow-x: auto; max-width: 100%; border: 1px solid #d4deea; }
+.developer-table { width: 100%; min-width: 850px; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.developer-table th { background: #003f7f; color: white; text-align: left; padding: 14px 12px; }
+.developer-table th:nth-child(1) { width: 145px; }
+.developer-table th:nth-child(2) { width: 130px; }
+.developer-table th:nth-child(3) { width: 110px; }
+.developer-table th:nth-child(4) { width: 140px; }
+.developer-table td { padding: 14px 12px; border-bottom: 1px solid #e1e7ef; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.developer-table tr:nth-child(even) { background: #f5f7f9; }
+.developer-pagination { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-top: 18px; }
+.developer-pagination > div { display: flex; gap: 8px; }
+.developer-skip { position: absolute; left: 16px; top: -100px; background: white; padding: 10px; z-index: 100; }
+.developer-skip:focus { top: 10px; }
+@media (max-width: 700px) {
+  .developer-topbar { padding: 14px 16px; flex-wrap: wrap; }
+  .developer-brand { gap: 12px; }
+  .developer-brand img { width: 90px; }
+  .developer-brand strong { font-size: 16px; }
+  .developer-main, .developer-status { width: calc(100% - 28px); }
+  .developer-main { margin-top: 20px; }
+  .developer-heading { align-items: flex-start; }
+  .developer-heading h1 { font-size: 23px; }
+  .developer-picker, .developer-panel { padding: 18px 14px; }
+  .developer-picker-fields, .developer-summary, .developer-filters { grid-template-columns: 1fr; }
+  .developer-stage ol { grid-template-columns: 1fr; }
+  .developer-tabs button { padding: 15px 12px; font-size: 13px; }
+  .developer-pagination { align-items: flex-start; flex-direction: column; }
+}

@@ -68,6 +68,7 @@
       "adminRecordsButton",
       "adminMailRoutingButton",
       "adminUsersButton",
+      "adminDeveloperLink",
       "mailRoutingMessage",
       "notificationHealthPanel",
       "notificationHealthStatus",
@@ -111,6 +112,12 @@
 
   function isAdmin() {
     return (state.user?.roles || []).some(role => ['admin', 'developer'].includes(String(role).toLowerCase()));
+  }
+
+  function isDeveloper() {
+    const user = state.user;
+    return user?.isActive === true && Array.isArray(user.roles) && user.roles.length === 1
+      && String(user.roles[0]).toLowerCase() === 'developer' && user.department === 'developer' && user.signingStep == null;
   }
 
   function initializeCreateDropdown() {
@@ -157,6 +164,7 @@
       const session = await window.PCN_SESSION.require(null, { requireRole: true });
       if (!session) return;
       state.user = session.user;
+      els.adminDeveloperLink.hidden = !isDeveloper();
       state.view = permittedView(state.view);
       window.PCN_SESSION.mountProfile(session.user, (error) => showAdminNotice("error", "Sign out failed", error.message));
       initializeRecordsDashboard();

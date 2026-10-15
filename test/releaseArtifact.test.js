@@ -16,6 +16,10 @@ test('guided creation assets are included in runtime releases', () => {
   const files = ['create.html','create.js','create.css','create-model.js','create-autosave.js','create-documents.js','pcn-readiness.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
 });
+test('Developer Tools assets are included in runtime releases', () => {
+  const files = ['developer.html','developer.js','developer.css','src/developerTools.js'];
+  assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
+});
 function fixture(changes = {}) {
   const manifest = { ...createManifest({ archive, commit: 'a'.repeat(40), runNumber: 42, runAttempt: 1 }), ...changes };
   const bytes = Buffer.from(JSON.stringify(manifest) + '\n');

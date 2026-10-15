@@ -21,7 +21,7 @@ test('inspection reports actual Prepared Checked Approved signatures and safe tr
 });
 test('listing has only safe selected record fields',async()=>{const result=await loadDeveloperPcns(fixture(),developer);assert.equal(result.items.length,1);assert.equal('ownerUserId'in result.items[0],false);assert.equal('internalReview'in result.items[0],false);});
 test('only active exclusive Developer assignment may use direct tools',async()=>{
- for(const user of [undefined,{...developer,roles:['admin']},{...developer,roles:['developer','admin']},{...developer,department:'it'},{...developer,isActive:false},{...developer,isActive:undefined}])await assert.rejects(()=>inspectDeveloperPcn(fixture(),user,record.id),e=>e.statusCode===403);
+ for(const user of [undefined,{...developer,roles:['admin']},{...developer,roles:['developer','admin']},{...developer,roles:['deve-loper']},{...developer,department:'it'},{...developer,isActive:false},{...developer,isActive:undefined}])await assert.rejects(()=>inspectDeveloperPcn(fixture(),user,record.id),e=>e.statusCode===403);
 });
 test('version sandwich rejects mixed inspection and missing metadata fails truthfully',async()=>{
  await assert.rejects(()=>inspectDeveloperPcn(fixture({race:true}),developer,record.id),e=>e.statusCode===409);
@@ -35,4 +35,21 @@ test('empty or discontinuous history is explicitly incomplete; unknown recorded 
 });
 test('draft and terminal workflows never invent a current signing step',async()=>{
  for(const status of ['draft','rejected','closed','approved']){const context=fixture();context.service.getById=async()=>({...record,status});const result=await inspectDeveloperPcn(context,developer,record.id);assert.equal(result.workflow.stages.flatMap(x=>x.steps).filter(x=>x.state==='current').length,0);}
+});
+test('TaPBU no-need removes skipped groups while signing names fall back to recorded fields',async()=>{
+ const context=fixture();context.service.getById=async()=>({...record,riskLevel:'RL2',documentControl:{},internalReview:{...record.internalReview,tapbu:{noNeed:true}}});
+ const result=await inspectDeveloperPcn(context,developer,record.id);
+ assert.equal(result.workflow.stages.length,4);assert.equal(result.workflow.stages.some(stage=>stage.key.startsWith('tapbu.')),false);
+ assert.equal(result.workflow.stages[0].steps[0].person,'Historical name');assert.equal(result.workflow.stages[0].steps[0].signedAt,'2026-10-15');
+});
+test('malformed histories fail and nested attachment secrets never escape',async()=>{
+ for(const revisions of [[{revision:0,changes:[]}],[{revision:1,changes:null}],[{revision:1,changes:[null]}]])await assert.rejects(()=>inspectDeveloperPcn(fixture({revisions}),developer,record.id),e=>e.statusCode===503);
+ const context=fixture({revisions:[{revision:1,changes:[{path:'documentAttachments.0.storagePath',before:'hidden',after:'private-path'},{path:'comments',before:[],after:[{comment:'Useful comment',email:'private-mail',passwordHash:'private-password'}]}]}]});
+ const result=await inspectDeveloperPcn(context,developer,record.id);const changes=result.transactions.items[0].changes;
+ assert.equal(changes.length,1);assert.deepEqual(changes[0].after,[{comment:'Useful comment'}]);
+});
+test('signature transaction labels describe department and signing step',async()=>{
+ const context=fixture({revisions:[{revision:1,changes:[{path:'internalReview.signoff.gscTet.preparedName',before:'',after:'Signer'},{path:'internalReview.signoff.qaTet.checkedDate',before:'',after:'2026-10-15'}]}]});
+ const result=await inspectDeveloperPcn(context,developer,record.id);
+ assert.deepEqual(result.transactions.items[0].changes.map(change=>change.label),['GSC/TET / Prepared by','QA/TET / Checked date']);
 });

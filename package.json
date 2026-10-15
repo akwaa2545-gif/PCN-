@@ -17,6 +17,7 @@
     "test:timeline": "node scripts/timeline-e2e.js",
     "test:records-dashboard": "node scripts/records-dashboard-e2e.js",
     "test:developer-role": "node scripts/developer-role-e2e.js",
+    "test:developer-tools": "node scripts/developer-tools-e2e.js",
     "db:check": "node scripts/db-check.js",
     "db:migrate": "node scripts/db-migrate.js",
     "db:import": "node scripts/db-import.js",

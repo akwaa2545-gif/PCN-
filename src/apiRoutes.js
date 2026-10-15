@@ -6,6 +6,7 @@ const { buildWorkflow } = require('./masterData');
 const { normalizeUserId } = require('./employeeAccounts');
 const { buildChecks, buildAction } = require('./documentChecks');
 const { loadRecordOverview } = require('./recordOverview');
+const { handleDeveloperTools } = require('./developerTools');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -48,6 +49,7 @@ async function handleApi(req, res, url, context, requestId) {
   }
   const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
   if (user.isActive === false) throw new ApiError(403, 'Active account required');
+  if (route.startsWith('/api/developer/')) return send(await handleDeveloperTools(method,url,context,user));
   if (route === '/api/profile') {
     if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
     if (url.searchParams.size) throw new ApiError(400, 'Profile request does not accept selectors');

@@ -12,6 +12,7 @@ const ROOT_FILES = new Set([
   'app.js', 'admin.js', 'admin-users.js', 'records.js', 'login.js', 'session-client.js', 'auth.css', 'admin.css', 'records.css', 'styles.css',
   'document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js',
   'create.html','create.js','create.css','create-model.js','create-autosave.js','create-documents.js','pcn-readiness.js',
+  'developer.html','developer.js','developer.css',
   'tokin-header-logo.png', 'thailand-login.jpg', 'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf',
   'scripts/read-sql-credential.ps1',
 ]);

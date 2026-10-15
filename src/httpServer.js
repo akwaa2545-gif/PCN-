@@ -14,6 +14,7 @@ const { COOKIE_NAME, validateSessionCookieName } = require('./authHttp');
 const assets = new Set(['admin.html','form.html','records.html','index.html','login.html','app.js','admin.js','admin-users.js','records.js','login.js','session-client.js','document-workspace.js','document-workspace.css','document-recovery.js','document-bridge.js','auth.css','admin.css','records.css','styles.css','tokin-header-logo.png','thailand-login.jpg','compic20220308153715_T3zHf.png','CairoliClassic-Bold.otf']);
 const mime = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.png':'image/png', '.jpg':'image/jpeg', '.otf':'font/otf' };
 for (const file of ['create.html','create.js','create.css','create-model.js','create-autosave.js','create-documents.js','pcn-readiness.js']) assets.add(file);
+for (const file of ['developer.html','developer.js','developer.css']) assets.add(file);
 
 function createRequestHandler(options = {}) {
   if (!options.repository && !options.service) throw new Error('A SQL repository is required');
@@ -68,6 +69,7 @@ async function serveStatic(req, res, url, rootDir) {
   if (route === '/login') file = 'login.html';
   if (route === '/records') file = 'records.html';
   if (route === '/create') file = 'create.html';
+  if (route === '/developer') file = 'developer.html';
   if (route === '/document-preview') file = 'form.html';
   if (/^\/P(?:CN|NC)-\d{4}-\d{3,4}$/i.test(route)) file = 'form.html';
   if (!assets.has(file)) throw new ApiError(404, 'File not found');

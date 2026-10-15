@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Developer Tools | PCN Portal System</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/developer.css" />
+</head>
+<body class="developer-page">
+  <a class="developer-skip" href="#developerMain">Skip to Developer Tools</a>
+  <header class="topbar developer-topbar">
+    <a class="developer-brand" href="/admin"><img src="/tokin-header-logo.png" alt="TOKIN, a YAGEO company" /><span><small>NSN-000244</small><strong>PCN Portal System</strong></span></a>
+    <nav class="topbar-actions" aria-label="Account navigation"><a class="ghost-link" href="/admin">Portal</a><div class="account-menu" id="accountMenu"></div></nav>
+  </header>
+  <div class="developer-status" id="developerStatus" role="status" aria-live="polite">Checking Developer access…</div>
+  <main id="developerMain" class="developer-main" hidden>
+    <header class="developer-heading"><div><span class="developer-badge">Developer</span><h1>Developer Tools</h1><p>Inspect document workflow and recorded changes.</p></div><button id="refreshDeveloper" type="button" class="developer-button developer-button-primary">Refresh</button></header>
+    <section class="developer-picker" aria-labelledby="documentPickerTitle">
+      <h2 id="documentPickerTitle">Select a PCN</h2>
+      <div class="developer-picker-fields"><label>Find a document<input type="search" id="pcnSearch" placeholder="PCN number, supplier or material" /></label><label>PCN document<select id="pcnSelect"><option value="">Select a PCN</option></select></label></div>
+    </section>
+    <div class="developer-tabs" role="tablist" aria-label="Developer inspection">
+      <button id="workflowTab" type="button" role="tab" aria-controls="workflowPanel" aria-selected="true">Workflow</button>
+      <button id="transactionsTab" type="button" role="tab" aria-controls="transactionsPanel" aria-selected="false" tabindex="-1">Document Transactions</button>
+    </div>
+    <section id="workflowPanel" role="tabpanel" aria-labelledby="workflowTab" class="developer-panel">
+      <h2>Workflow inspector</h2><p id="workflowEmpty">Select a PCN to inspect its workflow.</p>
+      <div id="workflowSummary" class="developer-summary"></div><div id="workflowStages" class="developer-stages"></div><div id="workflowChecks" class="developer-checks"></div>
+    </section>
+    <section id="transactionsPanel" role="tabpanel" aria-labelledby="transactionsTab" class="developer-panel" hidden>
+      <h2>Document Transactions</h2><p id="historyMessage">Select a PCN to view recorded changes.</p>
+      <div class="developer-filters"><label>Search changes<input type="search" id="transactionSearch" placeholder="Field, person, reference or value" /></label><label>From date<input type="date" id="transactionFrom" /></label><label>To date<input type="date" id="transactionTo" /></label></div>
+      <p class="developer-date-note">Dates are shown and filtered in UTC.</p>
+      <div class="developer-table-scroll" tabindex="0" role="region" aria-label="PCN change history"><table class="developer-table"><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Changed by</th><th scope="col">Revision</th><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody id="transactionRows"><tr><td colspan="6">Select a PCN to view recorded changes.</td></tr></tbody></table></div>
+      <div class="developer-pagination"><p id="transactionCount" role="status" aria-live="polite">0 changes</p><div><button id="transactionPrevious" type="button" class="developer-button" disabled>Previous</button><button id="transactionNext" type="button" class="developer-button" disabled>Next</button></div></div>
+    </section>
+  </main>
+  <script src="/session-client.js"></script><script src="/developer.js"></script>
+</body>
+</html>
