@@ -20,6 +20,16 @@ function client(responses, location = {}) {
 }
 const success = (data) => ({ status: 200, body: { success: true, data } });
 
+test('validation errors retain structured missing fields for the save checklist', async () => {
+  const details = { missing: [{ key: 'reason', label: 'Reason for change', field: 'reason' }] };
+  const c = client([{ status: 400, body: { success: false, error: 'Complete required information', details } }]);
+  await assert.rejects(c.api.fetch('/api/pcns/PCN-2026-0001', { method: 'PATCH', body: '{}' }), error => {
+    assert.equal(error.status, 400);
+    assert.equal(JSON.stringify(error.details), JSON.stringify(details));
+    return true;
+  });
+});
+
 test('portal gate accepts any assigned role and sends roleless accounts to read-only Records', async () => {
   for (const roles of [['supplier'], ['reviewer'], ['gsc'], ['productionengineering'], ['qa'], ['tapbu'], ['admin'], ['qa', 'gsc']]) {
     const c = client([success({ authenticated: true, user: { roles } })]);
