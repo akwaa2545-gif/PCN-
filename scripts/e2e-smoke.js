@@ -1164,7 +1164,7 @@ async function main() {
     assert.equal((await listResponse.json()).data.items.length,1);
     await page.locator('#adminPcnRows tr').filter({hasText:record.id}).waitFor();
     await page.locator('#notificationHealthStatus').filter({hasText:'Unavailable'}).waitFor({state:'attached'});
-    const viewButton=page.getByRole('button',{name:`View ${record.id}`,exact:true});
+    const viewButton=page.getByRole('button',{name:`History ${record.id}`,exact:true});
     const timelineResponse=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/pcns/${record.id}/revisions`);
     await viewButton.click();
     const historyResponse=await timelineResponse;

@@ -19,7 +19,7 @@ function portal(fetch) {
     loadDetail = async id => { window.selectedId = id; };
     openTimeline = (record, opener) => { window.timelineAction = { record, opener }; };
     requestRemovePcn = record => { window.removeAction = record; };
-    window.TEST = { state, els, initializeRecordsDashboard, loadPcns, refreshQuietly, canAutoRefresh, loadDetail: actualLoadDetail };
+    window.TEST = { state, els, initializeRecordsDashboard, loadPcns, refreshQuietly, canAutoRefresh, loadDetail: actualLoadDetail, preservePortalPosition, document };
   })();`);
   vm.runInNewContext(source, { window, document: { addEventListener() {}, querySelector: () => null, activeElement: null,
     createElement() { return { events: {}, attributes: {}, dataset: {}, addEventListener(name, handler) { this.events[name] = handler; }, setAttribute(name, value) { this.attributes[name] = value; } }; } } });
@@ -48,7 +48,8 @@ test('Portal dashboard uses batched authorized overview and preserves row select
   const actions = page.window.options.actions(items[0]);
   assert.equal(actions.length, 1);
   assert.match(actions[0].className, /admin-view-button/);
-  assert.equal(actions[0].textContent, 'History');
+  assert.equal(actions[0].title, 'History');
+  assert.match(actions[0].innerHTML, /<svg/);
   assert.equal(actions[0].attributes['aria-label'], 'History PCN-1');
   actions[0].events.click();
   assert.equal(page.window.timelineAction.record, items[0]);
@@ -151,4 +152,17 @@ test('direct detail authorization denial clears the full overview and invalidate
   assert.equal(page.state.pcns.length, 0); assert.equal(page.state.selected, null);
   assert.equal(page.state.progress, null); assert.equal(page.canAutoRefresh(), false);
   assert.match(page.state.message, /Access unavailable/);
+});
+
+
+test('Portal refresh preserves focus on a closed More disclosure instead of selecting the row', () => {
+  const page = portal(async () => ({}));
+  const summary = {}; const replacementSummary = { focus() { page.document.activeElement = this; } };
+  const oldRow = { dataset: { pcnId: 'PCN-1' }, querySelectorAll(selector) { return selector.includes('summary') ? [{}, summary] : [{}]; } };
+  summary.closest = selector => selector === '[data-pcn-id]' ? oldRow : null;
+  const newRow = { dataset: { pcnId: 'PCN-1' }, querySelectorAll(selector) { return selector.includes('summary') ? [{}, replacementSummary] : [{}]; }, focus() { page.document.activeElement = this; } };
+  page.els.adminPcnRows.querySelectorAll = () => [newRow];
+  page.document.activeElement = summary;
+  page.preservePortalPosition(() => {});
+  assert.equal(page.document.activeElement, replacementSummary);
 });

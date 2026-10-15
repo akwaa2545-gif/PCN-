@@ -100,6 +100,7 @@ function controllerPage(fetch, options = {}) {
       querySelectorAll() { return this.children.flatMap(child => [child, ...child.querySelectorAll()]); },
       focus() { document.activeElement = this; }, showModal() { this.open = true; }, close() { this.open = false; }, remove() {},
     };
+    if (tag === 'a' && options.resolveLinks) Object.defineProperty(element, 'href', { get() { return new URL(this.attributes.href, 'http://records.example').href; }, set(value) { this.attributes.href = value; } });
     all.push(element); return element;
   };
   document.createElement = createElement; document.body = createElement('body');
@@ -110,7 +111,7 @@ function controllerPage(fetch, options = {}) {
   const count = createElement('span'); const message = createElement('p'); let accessLost = 0;
   const controller = window.PCN_RECORDS_DASHBOARD.create({root,rows,search,count,message,user:{id:'viewer'},fetch,onAccessLost(){accessLost++;}, ...options});
   return { controller, document, rows, root, count, message, all, createElement, find:id => all.find(item => item.id === id),
-    button: (text, inside = root) => inside.querySelectorAll().find(item => item.tag === 'button' && item.textContent === text),
+    button: (text, inside = root) => inside.querySelectorAll().find(item => item.tag === 'button' && (item.textContent === text || item.attributes['aria-label']?.startsWith(`${text} `))),
     lost:()=>accessLost };
 }
 
@@ -226,6 +227,8 @@ test('record opening uses native links with the exact authorized route and keeps
   const identity = page.rows.querySelectorAll().find(item => item.className === 'rd-code-cell');
   assert.equal(identity.children[0].textContent, record.id);
   assert.equal(identity.children[1].textContent, 'TESTING DOC');
+  assert.equal(identity.children[2].textContent, 'Open PCN');
+  assert.equal(identity.parentElement.dataset.column, 'id');
 });
 
 test('overflow actions pause refresh, close safely and never select their row', async () => {
@@ -238,7 +241,8 @@ test('overflow actions pause refresh, close safely and never select their row', 
   const more = page.rows.querySelectorAll().find(item => item.tag === 'details');
   assert.ok(more, 'destructive actions live inside a disclosure');
   const summary = more.children[0];
-  assert.equal(summary.textContent, 'More');
+  assert.equal(summary.title, 'More actions for PCN-1');
+  assert.match(summary.innerHTML, /<svg/);
   assert.equal(summary.attributes['aria-label'], 'More actions for PCN-1');
   await summary.emit('click'); more.open = true; await more.emit('toggle');
   assert.ok(invalidations > 0); assert.equal(page.controller.canRefresh(), false);
@@ -257,4 +261,18 @@ test('overflow actions pause refresh, close safely and never select their row', 
   await remove.emit('click');
   assert.equal(more.open, false); assert.equal(removed, true);
   assert.equal(page.controller.canRefresh(), true);
+});
+
+
+test('Open uses the original route once without resolving it through the code anchor URL property', () => {
+  let hrefCalls = 0;
+  const page = controllerPage(async () => ({}), { resolveLinks: true, codeHref(record) { hrefCalls++; return `/document/${record.id}?readonly=1`; } });
+  page.controller.setRecords([{ id: 'PCN-1' }]);
+  const links = page.rows.querySelectorAll().filter(item => item.tag === 'a');
+  assert.equal(hrefCalls, 1);
+  assert.equal(links[0].getAttribute('href'), '/document/PCN-1?readonly=1');
+  assert.equal(links[1].getAttribute('href'), links[0].getAttribute('href'));
+  const quickView = page.button('Quick view');
+  assert.equal(quickView.title, 'Quick view PCN-1');
+  assert.match(quickView.innerHTML, /<svg/);
 });

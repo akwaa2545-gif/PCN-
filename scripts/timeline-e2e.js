@@ -89,7 +89,7 @@ async function main() {
     page.on('pageerror', error => report.errors.push(error.message));
     await page.goto(`${origin}/admin`);
     let activeId = record.id;
-    const eye = () => page.getByRole('button', { name: `View ${activeId}`, exact: true });
+    const eye = () => page.getByRole('button', { name: `History ${activeId}`, exact: true });
     const dialog = page.locator('#pcnTimelineDialog'), events = dialog.locator('.pcn-timeline-event');
     const details = dialog.locator('#pcnTimelineDetails');
     const open = async (keyboard = false) => {

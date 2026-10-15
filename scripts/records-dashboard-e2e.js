@@ -30,7 +30,7 @@ class DashboardPage {
   rows() { return this.host.locator('tr[data-pcn-id]'); }
   row(id) { return this.host.locator(`tr[data-pcn-id="${id}"]`); }
   async reset() { await this.host.getByRole('button', { name: 'Reset filters', exact: true }).click(); }
-  preview(id) { return this.host.getByRole('button', { name: `Preview ${id}`, exact: true }); }
+  preview(id) { return this.host.getByRole('button', { name: `Quick view ${id}`, exact: true }); }
   async fits() { assert.equal(await this.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Page stays within viewport'); }
 }
 
@@ -131,6 +131,16 @@ async function main() {
     await dashboard.card('Needs attention').click(); await expect(dashboard.rows()).toHaveCount(10);
     await dashboard.reset();
     report.checks.push('Verified employee with no assigned role opens professional read-only dashboard');
+
+    const openDocument = dashboard.row(records[0].id).locator('[data-column="id"] .rd-open-button');
+    await expect(dashboard.row(records[0].id).locator('.rd-row-actions .rd-open-button')).toHaveCount(0);
+    await expect(openDocument).toHaveText('Open PCN');await expect(openDocument).toHaveAttribute('href', `/${records[0].id}`);
+    assert.equal(await openDocument.getAttribute('target'), null, 'PCN opens in the current tab');
+    await openDocument.focus();await page.keyboard.press('Enter');await expect(page).toHaveURL(`${viewer.origin}/${records[0].id}`);
+    await expect(page.locator('#appNoticeTitle')).toHaveText('PCN loaded');
+    await expect(page.locator('main input:not(:disabled), main select:not(:disabled), main textarea:not(:disabled)')).toHaveCount(0);
+    await page.goBack();await dashboard.ready();
+    report.checks.push('Primary Open PCN keyboard link opens the real document in the current tab and preserves roleless read-only access');
     report.checks.push('All four summary counts match actual mixed records; clicking cards filters the table');
 
     await page.locator('#rdFilter-status').selectOption('gsc_review');
@@ -202,10 +212,12 @@ async function main() {
 
     const dialog = page.locator('#rdPreviewDialog');
     const closePreview = async id => { await dialog.getByRole('button', { name: 'Close preview', exact: true }).click(); await expect(dialog).toBeHidden(); await expect(dashboard.preview(id)).toBeFocused(); };
+    const historyReadsBeforePreview = viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0;
+    const documentReadsBeforePreview = viewer.reads.get(`/api/pcns/${records[0].id}/documents`) || 0;
     await dashboard.preview(records[0].id).focus(); await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
-    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0, 0, 'Timeline is lazy');
-    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/documents`) || 0, 0, 'Documents are lazy');
+    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/revisions`) || 0, historyReadsBeforePreview, 'Timeline is lazy');
+    assert.equal(viewer.reads.get(`/api/pcns/${records[0].id}/documents`) || 0, documentReadsBeforePreview, 'Documents are lazy');
     await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click();
     await expect(dialog.locator('.rd-timeline li')).toHaveCount(2);
     await expect(dialog.locator('.rd-timeline')).toContainText('GSC/TET');
@@ -264,6 +276,11 @@ async function main() {
     await expect(dashboard.host.locator('.rd-pagination')).toContainText('Page 2 of 2');
     await expect(page.locator('#recordsSearch')).toHaveValue('Dashboard material');
     await expect(page.locator('#recordsSearch')).toBeFocused();
+    const focusOpen = dashboard.row(current.id).locator('.rd-open-button');await focusOpen.focus();
+    const currentAgain = await repository.findById(current.id);
+    await repository.update(current.id, row => ({ ...row, supplierName: 'Opening focus preserved', updatedAt: new Date().toISOString() }), 'Dashboard polling fixture', currentAgain.version);
+    before = await repository.list();await expect(dashboard.row(current.id)).toContainText('Opening focus preserved');
+    await expect(focusOpen).toBeFocused();
     await page.locator('#rdViewEditor summary').click(); await page.locator('#rdViewName').fill('Unsaved view fixture');
     await unchangedFor(5500, () => viewer.reads.get('/api/pcns/overview'), viewer.reads.get('/api/pcns/overview'));
     await expect(page.locator('#rdViewName')).toHaveValue('Unsaved view fixture');
@@ -273,8 +290,26 @@ async function main() {
     const admin = await open('admin'); const portal = new DashboardPage(admin.page, '#pcnAdminView'); await portal.ready();
     await expect(portal.host.locator('[data-summary="all"] strong')).toHaveText('17');
     await expect(portal.row(records[2].id).locator('[data-column="next"]')).toContainText('Dashboard Assigned Preparer');
-    await expect(portal.host.getByRole('button', { name: `View ${records[2].id}`, exact: true })).toBeVisible();
-    await expect(portal.row(records[2].id).getByRole('button', { name: 'Remove', exact: true })).toBeVisible();
+    const actionRow=portal.row(records[2].id),history=actionRow.getByRole('button', { name: `History ${records[2].id}`, exact: true });
+    await expect(history).toHaveAttribute('title', 'History');
+    await expect(history.locator('svg[aria-hidden="true"]')).toHaveCount(1);
+    await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeHidden();
+    const more=actionRow.locator('.rd-more-summary');await more.focus();
+    const focusedRow = await repository.findById(records[2].id);
+    await repository.update(focusedRow.id, row => ({ ...row, supplierName: 'More focus preserved', updatedAt: new Date().toISOString() }), 'Dashboard polling fixture', focusedRow.version);
+    before = await repository.list();await expect(actionRow).toContainText('More focus preserved');await expect(more).toBeFocused();
+    await admin.page.keyboard.press('Enter');
+    await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeVisible();
+    await unchangedFor(5500, () => admin.reads.get('/api/pcns/overview'), admin.reads.get('/api/pcns/overview'));
+    await admin.page.keyboard.press('Escape');await expect(more).toBeFocused();
+    await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeHidden();
+    await more.click();await actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true }).click();
+    await expect(admin.page.locator('#adminRemoveDialog')).toBeVisible();await admin.page.locator('#adminRemoveCancelButton').click();
+    await expect(admin.page.locator('#adminRemoveDialog')).toBeHidden();
+    await history.click();await expect(admin.page.locator('#pcnTimelineDialog')).toBeVisible();
+    await admin.page.locator('#pcnTimelineCloseButton').click();await expect(history).toBeFocused();
+    await actionRow.locator('.rd-open-button').click();await expect(admin.page).toHaveURL(`${admin.origin}/${records[2].id}`);
+    await expect(admin.page.locator('#appNoticeTitle')).toHaveText('PCN loaded');await admin.page.goBack();await portal.ready();
     const portalWrap = portal.host.locator('.admin-table-wrap');
     assert.equal(await portalWrap.evaluate(wrap => {
       const actions = wrap.querySelector('tbody .rd-row-actions').getBoundingClientRect();
@@ -293,7 +328,7 @@ async function main() {
       assert.equal((await repository.findById(row)).ownerUserId, 'supplier-id');
     }
     await expect(owned.host.getByRole('button', { name: /^Remove(?:\s|$)/ })).toHaveCount(0);
-    report.checks.push('Portal shares dashboard, exposes authorized assignees and existing View/Remove; supplier sees only owned records without Remove');
+    report.checks.push('Portal Open PCN, labelled History and More actions work; More pauses polling, Escape restores focus, removal still confirms and suppliers cannot remove');
 
     await dashboard.reset(); await page.setViewportSize({ width: 390, height: 844 }); await dashboard.fits();
     await page.screenshot({ path: path.resolve('test-results/records-dashboard-mobile.png'), fullPage: true });

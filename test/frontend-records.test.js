@@ -84,7 +84,11 @@ test('roleless employee can list records and open read-only details', async () =
   assert.equal(page.elements.get('recordsCount').textContent, '1');
   assert.match(page.elements.get('recordsAccessMessage').textContent, /read.only/i);
   const rows = page.elements.get('recordsRows').children;
-  assert.equal(rows[0].children[0].children[0].href, '/PCN-2026-0001');
+  assert.equal(rows[0].children[0].children[0].children[0].href, '/PCN-2026-0001');
+  const open = rows[0].children[0].children[0].children.at(-1);
+  assert.equal(open.textContent, 'Open PCN');
+  assert.equal(open.href, '/PCN-2026-0001');
+  assert.equal(open.events.click, undefined);
   assert.equal(page.profiles.length, 1);
 });
 

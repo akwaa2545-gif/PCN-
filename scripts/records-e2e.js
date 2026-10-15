@@ -55,16 +55,16 @@ async function main() {
     };
     const viewer = await open('0800001');
     await expect(viewer.locator('#recordsWorkspace')).toBeVisible();
-    await expect(viewer.locator('#recordsRows a')).toHaveCount(2);
+    await expect(viewer.locator('#recordsRows .rd-code-link')).toHaveCount(2);
     await expect(viewer.locator('#recordsRows')).toContainText(first.id);
     await expect(viewer.locator('#recordsRows')).toContainText(second.id);
     await expect(viewer.locator('.topbar-actions a')).toHaveCount(0);
     await viewer.locator('#recordsSearch').fill('Other supplier fixture');
-    await expect(viewer.locator('#recordsRows a')).toHaveCount(1);
+    await expect(viewer.locator('#recordsRows .rd-code-link')).toHaveCount(1);
     await expect(viewer.locator('#recordsRows')).toContainText(second.id);
     await viewer.locator('#recordsSearch').fill('');
     await viewer.locator('#recordsRefreshButton').click();
-    await expect(viewer.locator('#recordsRows a')).toHaveCount(2);
+    await expect(viewer.locator('#recordsRows .rd-code-link')).toHaveCount(2);
     await viewer.screenshot({ path: path.resolve('test-results/records-roleless-desktop.png'), fullPage: true });
     checks.push('roleless-login-shows-all-owners-search-refresh-no-create-or-Portal');
 
@@ -111,7 +111,7 @@ async function main() {
     checks.push('roleless-create-Portal-redirect-and-server-mutations-denied');
     await viewer.setViewportSize({ width: 390, height: 844 });
     await expect(viewer.locator('#recordsSearch')).toBeVisible();
-    await expect(viewer.locator('#recordsRows a')).toHaveCount(2);
+    await expect(viewer.locator('#recordsRows .rd-code-link')).toHaveCount(2);
     assert.equal(await viewer.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await viewer.screenshot({ path: path.resolve('test-results/records-roleless-mobile.png'), fullPage: true });
 

@@ -226,7 +226,7 @@ async function main() {
       await expect(member.locator('#adminPcnRows .danger-button')).toHaveCount(0);
       await expect(member.locator('#adminPcnRows tr')).toHaveCount(code === '0700003' ? 1 : 2);
       if (code === '0700003') await expect(member.locator('#adminPcnRows')).not.toContainText(otherRecord.id);
-      await member.getByRole('button', { name: `View ${ownRecord.id}`, exact: true }).click();
+      await member.getByRole('button', { name: `History ${ownRecord.id}`, exact: true }).click();
       await expect(member.locator('#adminNoticeTitle')).toHaveText('PCN loaded');
       await expect(member.locator('#adminProgressSteps input:not(:disabled)')).toHaveCount(0);
       for (const hash of ['#mail-routing', '#users', '#records']) {

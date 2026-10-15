@@ -260,16 +260,18 @@
     const view = document.createElement('button');
     view.type = 'button';
     view.className = 'admin-row-button admin-view-button';
-    view.setAttribute('aria-label', `View ${record.id}`);
+    view.setAttribute('aria-label', `History ${record.id}`);
     view.setAttribute('aria-haspopup', 'dialog');
     view.setAttribute('aria-controls', 'pcnTimelineDialog');
-    view.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle></svg>';
+    view.title = 'History';
+    view.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.6 7"></path><path d="M3 4v7h7M12 7v5l3 2"></path></svg>';
     view.disabled = isAnyBusy() || autoRefreshBlocked;
     view.addEventListener('click', () => openTimeline(record, view));
     if (!isAdmin()) return [view];
     const remove = document.createElement('button');
-    remove.type = 'button'; remove.className = 'danger-button';
-    remove.textContent = isBusy(`remove:${record.id}`) ? 'Removing...' : 'Remove';
+    remove.type = 'button'; remove.className = 'danger-button'; remove.dataset.rdOverflow = 'true';
+    remove.setAttribute('aria-label', `Remove ${record.id}`); remove.title = `Remove ${record.id}`;
+    remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"></path></svg>';
     remove.disabled = isAnyBusy() || autoRefreshBlocked;
     remove.addEventListener('click', () => requestRemovePcn(record));
     return [view, remove];
@@ -278,7 +280,7 @@
   function preservePortalPosition(update) {
     const active = document.activeElement;
     const row = active?.closest?.('[data-pcn-id]');
-    const position = row ? [row.dataset.pcnId, [...row.querySelectorAll('a, button')].indexOf(active)] : null;
+    const position = row ? [row.dataset.pcnId, [...row.querySelectorAll('a, button, summary')].indexOf(active)] : null;
     const card = active?.closest?.('[data-notification-group]');
     const routingPosition = card ? [card.dataset.notificationGroup, [...card.querySelectorAll('button, input')].indexOf(active)] : null;
     const scroll = [window.scrollX, window.scrollY];
@@ -287,7 +289,7 @@
     if (active === els.adminStatusSelect && status && state.selected) els.adminStatusSelect.value = status;
     if (position) {
       const replacement = [...els.adminPcnRows.querySelectorAll('[data-pcn-id]')].find(node => node.dataset.pcnId === position[0]);
-      (position[1] < 0 ? replacement : replacement?.querySelectorAll('a, button')[position[1]])?.focus({ preventScroll: true });
+      (position[1] < 0 ? replacement : replacement?.querySelectorAll('a, button, summary')[position[1]])?.focus({ preventScroll: true });
       if (!replacement) els.adminSearchInput?.focus({ preventScroll: true });
     } else if (routingPosition) {
       const replacement = [...els.notificationGroups.querySelectorAll('[data-notification-group]')].find(node => node.dataset.notificationGroup === routingPosition[0]);

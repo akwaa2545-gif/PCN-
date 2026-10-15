@@ -1,6 +1,6 @@
 # PCN Records dashboard
 
-Updated: 2026-10-14.
+Updated: 2026-10-15.
 
 Status: implemented locally on `feature/records-dashboard`; deployment is on hold until the user explicitly says **deploy**. This task does not push source, publish releases, run remote CI or change the host. The last deployed runtime remains `pcn-test-17-1`; its existing evidence in [README](../README.md) and [the deployment runbook](github-deployment.md) is unchanged.
 
@@ -14,7 +14,7 @@ Portal and read-only Records use the same dashboard controller and existing `rec
 | Next responsible | Displays the effective workflow department and signing step, plus eligible assigned names for internal users. Suppliers and roleless employees receive no privileged account list. |
 | Workflow progress | Shows the current stage and actual recorded signing steps. A rejected record is labelled as rejected rather than presenting all signing steps as completed. |
 | Filters and saved views | Combines text, status, risk, supplier, responsible department and inclusive updated-date filters. Date bounds use UTC calendar days. Up to ten named filter views can be saved or removed. |
-| Quick preview | A read-only dialog offers Overview, Timeline and Documents without leaving the list. The PCN code still opens its detail page; Portal retains the existing View timeline and authorized Remove action. |
+| Open and preview | A gold **Open PCN** link beneath the PCN code opens the document in the current tab. Quick view and History use icon buttons with tooltips and accessible labels. Quick view offers read-only Overview, Timeline and Documents; Portal retains the existing history dialog. Authorized Remove is an icon under More and still requires confirmation. |
 | Document readiness | Shows Documents ready, a required-document missing count, or Not available when verified metadata cannot be established. |
 | Table controls | Sortable columns, configurable visible columns, 10/25/50/100 rows per page and export of the entire filtered, sorted result set as CSV. PCN code remains visible. |
 | Pending time | Shows Waiting only when the current status start is recorded. Otherwise Updated identifies the saved-record timestamp fallback. Overdue requires an explicit valid review deadline. |
@@ -60,7 +60,7 @@ The helper accepts an explicit valid `reviewDueAt` if present in a record. **The
 
 Saved filter views, column selection, sort and page size use bounded browser preferences scoped to the current account. Record payloads, documents and credentials are not stored in those preferences. Malformed preferences fall back to defaults; unavailable storage leaves preferences usable for the current visit and displays a message.
 
-Existing automatic updates read the overview while the page is visible and preserve filters, page position, focus and scrolling. An open preview or preference editor pauses background updates and invalidates already-started reads. Permission loss clears records and preview data, hides the workspace and stops further polling.
+Existing automatic updates read the overview while the page is visible and preserve filters, page position, focus and scrolling, including separate focus targets for the PCN code, Open PCN and More. An open preview, preference editor or row's More menu pauses background updates and invalidates already-started reads. Escape closes More and restores focus to its control. Permission loss clears records and preview data, hides the workspace and stops further polling.
 
 CSV export includes all currently filtered records in the selected sort order and visible data columns, not just the current page. It is UTF-8 with a BOM and quoted cells; spreadsheet formula prefixes are neutralized. The output is a CSV file, not an Excel workbook or PDF report. Export changes no server data.
 
@@ -97,3 +97,5 @@ Local full-suite coverage passed **682/682 unit/API tests**, with **91.92% line,
 Legacy read-only Records checks, timeline checks and all six automatic-update groups also passed locally. The standalone full application `npm run test:e2e` smoke suite passed with exit code 0, covering Portal, Users, mail-routing, save/authentication workflows and the existing native unsaved-change confirmation. A focused supplier probe also confirmed eight owned records and no plain Remove action, with zero browser errors, external calls or forbidden writes.
 
 The workflow includes a dashboard browser step for a future authorized release. Adding that step is local source work; it does not mean CI or deployment has run. These local results are separate from runtime 17's release and host acceptance.
+
+On 2026-10-15, the local table action update passed 13 isolated browser groups covering native Open navigation, read-only access, icon actions, More confirmation and polling/focus preservation, with no browser errors, external calls or forbidden writes. Open PCN uses the Create button's gold and stays beneath the PCN code. Users and PCN Records tables use Aptos with Segoe UI/Arial fallbacks. The subsequent full local suite passed 951/951 tests with 88.26% line, 90.95% branch and 94.62% function coverage. This remains local work.

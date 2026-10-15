@@ -159,12 +159,29 @@
     const button = (value, callback, className = 'rd-button') => {
       const result = node('button', value, className); result.type = 'button'; result.dataset.rdFocus = `${className}:${value}`; result.addEventListener('click', callback); return result;
     };
+    const icon = (target, paths, titleText) => {
+      target.textContent = '';
+      target.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${paths}</svg>`;
+      target.title = titleText;
+    };
     const identity = options.user?.id || options.user?.employeeCode || options.user?.username;
     const storageKey = identity ? `pcn-records-dashboard:v1:${encodeURIComponent(identity)}` : null;
     let preferences;
     try { preferences = readPreferences(storageKey ? window.localStorage?.getItem(storageKey) : null); } catch { preferences = readPreferences(null); }
     let state = { records: [], filters: cleanFilters({ search: search.value }), page: 1, preferences, accessible: true };
     let preview = { record: null, tab: 'overview', request: 0, cache: {}, opener: null };
+    let rowMenus = [];
+    const closeRowMenus = (restoreFocus = false, except = null) => {
+      rowMenus.forEach(menu => {
+        if (!menu.details.open || menu.details === except) return;
+        menu.details.open = false;
+        if (restoreFocus) menu.summary.focus({ preventScroll: true });
+      });
+    };
+    const outsideRowMenu = event => {
+      rowMenus.forEach(menu => { if (menu.details.open && !menu.details.contains(event.target)) menu.details.open = false; });
+    };
+    document.addEventListener('click', outsideRowMenu);
     const toolbar = node('section', undefined, 'rd-controls'); toolbar.setAttribute('aria-label', 'Record controls');
     const cards = node('div', undefined, 'rd-summary');
     const fields = node('div', undefined, 'rd-filters');
@@ -276,7 +293,7 @@
         const actions = node('th', 'Actions'); actions.scope = 'col'; heading.append(actions); tableHead.append(heading);
       }
       const filtered = sortRecords(filterRecords(state.records, state.filters), state.preferences.sort, state.preferences.direction);
-      const page = paginate(filtered, state.page, state.preferences.pageSize); state = { ...state, page: page.page }; count.textContent = String(filtered.length); rows.replaceChildren();
+      const page = paginate(filtered, state.page, state.preferences.pageSize); state = { ...state, page: page.page }; count.textContent = String(filtered.length); closeRowMenus(); rowMenus = []; rows.replaceChildren();
       if (!page.items.length) { const row = node('tr'); const cell = node('td', state.records.length ? 'No records match these filters. Reset filters to see all records.' : 'No PCN records are available.', 'records-empty'); cell.colSpan = state.preferences.columns.length + 1; row.append(cell); rows.append(row); }
       page.items.forEach(record => renderRow(record)); renderFooter(page, filtered.length);
       if (focusKey || focusId) {
@@ -292,7 +309,16 @@
       row.setAttribute('aria-selected', String(selected));
       state.preferences.columns.forEach(key => {
         const cell = node('td'); cell.dataset.column = key;
-        if (key === 'id') { const link = node('a', record.id); link.dataset.rdFocus = `code:${record.id}`; link.href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`; cell.append(link); if (record.isTestDocument === true) cell.append(node('span', 'TESTING DOC', 'rd-test-badge')); }
+        if (key === 'id') {
+          const identity = node('div', undefined, 'rd-code-cell');
+          const href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`;
+          const link = node('a', record.id, 'rd-code-link'); link.dataset.rdFocus = `code:${record.id}`; link.href = href;
+          identity.append(link);
+          if (record.isTestDocument === true) identity.append(node('span', 'TESTING DOC', 'rd-test-badge'));
+          const openLink = node('a', 'Open PCN', 'rd-button rd-open-button');
+          openLink.href = href; openLink.dataset.rdFocus = `open:${record.id}`; openLink.setAttribute('aria-label', `Open ${record.id}`);
+          identity.append(openLink); cell.append(identity);
+        }
         else if (key === 'status') cell.append(node('span', label(record.status), `rd-badge rd-status-${String(record.status || '').replace(/[^a-z_]/g, '')}`));
         else if (key === 'progress') renderProgress(cell, record);
         else if (key === 'next') { cell.append(node('strong', action(record).label || 'Not available')); cell.append(node('small', personNames(record) || (terminal(record.status) ? 'Review finished' : 'Assignee not available'))); }
@@ -300,10 +326,43 @@
         else { cell.textContent = columnValue(record, key); if (key === 'pending' && record.dashboard?.pending?.overdue === true) cell.className = 'rd-overdue'; }
         row.append(cell);
       });
-      const actionsCell = node('td', undefined, 'rd-row-actions'); const previewButton = button('Preview', () => openPreview(record, previewButton), 'rd-button rd-preview-button'); previewButton.dataset.rdFocus = `preview:${record.id}`; previewButton.setAttribute('aria-label', `Preview ${record.id}`); actionsCell.append(previewButton);
-      const extra = options.actions?.(record); (Array.isArray(extra) ? extra : extra ? [extra] : []).forEach(item => { if (item.dataset) item.dataset.rdFocus = `action:${record.id}:${item.getAttribute?.('aria-label') || item.textContent}`; actionsCell.append(item); }); row.append(actionsCell);
-      if (options.onRowSelect) { row.tabIndex = 0; row.addEventListener('click', event => { if (!event.target.closest('a,button,input,select')) options.onRowSelect(record); }); row.addEventListener('keydown', event => { if (event.target !== row || !['Enter', ' '].includes(event.key)) return; event.preventDefault(); options.onRowSelect(record); }); }
+      const actionsCell = node('td', undefined, 'rd-row-actions');
+      const secondary = node('div', undefined, 'rd-secondary-actions');
+      const previewButton = button('Quick view', () => openPreview(record, previewButton), 'rd-button rd-preview-button');
+      previewButton.dataset.rdFocus = `preview:${record.id}`; previewButton.setAttribute('aria-label', `Quick view ${record.id}`);
+      icon(previewButton, '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle>', `Quick view ${record.id}`); secondary.append(previewButton);
+      const extra = options.actions?.(record); const overflow = [];
+      (Array.isArray(extra) ? extra : extra ? [extra] : []).forEach(item => {
+        if (item.dataset) item.dataset.rdFocus = `action:${record.id}:${item.getAttribute?.('aria-label') || item.textContent}`;
+        if (item.dataset?.rdOverflow === 'true') overflow.push(item); else secondary.append(item);
+      });
+      if (overflow.length) secondary.append(renderRowMenu(record, overflow));
+      actionsCell.append(secondary); row.append(actionsCell);
+      if (options.onRowSelect) { row.tabIndex = 0; row.addEventListener('click', event => { if (!event.target.closest('a,button,input,select,summary,details')) options.onRowSelect(record); }); row.addEventListener('keydown', event => { if (event.target !== row || !['Enter', ' '].includes(event.key)) return; event.preventDefault(); options.onRowSelect(record); }); }
       rows.append(row);
+    }
+
+    function renderRowMenu(record, items) {
+      const details = node('details', undefined, 'rd-row-more');
+      const summary = node('summary', 'More', 'rd-more-summary');
+      summary.dataset.rdFocus = `more:${record.id}`; summary.setAttribute('aria-label', `More actions for ${record.id}`);
+      icon(summary, '<circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle>', `More actions for ${record.id}`);
+      const panel = node('div', undefined, 'rd-more-panel'); items.forEach(item => panel.append(item)); details.append(summary, panel);
+      rowMenus.push({ details, summary });
+      summary.addEventListener('click', () => {
+        if (!details.open) { closeRowMenus(false, details); options.onOpen?.(); }
+      });
+      details.addEventListener('toggle', () => { if (details.open) { closeRowMenus(false, details); options.onOpen?.(); } });
+      details.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !details.open) return;
+        event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus({ preventScroll: true });
+      });
+      details.addEventListener('focusout', event => { if (!details.contains(event.relatedTarget)) details.open = false; });
+      // Close before the existing action opens its confirmation dialog; never cancel the action.
+      details.addEventListener('click', event => {
+        if (event.target.closest('button')) { details.open = false; summary.focus({ preventScroll: true }); }
+      }, true);
+      return details;
     }
 
     function renderProgress(cell, record) {
@@ -329,7 +388,7 @@
 
     async function openPreview(record, opener) {
       if (!state.accessible || options.isBusy?.()) return;
-      options.onOpen?.(); preview = { record, tab: 'overview', request: preview.request + 1, cache: {}, opener }; title.textContent = `PCN preview · ${record.id}`; content.replaceChildren();
+      closeRowMenus(); options.onOpen?.(); preview = { record, tab: 'overview', request: preview.request + 1, cache: {}, opener }; title.textContent = `PCN preview · ${record.id}`; content.replaceChildren();
       testBadge.hidden = record.isTestDocument !== true;
       if (!dialog.open) dialog.showModal(); closeButton.focus(); await loadPreview();
     }
@@ -392,14 +451,14 @@
     }
     function closePreview() { if (dialog.open) dialog.close(); finishPreview(); }
     function clear() {
-      state = { ...state, records: [] }; closePreview(); rows.replaceChildren(); count.textContent = '0'; cards.replaceChildren(); footer.replaceChildren();
+      state = { ...state, records: [] }; closeRowMenus(); rowMenus = []; closePreview(); rows.replaceChildren(); count.textContent = '0'; cards.replaceChildren(); footer.replaceChildren();
       ['status', 'risk', 'supplier', 'department'].forEach(key => updateOptions(refs[key], [], `All ${key === 'status' ? 'statuses' : `${key}s`}`, ''));
       chooser.open = false; viewEditor.open = false; toolbar.hidden = true;
     }
     return {
       setRecords(records) { if (!state.accessible) return; toolbar.hidden = false; state = { ...state, records: [...records] }; render(); }, clear,
-      canRefresh: () => state.accessible && !dialog.open && !chooser.open && !viewEditor.open && !options.isBusy?.(),
-      destroy() { state = { ...state, accessible: false }; clear(); toolbar.remove?.(); footer.remove?.(); dialog.remove?.(); },
+      canRefresh: () => state.accessible && !dialog.open && !chooser.open && !viewEditor.open && !rowMenus.some(menu => menu.details.open) && !options.isBusy?.(),
+      destroy() { document.removeEventListener?.('click', outsideRowMenu); state = { ...state, accessible: false }; clear(); toolbar.remove?.(); footer.remove?.(); dialog.remove?.(); },
       getState: () => ({ filters: { ...state.filters }, page: state.page, preferences: { ...state.preferences }, preview: preview.record?.id || null }),
     };
   }
@@ -420,7 +479,7 @@
         const response = await window.PCN_SESSION.fetch('/api/pcns/overview'); if (!current()) return;
         if (!Array.isArray(response?.items)) throw new Error('The records list returned an invalid response.');
         const nextFingerprint = JSON.stringify(response.items);
-        if (nextFingerprint !== fingerprint) { const href = document.activeElement?.closest?.('a')?.getAttribute('href'); const scroll = { x: window.scrollX, y: window.scrollY }; fingerprint = nextFingerprint; controller.setRecords(response.items); if (href) Array.from(rows.querySelectorAll?.('a') || []).find(link => link.getAttribute('href') === href)?.focus({ preventScroll: true }); window.scrollTo?.(scroll.x, scroll.y); }
+        if (nextFingerprint !== fingerprint) { const focusKey = document.activeElement?.dataset?.rdFocus; const href = document.activeElement?.closest?.('a')?.getAttribute('href'); const scroll = { x: window.scrollX, y: window.scrollY }; fingerprint = nextFingerprint; controller.setRecords(response.items); if (!focusKey && href) Array.from(rows.querySelectorAll?.('a') || []).find(link => link.getAttribute('href') === href)?.focus({ preventScroll: true }); window.scrollTo?.(scroll.x, scroll.y); }
         message.textContent = `${response.items.length} PCN record${response.items.length === 1 ? '' : 's'} available.`;
       } catch (error) { if (!current()) return; if ([401, 403].includes(error.status)) accessLost(error); message.textContent = error.message; if (quiet) throw error; }
       finally { loading = false; refresh.disabled = false; }
@@ -430,7 +489,7 @@
       if (Array.isArray(session.user?.roles) && session.user.roles.length) { window.location.assign('/admin'); return; }
       if (!['employee-code', 'pcn-local'].includes(session.user?.identityProvider) || !session.user.employeeCode || session.user.isActive === false) throw new Error('Records access requires verified employee sign-in.');
       window.PCN_SESSION.mountProfile(session.user, error => { message.textContent = error.message; }); workspace.hidden = false;
-      document.getElementById('recordsAccessMessage').textContent = 'You have read-only access. Preview a record or select its PCN code to view details.';
+      document.getElementById('recordsAccessMessage').textContent = 'You have read-only access. Select Open PCN to read the document, or Quick view for a summary.';
       controller = create({ root: workspace, rows, count, search, message, user: session.user, fetch: window.PCN_SESSION.fetch, onOpen: () => { generation++; }, onAccessLost: accessLost });
       refresh.addEventListener('click', () => load()); await load();
       window.PCN_AUTO_REFRESH?.start({ refresh: context => load({ ...context, quiet: true }), canRefresh: () => !loading && accessible && controller.canRefresh(), intervalMs: 5000 });
