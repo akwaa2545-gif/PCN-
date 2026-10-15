@@ -57,6 +57,8 @@ test('browser locks each department in Prepared then Checked then Approved seque
     assert.equal(api.getApprovalLockRule(`${group}.approved`).locked, true);
     controls.find(item => item.dataset.internalField === `${group}.checked`).checked = true;
     assert.equal(api.getApprovalLockRule(`${group}.approved`).locked, false);
+    controls.find(item => item.dataset.internalField === `${group}.prepared`).checked = false;
+    assert.equal(api.getApprovalLockRule(`${group}.approved`).locked, true, 'a historical Checked signature cannot bypass missing Prepared');
     assert.deepEqual(Array.from(api.approvalSignoffFields()), groups.flatMap(key => actions.map(action => `${key}.${action}`)));
   }
 });
@@ -72,6 +74,18 @@ test('final judgment fields belong to QA/TET Approved while Administrator and De
     const api = workbook(controls); api.state.user = user; api.updateApprovalCheckLocks();
     assert.ok(controls.every(item => item.disabled === !allowed), JSON.stringify(user));
   }
+});
+
+test('historical previous-group gaps block new signatures without changing saved signatures', () => {
+  const controls = groups.flatMap((group, index) => actions.map(action => control(`${group}.${action}`, index < 2)));
+  controls.push(control('tapbu.need', true));
+  const api = workbook(controls); api.state.user = { roles: ['admin'], isActive: true };
+  controls.find(item => item.dataset.internalField === 'signoff.gscTet.prepared').checked = false;
+  const before = controls.map(item => item.checked);
+  assert.equal(api.getApprovalLockRule('signoff.qaTet.prepared').locked, true, 'complete Prod.Eng does not bypass incomplete GSC');
+  api.updateApprovalCheckLocks();
+  assert.deepEqual(controls.map(item => item.checked), before);
+  assert.equal(controls.find(item => item.dataset.internalField === 'signoff.gscTet.checked').disabled, false, 'saved Checked remains preserved');
 });
 
 test('admin current pending action and mail cards follow the same signing order', () => {
