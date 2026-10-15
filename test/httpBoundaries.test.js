@@ -131,6 +131,22 @@ test('static HEAD and security headers work while malformed paths and write meth
   assert.equal((await api.request('/create', { method: 'POST', body: {} })).status, 405);
 });
 
+test('only the document preview can be framed by the same origin', async t => {
+  const api = await startApi(t);
+  const preview = await api.request('/document-preview?id=PCN-2026-0001&version=0000000000000001');
+  assert.equal(preview.status, 200);
+  assert.match(preview.text, /id="pcnForm"/);
+  assert.equal(preview.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.match(preview.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+  assert.equal(preview.headers.get('cache-control'), 'no-store');
+  for (const route of ['/create','/form.html?id=PCN-2026-0001','/login','/api/health','/document-preview/','/%64ocument-preview']) {
+    const response = await api.request(route);
+    assert.equal(response.headers.get('x-frame-options'), 'DENY', route);
+    assert.match(response.headers.get('content-security-policy'), /frame-ancestors 'none'/, route);
+  }
+  assert.equal((await api.request('/document-preview', { method:'POST',body:{} })).status, 405);
+});
+
 test('administrator login rejects supplier accounts and missing sessions remain anonymous', async t => {
   const api = await startApi(t);
   const login = await api.request('/api/admin/login', { method: 'POST', body: { username: 'supplier', password: TEST_PASSWORD } });

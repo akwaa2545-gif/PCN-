@@ -9,7 +9,8 @@ const expect = baseExpect.configure({ timeout: 10000 });
 const layoutOnly = process.argv.includes('--layout-only');
 const retryOnly = process.argv.includes('--retry-only');
 const identityOnly = process.argv.includes('--identity-only');
-const artifactSuffix = layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : '';
+const previewOnly = process.argv.includes('--preview-only');
+const artifactSuffix = layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
 function checked(description) { report.checks.push(description); console.log(JSON.stringify({ creationCheck: description })); }
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], writes: [], outbox: [], submissions: [] };
 
@@ -155,6 +156,22 @@ async function main() {
     await expect(page.locator('#createEditor')).toBeVisible();
     checked('Dedicated blank Create page opens without allocating a PCN or sending notifications');
     await page.screenshot({ path: path.resolve('test-results/create-pcn-desktop.png'), fullPage: true });
+    if (previewOnly) {
+      const model = require('../create-model'), master = require('../src/masterData');
+      const created = await system.creationService.create({ clientDraftKey: crypto.randomUUID(),
+        document: model.toPayload(model.sample(master)), testDocument: true }, 'preview-fixture',
+        { id: 'create-admin-id', roles: ['admin'], isActive: true });
+      await page.goto(`${origin}/create?draft=${created.record.id}`);
+      await expect(page.locator('#createEditor')).toBeVisible();
+      const url = page.url(), pageCount = context.pages().length;
+      await page.locator('#supplierName').fill('TEST Preview latest unsaved edit');
+      await page.locator('#previewDocument').click();
+      await expect(page.locator('#documentPreviewDialog')).toBeVisible();
+      assert.equal(page.url(), url); assert.equal(context.pages().length, pageCount);
+      assert.deepEqual(system.jobs, []);
+      checked('Preview opens a native in-page dialog without changing the creation URL or opening another tab');
+      report.status = 'passed'; return;
+    }
     if (identityOnly) {
       const model = require('../create-model'), master = require('../src/masterData');
       const user = { id: 'create-admin-id', roles: ['admin'], isActive: true };
