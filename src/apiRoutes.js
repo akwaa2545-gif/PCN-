@@ -24,7 +24,7 @@ async function handleApi(req, res, url, context, requestId) {
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin);
     const body = await readJsonBody(req);
-    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember','developerPassword'] : ['username','password','remember','developerPassword']);
+    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
     if (route === '/api/admin/login' && !hasRole(session.user, 'admin')) {
       await authService.logout(session.token);
@@ -73,7 +73,7 @@ async function handleApi(req, res, url, context, requestId) {
     if (route === '/api/admin/users' && method === 'GET') return send((await authService.repository.listUsers()).map(publicAccount));
     if (route === '/api/admin/local-users' && method === 'POST') {
       const body = await readJsonBody(req);
-      assertBodyKeys(body,['employeeCode','displayName','roles','department','signingStep','mailSelection']);
+      assertBodyKeys(body,['employeeCode','displayName','roles','department','signingStep','mailSelection','developerPassword']);
       return send(await authService.createLocalEmployee(body,employeeDirectory,actor,user),201);
     }
     if (route === '/api/admin/employees' && method === 'GET') {
@@ -86,11 +86,11 @@ async function handleApi(req, res, url, context, requestId) {
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
       if (Object.hasOwn(body,'employeeCode') || authMode === 'employee-code' || employeeDirectory) {
-        assertBodyKeys(body, ['employeeCode','roles','department','signingStep','mailSelection']);
+        assertBodyKeys(body, ['employeeCode','roles','department','signingStep','mailSelection','developerPassword']);
         return send(await authService.createEmployee(body,employeeDirectory,actor,user),201);
       }
-      assertBodyKeys(body,['username','email','password','roles']);
-      return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,bootstrap:false,mustChangePassword:true}),201);
+      assertBodyKeys(body,['username','email','password','roles','department','signingStep','developerPassword']);
+      return send(await authService.createUser({username:body.username,email:body.email || null,password:body.password,roles:body.roles,department:body.department,signingStep:body.signingStep,developerPassword:body.developerPassword,bootstrap:false,mustChangePassword:true},actor,user),201);
     }
     const roleRemoval=/^\/api\/admin\/users\/([^/]+)\/roles$/.exec(route);
     if (roleRemoval && method==='DELETE') {
@@ -103,7 +103,7 @@ async function handleApi(req, res, url, context, requestId) {
     if(accountEdit && method==='PATCH') {
       const userId=normalizeUserId(accountEdit[1]);
       const body=await readJsonBody(req);
-      assertBodyKeys(body,['roles','department','signingStep','mailSelection','isActive','version']);
+      assertBodyKeys(body,['roles','department','signingStep','mailSelection','isActive','version','developerPassword']);
       return send(await authService.updateEmployee({...body,userId},actor,user));
     }
     const employeeLink = /^\/api\/admin\/users\/([^/]+)\/employee$/.exec(route);

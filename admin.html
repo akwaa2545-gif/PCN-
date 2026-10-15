@@ -282,6 +282,7 @@
             <h4 class="employee-assignments-title">Access settings</h4>
             <label for="employeeRole">PCN role<select id="employeeRole" required aria-describedby="employeeRoleHelp employeeRoutePreview"><option value="">Select role</option><option value="admin">Administrator</option><option value="developer">Developer</option><option value="approved">Approved</option><option value="checked">Checked</option><option value="prepared">Prepared</option></select></label>
             <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
+            <label id="employeeDeveloperPasswordField" for="employeeDeveloperPassword" hidden>Developer password<input id="employeeDeveloperPassword" type="password" autocomplete="off" maxlength="128" aria-describedby="employeeRoutePreview employeeDialogMessage" disabled /></label>
 
             <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
             <p id="employeeRoleHelp" class="employee-assignment-help"></p>

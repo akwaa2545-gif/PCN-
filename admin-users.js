@@ -85,6 +85,7 @@
       'usersCreateButton', 'employeeUserDialog', 'employeeDialogCloseButton', 'employeeDialogMessage', 'employeeProvisioningHelp',
       'employeeMailLoading', 'employeeMailLoadingText', 'usersAddRoleButton', 'employeeManualFields',
       'employeeManualCode', 'employeeManualName', 'employeeDirectoryFields',
+      'employeeDeveloperPasswordField', 'employeeDeveloperPassword',
       'pendingUsersRows', 'pendingUsersCount', 'assignedUsersCount', 'pendingUsersEmpty', 'assignedUsersEmpty',
       'usersSearchFilter', 'usersRoleFilter', 'usersDepartmentFilter', 'usersStatusFilter', 'usersClearFiltersButton', 'usersFilterSummary'];
     const els = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
@@ -181,9 +182,14 @@
     }
     function bodyForSelection() {
       if (state.linkUser) return directoryBody(state.selected);
-      if (state.editUser) return editBody(state.editUser, els.employeeRole.value, els.employeeDepartment.value, state.mail, els.employeeActive.checked, state.assignmentChanged, state.retainMail);
-      if (state.manual) return { ...localIdentity(els.employeeManualCode.value, els.employeeManualName.value), ...assignmentBody(els.employeeRole.value, els.employeeDepartment.value, state.mail) };
-      return provisioningBody(state.selected, els.employeeRole.value, els.employeeDepartment.value, state.mail);
+      const body = state.editUser
+        ? editBody(state.editUser, els.employeeRole.value, els.employeeDepartment.value, state.mail, els.employeeActive.checked, state.assignmentChanged, state.retainMail)
+        : state.manual ? { ...localIdentity(els.employeeManualCode.value, els.employeeManualName.value), ...assignmentBody(els.employeeRole.value, els.employeeDepartment.value, state.mail) }
+          : provisioningBody(state.selected, els.employeeRole.value, els.employeeDepartment.value, state.mail);
+      if (!body.roles.includes('developer')) return body;
+      const password = els.employeeDeveloperPassword.value;
+      if (!password || password.length > 128) throw new Error('Enter the Developer password to save this access.');
+      return { ...body, developerPassword: password };
     }
     function previewRoute(validationError = '') {
       if (validationError) { els.employeeRoutePreview.textContent = validationError; return; }
@@ -210,6 +216,11 @@
       els.employeeRole.disabled = state.busy;
       els.employeeDepartment.disabled = state.busy || els.employeeRole.value === 'developer';
       [...els.employeeDepartment.options].forEach(option => { if (option.value === 'developer') option.disabled = els.employeeRole.value !== 'developer'; });
+      const developerSelected = !state.linkUser && els.employeeRole.value === 'developer';
+      els.employeeDeveloperPasswordField.hidden = !developerSelected;
+      els.employeeDeveloperPassword.required = developerSelected;
+      els.employeeDeveloperPassword.disabled = state.busy || !developerSelected;
+      if (!developerSelected) els.employeeDeveloperPassword.value = '';
       els.employeeRole.required = !state.linkUser && (!state.editUser || !state.editUser.roles.length || state.assignmentChanged);
       els.employeeActive.disabled = state.busy;
       els.employeeMailSearch.disabled = state.busy || !hasMailIdentity();
@@ -228,6 +239,7 @@
       previewRoute(validationError);
     }
     function clearSelection(focus = true) {
+      els.employeeDeveloperPassword.value = '';
       cancelLookup();
       cancelMailLookup();
       state = { ...state, manual: false, selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
@@ -265,6 +277,7 @@
     }
     function selectEmployee(employee) {
       if (!els.employeeUserDialog.open || state.busy) return;
+      els.employeeDeveloperPassword.value = '';
       try { directoryBody(employee); } catch (error) { els.employeeSearchStatus.textContent = error.message; return; }
       const existingUser = !state.linkUser && state.users.find((user) =>
         String(user.employeeCode || '').toLowerCase() === employee.employeeCode.toLowerCase());
@@ -556,6 +569,7 @@
     }
     els.employeeSearch.addEventListener('input', () => {
       if (state.busy || state.manual || state.editUser) return;
+      els.employeeDeveloperPassword.value = '';
       cancelLookup(); hideResults();
       cancelMailLookup();
       state = { ...state, selected: null, mail: null, retainMail: false };
@@ -580,12 +594,14 @@
       } else if (event.key === 'Escape') { event.preventDefault(); cancelLookup(); hideResults(); els.employeeSearch.focus(); }
     });
     [els.employeeRole, els.employeeDepartment].forEach((input) => input.addEventListener('change', () => {
+      els.employeeDeveloperPassword.value = '';
       if (input === els.employeeRole) {
         if (input.value === 'developer') els.employeeDepartment.value = 'developer';
         else if (els.employeeDepartment.value === 'developer') els.employeeDepartment.value = '';
       }
       state = { ...state, assignmentChanged: true }; updateControls();
     }));
+    els.employeeDeveloperPassword.addEventListener('input', updateControls);
     els.employeeActive.addEventListener('change', updateControls);
     els.employeeMailSearch.addEventListener('input', () => {
       cancelMailLookup(); state = { ...state, mail: null, retainMail: false };
@@ -600,6 +616,7 @@
     });
     [els.employeeManualCode, els.employeeManualName].forEach(input => input.addEventListener('input', () => {
       if (!state.manual || state.busy) return;
+      els.employeeDeveloperPassword.value = '';
       cancelMailLookup();
       state = { ...state, mail: null, retainMail: false };
       els.employeeMailSelected.textContent = '';
@@ -683,6 +700,7 @@
         if (editedUser?.roles.includes('developer') && !body.roles.includes('developer')
           && !window.confirm('Remove Developer access from this user and replace it with the selected PCN role and department?')) return;
         if (linkedUser && !window.confirm(`Link ${linkedUser.username} to ${state.selected.employeeCode}? The employee code becomes this account's sign-in code and existing sessions will be signed out. Its permissions and records will be preserved.`)) return;
+        els.employeeDeveloperPassword.value = '';
         state = { ...state, busy: true }; cancelLookup(); cancelMailLookup(); updateControls(); renderUsers(); message('Saving employee access...');
         const target = linkedUser || editedUser;
         const url = editedUser ? `/api/admin/users/${encodeURIComponent(editedUser.id)}` : linkedUser ? `/api/admin/users/${encodeURIComponent(linkedUser.id)}/employee` : state.manual ? '/api/admin/local-users' : '/api/admin/users';
@@ -695,7 +713,7 @@
         message(error.status === 409 && state.editUser ? 'This user changed on the server. Your edit is kept. Refresh users to discard this draft and load the latest version.' : error.message, true);
         els.employeeDialogMessage.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
         els.employeeDialogMessage.focus({ preventScroll: true });
-      }
+      } finally { els.employeeDeveloperPassword.value = ''; updateControls(); }
     });
     window.addEventListener('hashchange', () => {
       viewGeneration++;

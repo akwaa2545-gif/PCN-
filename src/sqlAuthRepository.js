@@ -199,10 +199,14 @@ class SqlAuthRepository {
       await lockUserMailRouting(transaction,'Exclusive');
       await assertCurrentUser(transaction,caller);
       const existing = await transaction.request().input('id', sql.UniqueIdentifier, id)
-        .query('SELECT Id,IdentityProvider,EmployeeCode,IsActive FROM pcn.Users WITH (UPDLOCK,HOLDLOCK) WHERE Id=@id');
+        .query(`SELECT u.Id,u.IdentityProvider,u.EmployeeCode,u.IsActive,
+          CASE WHEN EXISTS (SELECT 1 FROM pcn.UserRoles ur JOIN pcn.Roles r ON r.Id=ur.RoleId
+            WHERE ur.UserId=u.Id AND r.Name=N'developer') THEN 1 ELSE 0 END AS HasDeveloperRole
+          FROM pcn.Users u WITH (UPDLOCK,HOLDLOCK) WHERE u.Id=@id`);
       const user = existing.recordset[0];
       if (!user) throw new ApiError(404, 'User not found');
       if (!user.IsActive) throw new ApiError(400, 'Only active users can be linked to an employee');
+      if (user.HasDeveloperRole) throw new ApiError(409,'Remove Developer access before linking an employee');
       if (['employee-code','pcn-local'].includes(user.IdentityProvider) && user.EmployeeCode?.toLowerCase() !== employeeCode.toLowerCase()) throw new ApiError(409, 'Account is already linked to another employee');
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('employeeCode', sql.NVarChar(100), employeeCode).input('normalizedEmployeeCode', sql.NVarChar(100), employeeCode.toLowerCase())
@@ -222,13 +226,17 @@ class SqlAuthRepository {
     return this.getUserById(id);
   }
 
-  async createUser({ username, email, passwordHash, roles, mustChangePassword, department = null, signingStep = null }) {
+  async createUser({ username, email, passwordHash, roles, mustChangePassword, department = null, signingStep = null }, actor='administrator', user) {
     if (!Array.isArray(roles) || !roles.length || roles.some(role => !employeeRoles.includes(role))) throw new ApiError(400, 'Invalid user roles');
     validateUserAssignment({ roles, department, signingStep });
     const transaction = this.pool.transaction();
     await transaction.begin();
     const id = crypto.randomUUID();
     try {
+      if (user) {
+        await lockUserMailRouting(transaction,'Shared');
+        await assertCurrentUser(transaction,user);
+      }
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('username', sql.NVarChar(100), username).input('normalizedUsername', sql.NVarChar(100), username.toLowerCase())
         .input('email', sql.NVarChar(320), email).input('normalizedEmail', sql.NVarChar(320), email?.toLowerCase() || null)

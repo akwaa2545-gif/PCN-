@@ -62,3 +62,11 @@ test('Developer access must be removed before changing the linked employee ident
  await assert.rejects(f.service.linkEmployee({userId:f.state.user.id,employeeCode:'7654321'},f.directory,'user:administrator-id',actor),e=>e.statusCode===409&&/Remove Developer access/.test(e.message));
  assert.equal(f.state.lookups.length,0);assert.equal(linked,false);
 });
+
+test('malformed Developer role, department or signing assignment cannot authenticate or reuse a session',async()=>{
+ for(const provider of ['employee-code','pcn-local','password'])for(const change of [{department:'it'},{roles:['developer','admin']},{signingStep:'checked'}]){
+  const f=fixture(provider);const login=await f.service.login(f.body);f.state.user={...f.state.user,...change};
+  assert.equal(await f.service.session(login.token),null);
+  await assert.rejects(f.service.login(f.body),error=>error.statusCode===401);
+ }
+});

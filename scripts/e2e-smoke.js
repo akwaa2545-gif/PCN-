@@ -742,7 +742,18 @@ async function verifyUnsavedDocumentWarning(browser) {
   }
 }
 
+async function fixtureDeadline(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([promise,new Promise((resolve,reject)=>{
+      timer=setTimeout(()=>reject(new Error(`Isolated fixture timed out: ${label}`)),15000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 async function main() {
+  let phase='initializing';
+  const markPhase=value=>{phase=value;console.log(JSON.stringify({smokePhase:phase}));};
   const repository = memoryRepository();
   let directoryConfigured=true;
   await repository.saveNotificationSettings({groups:[{key:'signoff.gscTet',label:'GSC/TET',emails:'legacy@example.test',recipients:[{email:'legacy@example.test',displayName:'Legacy Contact'}]}]});
@@ -753,6 +764,7 @@ async function main() {
   let configuration='configured';
   let healthError=false;
   let healthGate=null;
+  let releaseHealth;
   let workerHealth={worker:{lastCheckedAt:null,lastOutcome:null},queue:{pending:2,sending:1,accepted:3,uncertain:0,latestAcceptedAt:null}};
   let healthReads=0;
   const outbound=[];
@@ -782,13 +794,13 @@ async function main() {
       if(payload.query==='Prepared Reviewer') return new Response(JSON.stringify({users:[{...directoryProfile,displayName:'Prepared Reviewer',mail:'prepared@example.test'}]}));
       if(payload.query==='Remove Pending') {
         observePendingLookup();
-        await pendingLookupGate;
+        await fixtureDeadline(pendingLookupGate,'pending directory release');
         finishPendingLookup();
         return new Response(JSON.stringify({users:[directoryProfile]}));
       }
       if(payload.query==='Blur Pending') {
         observeBlurLookup();
-        await blurLookupGate;
+        await fixtureDeadline(blurLookupGate,'blur directory release');
         return new Response(JSON.stringify({users:[directoryProfile]}));
       }
       if(payload.query!=='Browser Reviewer') return new Response(JSON.stringify({users:[]}));
@@ -806,7 +818,7 @@ async function main() {
   };
   const notificationWorker={async health() {
     healthReads+=1;
-    if(healthGate) await healthGate;
+    if(healthGate) await fixtureDeadline(healthGate,'health release');
     if(healthError) throw new Error('PRIVATE_DIAGNOSTIC_MARKER');
     return structuredClone(workerHealth);
   }};
@@ -814,6 +826,7 @@ async function main() {
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(3099,'127.0.0.1',resolve);});
   let browser;
   try {
+    markPhase('initial-login');
     browser = await chromium.launch({headless:true});
     const page = await browser.newPage({viewport:{width:1440,height:1100}});
     page.setDefaultTimeout(15000);
@@ -914,6 +927,7 @@ async function main() {
     assert.equal(await approvedList.locator('[data-recipient-email]').count(),0,'Escape leaves routing unchanged');
     assert.equal(await approvedAdd.evaluate(button=>document.activeElement===button),true);
     const pendingList=page.locator('#notificationGroups [data-notification-group="department.qaTet.approved"]');
+    markPhase('pending-directory-dismissal');
     await pendingList.getByRole('button',{name:'Add recipient to QA/TET Approved'}).click();
     assert.equal(await page.locator('#notificationRecipientTitle').textContent(),'QA/TET \u2014 Approved');
     await popupInput.fill('Remove Pending');
@@ -926,12 +940,13 @@ async function main() {
     assert.equal(await popup.isVisible(),true,'Escape dismisses active directory results before closing the dialog');
     await popup.locator('.directory-suggestions').waitFor({state:'hidden'});
     releasePendingLookup();
-    await pendingLookupFinished;
+    await fixtureDeadline(pendingLookupFinished,'pending directory completion');
     assert.equal(await popup.locator('.directory-suggestion:not(.is-message)').count(),0,'A dismissed lookup cannot reopen after its late response');
     await cancelRecipient.click();
     await popup.waitFor({state:'hidden'});
     assert.equal(await pendingList.locator('[data-recipient-email]').count(),0,'Cancelling a lookup adds no recipient');
     await pendingList.getByRole('button',{name:'Add recipient to QA/TET Approved'}).click();
+    markPhase('blur-directory-dismissal');
     await popupInput.fill('Blur Pending');
     try { await Promise.race([blurLookupStarted,new Promise((resolve,reject)=>{pendingTimeout=setTimeout(()=>reject(new Error('Blur directory lookup did not start')),15000);})]); }
     finally { clearTimeout(pendingTimeout); }
@@ -965,7 +980,7 @@ async function main() {
       assert.equal(await suggestion.locator('.directory-suggestion-position').textContent(),'Quality Reviewer - Supplier Quality');
       assert.equal(await suggestion.locator('img').getAttribute('src'),directoryPhoto);
       await suggestion.locator('img').evaluate(image=>image.decode());
-      if(lookup===0) await page.screenshot({path:path.resolve('test-results/directory-suggestions-browser-smoke.png'),fullPage:true});
+      if(lookup===0) { await page.screenshot({path:path.resolve('test-results/directory-suggestions-browser-smoke.png'),fullPage:true});markPhase('directory-selection-response-envelopes'); }
       if(lookup===0) await suggestion.click();
       else { await popupInput.focus(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter'); }
       assert.equal(await popupInput.inputValue(),'reviewer@example.test');
@@ -1029,6 +1044,7 @@ async function main() {
     await legacySource.getByRole('button',{name:'Copy contacts to list from GSC/TET'}).click();
     assert.equal(await checkedList.locator('input').count(),1,'Copy merges duplicate contacts');
     assert.match(await legacySource.textContent(),/legacy@example.test/);
+    markPhase('notification-health-statuses');
     for(const [status,label] of [['not_configured','Not configured'],['invalid','Needs attention'],['configured','Ready']]) {
       configuration=status;
       await page.locator('#notificationHealthRefreshButton').click();
@@ -1041,7 +1057,7 @@ async function main() {
       await page.locator('#notificationHealthStatus').filter({hasText:'Needs attention'}).waitFor();
       assert.equal(await firstRecipient.inputValue(),'reviewer@example.test');
     }
-    let releaseHealth;
+    markPhase('notification-health-pending');
     healthGate=new Promise(resolve=>{releaseHealth=resolve;});
     await page.locator('#notificationHealthRefreshButton').focus();
     await page.keyboard.press('Enter');
@@ -1052,8 +1068,10 @@ async function main() {
     workerHealth={...workerHealth,worker:{lastCheckedAt:'2026-10-06T01:02:03.000Z',lastOutcome:'accepted'},queue:{...workerHealth.queue,uncertain:0,latestAcceptedAt:'2026-10-06T01:02:03.000Z'}};
     healthGate=null;
     releaseHealth();
+    markPhase('notification-health-released');
     await page.locator('#notificationHealthPanel[aria-busy=false]').waitFor();
     assert.equal(await page.locator('#notificationHealthStatus').textContent(),'Ready');
+    markPhase('notification-routing-save');
     await page.locator('#notificationSaveButton').click();
     await page.locator('#mailRoutingMessage').filter({hasText:'Mail routing saved.'}).waitFor();
     const savedRouting=(await repository.getNotificationSettings()).groups[0];
@@ -1102,6 +1120,7 @@ async function main() {
     await page.unroute('**/api/admin/notifications/health');
     const context=await browser.newContext({viewport:{width:1440,height:1100}});
     const supplier=await context.newPage();
+    markPhase('supplier-create');
     supplier.setDefaultTimeout(15000);
     supplier.setDefaultNavigationTimeout(15000);
     supplier.on('pageerror',error=>errors.push(error.message));
@@ -1198,6 +1217,7 @@ async function main() {
     await page.screenshot({path:path.resolve('test-results/notification-recipient-popup-mobile.png'),fullPage:true});
     await page.keyboard.press('Escape');
     await popup.waitFor({state:'hidden'});
+    markPhase('users-provisioning');
     // Employee provisioning is independently mocked, separate from the Power Automate mail directory.
     await page.setViewportSize({width:1440,height:1100});
     const employee={employeeCode:'0000001',displayName:'Source Employee',englishName:'Source Employee',email:null,sourceDepartment:'Engineering',jobTitle:'Engineer',isActive:true};
@@ -1302,7 +1322,11 @@ async function main() {
     assert.equal(await createdIdentity.locator('.notification-person-avatar img').getAttribute('src'),directoryPhoto,'Users display the verified directory profile photo');
     assert.equal(await createdIdentity.locator('.notification-person-email').textContent(),'source@example.test');
     assert.equal(await createdIdentity.locator('.notification-person-meta').textContent(),'Engineer - Engineering');
-    assert.equal(await page.locator('#employeeUserForm input[type=password]').count(),0);
+    assert.equal(await page.locator('#employeeUserForm input[type=password]').count(),1,'Only the conditional Developer assignment password exists');
+    assert.equal(await page.locator('#employeeUserForm input[type=password]').getAttribute('id'),'employeeDeveloperPassword');
+    assert.equal(await page.locator('#employeeDeveloperPasswordField').evaluate(field=>field.hidden),true,'Non-Developer assignments hide the password field');
+    assert.equal(await page.locator('#employeeDeveloperPassword').isDisabled(),true,'Non-Developer assignments disable the password field');
+    assert.equal(await page.locator('#employeeDeveloperPassword').inputValue(),'','Saving regular access leaves no assignment password');
     await page.locator('#adminMailRoutingButton').click();
     const managedList=page.locator('[data-notification-group="department.qaTet.checked"]');
     await managedList.locator('[data-managed-recipient]').waitFor();
@@ -1467,9 +1491,13 @@ async function main() {
     // These completed pages otherwise keep polling during independent helper contexts.
     await supplier.context().close();
     await page.context().close();
+    markPhase('split-notification-helper');
     await verifySplitNotificationFeedback(browser,feedbackStorage,errors);
+    markPhase('email-link-helper');
     await verifyPcnEmailLinks(browser,errors);
+    markPhase('handwritten-signoff-helper');
     await verifyHandwrittenSignoffs(browser);
+    markPhase('unsaved-document-helper');
     await verifyUnsavedDocumentWarning(browser);
     const viewerPage = await browser.newPage({viewport:{width:1365,height:900}});
     viewerPage.on('pageerror',error=>errors.push(error.message));
@@ -1508,9 +1536,17 @@ async function main() {
     assert.deepEqual(outbound,[],'The complete browser suite performs no outbound email');
     assert.deepEqual(errors,[],'All browser journeys complete without page errors');
     console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','five-departments-fifteen-step-lists','separate-supplier-list','qa-initial-final-shared-lists','empty-lists-without-fields','popup-department-and-step','popup-cancel-and-escape-no-changes','popup-one-field','static-contact-rows','last-remove-restores-add','typing-and-selection-no-extra-fields','natural-directory-height','pending-escape-cancels-lookup','blurred-lookup-does-not-reopen','popup-internal-search-status','duplicate-recipient-rejected','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','directory-selection-required','forced-confirm-cannot-bypass','input-event-clears-selection','failed-no-match-unconfigured-lookup','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','popup-focus-and-mobile-layout','admin-users-role-gate','employee-source-isolated-from-mail','typed-code-cannot-provision','employee-no-match-and-error','employee-selection-and-read-only-code','employee-input-invalidates-selection','selected-employee-create-fixed-assignments','five-pcn-role-options-no-duplicate-select','administrator-demotion-confirm-cancel','unchanged-multiple-role-and-signing-preserved','legacy-requester-no-implicit-signing','english-name-mail-lookup','duplicate-name-explicit-confirmation','single-step-requires-verified-mail','free-text-email-cannot-save','mail-input-invalidates-selection','managed-users-routing-readonly','manual-save-excludes-managed-mail','user-edit-step-active-version','user-conflict-keeps-draft','user-edit-cancel-no-write','maintenance-mode-explicit-employee-link','explicit-employee-link-preserves-assignments','cancel-employee-selection-no-write','unconfigured-source-blocks-provisioning','users-responsive-layout','unknown-auth-mode-retry','employee-session-service-failure-closed','employee-stale-session-recovery','employee-only-sign-in-no-password','employee-login-leading-zero-and-csrf','split-update-queued-action-blocked','split-signature-save-both-queued','split-update-blocked-action-queued','split-workflow-checkbox-feedback-after-refresh','split-queue-feedback-no-delivery-claims','split-policy2-no-legacy-notification-post','no-page-errors'],storage:'isolated_test_adapters'}));
+  } catch(error) {
+    console.error(JSON.stringify({smokeFailurePhase:phase,error:error.stack || error.message}));
+    throw error;
   } finally {
+    markPhase('cleanup-release-fixtures');
+    healthGate=null; releaseHealth?.(); releasePendingLookup?.(); releaseBlurLookup?.();
+    markPhase('cleanup-browser');
     if(browser) await browser.close();
+    markPhase('cleanup-server');
     await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});
+    markPhase('cleanup-complete');
   }
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1;});
