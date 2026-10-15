@@ -45,7 +45,7 @@ async function main() {
   report.fixtureEvents = history.length;
   clock = new Date('2026-10-12T10:10:00.000Z');
   let signed = await service.create({ ...unsignedPayload, status: 'draft', supplierName: 'Timeline Signing Supplier' }, 'Signing Fixture Creator', user);
-  for (const [index, action] of ['approved', 'checked'].entries()) {
+  for (const [index, action] of ['prepared', 'checked'].entries()) {
     clock = new Date(`2026-10-12T10:${11 + index}:00.000Z`);
     const signer = { id: `fixture-${action}`, displayName: `Fixture GSC ${action}`, roles: ['gsc'], department: 'gscTet', signingStep: action };
     signed = await service.update(signed.id, { version: signed.version, internalReview: { signoff: { gscTet: { [action]: true } } } }, signer.displayName, signer);
@@ -167,8 +167,8 @@ async function main() {
     report.checks.push('390px modal fits viewport; horizontal timeline scrolls and both ends remain selectable');
     activeId = signed.id;
     await open(); await expect(events).toHaveCount(signingHistory.length);
-    await expect(events.nth(1)).toContainText(/GSC\/TET\s*(?:—|–|-)?\s*Approved/);
-    await expect(events.nth(1)).toContainText('Fixture GSC approved');
+    await expect(events.nth(1)).toContainText(/GSC\/TET\s*(?:—|–|-)?\s*Prepared/);
+    await expect(events.nth(1)).toContainText('Fixture GSC prepared');
     await expect(events.last()).toContainText(/GSC\/TET\s*(?:—|–|-)?\s*Checked/);
     await expect(events.last()).toContainText('Fixture GSC checked');
     await events.last().click(); await expect(details).toContainText('Fixture GSC checked');
@@ -180,7 +180,7 @@ async function main() {
     await page.setViewportSize({ width: 1440, height: 1000 }); await fit(page, dialog);
     await page.screenshot({ path: path.resolve('test-results/timeline-signing-desktop.png') });
     await close('#pcnTimelineCloseButton');
-    report.checks.push('Genuine assigned GSC Approved then Checked revisions show signer and department/action in simple nodes');
+    report.checks.push('Genuine assigned GSC Prepared then Checked revisions show signer and department/action in simple nodes');
     assert.deepEqual(await repository.findById(record.id), record, 'Browser viewing never mutates PCN');
     assert.deepEqual(await repository.getRevisions(record.id), history, 'Browser viewing never mutates revision history');
     assert.deepEqual(await repository.findById(signed.id), signed, 'Timeline viewing never mutates signed PCN');

@@ -10,7 +10,7 @@ const now = new Date('2026-10-14T12:00:00Z');
 const viewer = {id:'viewer',roles:[],employeeCode:'1234567',identityProvider:'employee-code',isActive:true};
 const admin = {id:'admin',roles:['admin'],isActive:true};
 const record = { ...unsignedPayload,id:'PCN-2026-0001',version:'0000000000000001',status:'submitted',createdAt:'2026-10-01T12:00:00Z',updatedAt:'2026-10-12T12:00:00Z',
-  internalReview:{docs:{hazardousReport:true},signoff:{gscTet:{approved:true}}}};
+  internalReview:{docs:{hazardousReport:true},signoff:{gscTet:{prepared:true}}}};
 const assigned = {displayName:'Assigned Checker',email:'private@example.test',mailProfile:{secret:true},employeeCode:'7654321',roles:['gsc'],department:'gscTet',signingStep:'checked',isActive:true};
 const clean = {scanStatus:'clean',requirementName:'hazardousReport'};
 

@@ -1673,8 +1673,8 @@
         control.disabled = true;
         control.title = 'Historical signoff information is read-only.';
       } else if (/^qateFinal\./.test(field) && !field.startsWith('qateFinal.signoff.')) {
-        control.disabled = !canSignStep('qateFinal.signoff', 'prepared');
-        control.title = control.disabled ? 'Requires the QA/TET Prepared assignment.' : '';
+        control.disabled = !canSignStep('qateFinal.signoff', 'approved');
+        control.title = control.disabled ? 'Requires the QA/TET Approved assignment.' : '';
       }
     });
     renderHandwrittenSignatures();
@@ -1870,53 +1870,52 @@
       };
     }
 
-    const priorFieldInGroup = getPriorSignoffField(current.group, current.action);
+    const priorFieldInGroup = getMissingPriorSignoffField(current.group, current.action);
 
-    if (priorFieldInGroup && !isControlChecked(priorFieldInGroup)) {
+    if (priorFieldInGroup) {
       return {
         locked: true,
         reason: `Complete ${formatApprovalField(priorFieldInGroup)} before ${formatApprovalField(field)}.`
       };
     }
 
-    const priorGroup = getPriorApprovalGroup(current.group);
+    const priorGroup = getPriorApprovalGroups(current.group).find((group) => !isApprovalGroupComplete(group));
 
     if (priorGroup) {
-      if (!isApprovalGroupComplete(priorGroup)) {
-        return {
-          locked: true,
-          reason: `Complete all ${formatApprovalGroup(priorGroup)} signoff checks before ${formatApprovalGroup(current.group)}.`
-        };
-      }
+      return {
+        locked: true,
+        reason: `Complete all ${formatApprovalGroup(priorGroup)} signoff checks before ${formatApprovalGroup(current.group)}.`
+      };
     }
 
     return { locked: false, reason: "" };
   }
 
-  function getPriorSignoffField(group, action) {
-    const actionOrder = ["approved", "checked", "prepared"];
+  function getMissingPriorSignoffField(group, action) {
+    const actionOrder = ["prepared", "checked", "approved"];
     const actionIndex = actionOrder.indexOf(action);
 
     if (actionIndex <= 0) {
       return "";
     }
 
-    return `${group}.${actionOrder[actionIndex - 1]}`;
+    const missingAction = actionOrder.slice(0, actionIndex).find((priorAction) => !isControlChecked(`${group}.${priorAction}`));
+    return missingAction ? `${group}.${missingAction}` : "";
   }
 
   function isApprovalGroupComplete(group) {
     return ["approved", "checked", "prepared"].every((action) => isControlChecked(`${group}.${action}`));
   }
 
-  function getPriorApprovalGroup(group) {
+  function getPriorApprovalGroups(group) {
     const groups = approvalRouteGroups();
     const groupIndex = groups.indexOf(group);
 
     if (groupIndex <= 0) {
-      return "";
+      return [];
     }
 
-    return groups[groupIndex - 1];
+    return groups.slice(0, groupIndex);
   }
 
   function approvalRouteGroups() {
@@ -1931,24 +1930,24 @@
 
   function approvalSignoffFields() {
     return [
-      "signoff.gscTet.approved",
-      "signoff.gscTet.checked",
       "signoff.gscTet.prepared",
-      "signoff.prodEngTet.approved",
-      "signoff.prodEngTet.checked",
+      "signoff.gscTet.checked",
+      "signoff.gscTet.approved",
       "signoff.prodEngTet.prepared",
-      "signoff.qaTet.approved",
-      "signoff.qaTet.checked",
+      "signoff.prodEngTet.checked",
+      "signoff.prodEngTet.approved",
       "signoff.qaTet.prepared",
-      "tapbu.gsc.approved",
-      "tapbu.gsc.checked",
+      "signoff.qaTet.checked",
+      "signoff.qaTet.approved",
       "tapbu.gsc.prepared",
-      "tapbu.qa.approved",
-      "tapbu.qa.checked",
+      "tapbu.gsc.checked",
+      "tapbu.gsc.approved",
       "tapbu.qa.prepared",
-      "qateFinal.signoff.approved",
+      "tapbu.qa.checked",
+      "tapbu.qa.approved",
+      "qateFinal.signoff.prepared",
       "qateFinal.signoff.checked",
-      "qateFinal.signoff.prepared"
+      "qateFinal.signoff.approved"
     ];
   }
 

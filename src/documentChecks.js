@@ -66,8 +66,8 @@ function buildAction(record, user, users = []) {
         canAct: tapbuPending ? user.isActive !== false && hasRole(user,'admin','reviewer','gsc') : canSign(user,department,action) };
     }
   }
-  return { ...none,stage:'final_judgment',department:'qaTet',signingStep:'prepared',
-    field:'internalReview.qateFinal.approve',label:'Record final judgment',canAct:canSign(user,'qaTet','prepared') };
+  return { ...none,stage:'final_judgment',department:'qaTet',signingStep:'approved',
+    field:'internalReview.qateFinal.approve',label:'Record final judgment',canAct:canSign(user,'qaTet','approved') };
 }
 
 module.exports = { buildChecks, assertCompletion, buildAction };

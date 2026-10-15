@@ -67,6 +67,7 @@ class NotificationService {
     if (settings.schemaVersion !== 2 || policy !== 2) return { record: policyRecord };
     proposed = policyRecord;
     const prior = before?.mailRoutingState;
+    const adoptingSigningOrder = Boolean(before && prior?.signingOrderVersion !== 2);
     const changes = signoffChanges(before, proposed);
     const terminalCompletion = ['closed', 'rejected'].includes(proposed.status)
       && changes.completed.some(field => field.stageKey === 'qateFinal.signoff')
@@ -80,12 +81,12 @@ class NotificationService {
     const prerequisiteResolved = prior?.reason === 'tapbu_requirement_not_selected'
       && before?.internalReview?.tapbu?.need !== true && proposed.internalReview?.tapbu?.need === true;
     const prerequisiteInvalidated = target?.blockedReason && prior?.groupKey === target.groupKey && prior.reason !== target.blockedReason;
-    const currentActionActivated = adoptingCurrentRouting && target
+    const currentActionActivated = (adoptingCurrentRouting || adoptingSigningOrder) && target
       && !['approved', 'rejected', 'closed'].includes(proposed.status) && !changes.invalidated;
     const handoff = submitted || ((changes.completed.length > 0 || prerequisiteResolved || currentActionActivated) && !changes.invalidated);
     if (currentActionActivated) {
       await tx.request().input('pcnId', sql.NVarChar(32), proposed.id)
-        .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Current step routing replaced legacy notification' WHERE PcnId=@pcnId AND Action=N'completed' AND Status=N'pending'");
+        .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Current signing order replaced pending notification' WHERE PcnId=@pcnId AND (Action=N'completed' OR Action IN (N'prepared',N'checked',N'approved',N'notification')) AND Status=N'pending'");
     }
     if (prior?.activationId && (priorKey !== nextKey || changes.invalidated || handoff || prerequisiteInvalidated)) {
       await tx.request().input('eventKey', sql.NVarChar(200), `${proposed.id}:${prior.activationId}:handoff`)
@@ -97,7 +98,9 @@ class NotificationService {
     }
     if (!target || !handoff) {
       const { mailRoutingState: omitted, ...withoutState } = proposed;
-      const record = prior && priorKey === nextKey && !changes.invalidated ? proposed : withoutState;
+      const retainedOrder = target && !['approved', 'rejected', 'closed'].includes(proposed.status)
+        ? { ...withoutState, mailRoutingState: { signingOrderVersion: 2 } } : withoutState;
+      const record = prior && priorKey === nextKey && !changes.invalidated ? proposed : retainedOrder;
       return { record, plan: { queued: false, reason: 'no_transition' } };
     }
     const assignments = await readUserMailAssignments(tx);
@@ -105,14 +108,14 @@ class NotificationService {
     try { effective = normalizeMailRouting(applyUserMailRouting(settings, assignments)); }
     catch (error) {
       if (!(error instanceof ApiError)) throw error;
-      return { record: { ...proposed, mailRoutingState: { activationId: crypto.randomUUID(), stageKey: target.stageKey,
+      return { record: { ...proposed, mailRoutingState: { signingOrderVersion: 2, activationId: crypto.randomUUID(), stageKey: target.stageKey,
         action: target.action, groupKey: target.groupKey, status: 'blocked', reason: 'notification_configuration_invalid' } },
         plan: { queued: false, reason: 'notification_configuration_invalid', nextGroupKey: target.groupKey, nextLabel: target.label } };
     }
     const group = effective.groups.find(entry => entry.key === target.groupKey);
     const configured = this.mailConfigurationStatus ? this.mailConfigurationStatus() === 'configured' : Boolean(this.mailUrl);
     const reason = target.blockedReason || (!group?.effectiveEmails.trim() ? 'recipient_not_configured' : !configured ? 'mail_not_configured' : null);
-    const state = { activationId: crypto.randomUUID(), stageKey: target.stageKey, action: target.action,
+    const state = { signingOrderVersion: 2, activationId: crypto.randomUUID(), stageKey: target.stageKey, action: target.action,
       groupKey: target.groupKey, routingVersion: effective.routingVersion, status: reason ? 'blocked' : 'pending', ...(reason ? { reason } : {}) };
     const record = { ...proposed, mailRoutingState: state };
     const summary = { queued: false, ...(reason ? { reason } : {}), nextGroupKey: target.groupKey, nextLabel: target.label };
@@ -125,7 +128,8 @@ class NotificationService {
           nextDepartment: departments.find(department => department.key === target.departmentKey)?.label,
           nextRole: target.action ? target.action[0].toUpperCase() + target.action.slice(1) : undefined,
           updateSummary, pcnUrl: this.pcnLink(record.id) }),
-        senderName: 'Supplier PCN Workflow' };
+        senderName: 'Supplier PCN Workflow', actionSnapshot: { signingOrderVersion: 2, pcnId: record.id,
+          activationId: state.activationId, stageKey: target.stageKey, action: target.action, groupKey: target.groupKey } };
       if (group.automaticRecipients.length) payload.routingSnapshot = { groupKey: group.key, manualEmails: group.emails,
         automaticRecipients: group.automaticRecipients.map(recipient => ({ userId: recipient.userId, email: recipient.email,
           department: target.departmentKey, signingStep: target.action, directoryId: recipient.id })) };

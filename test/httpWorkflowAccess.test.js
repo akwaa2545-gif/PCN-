@@ -5,7 +5,7 @@ const {
   hasRole, isInternal, routeGroups, complete
 } = require('../src/workflowAccess');
 
-const user = role => ({ id: 'owner', roles: [role], ...(role === 'qa' ? { department: 'qaTet', signingStep: 'prepared' } : {}) });
+const user = role => ({ id: 'owner', roles: [role], ...(role === 'qa' ? { department: 'qaTet', signingStep: 'approved' } : {}) });
 const signoff = { approved: true, checked: true, prepared: true };
 const finished = () => ({ signoff: { gscTet: { ...signoff }, prodEngTet: { ...signoff }, qaTet: { ...signoff } },
   tapbu: { need: true, gsc: { ...signoff }, qa: { ...signoff } }, qateFinal: { signoff: { ...signoff }, approve: true } });
@@ -53,7 +53,7 @@ test('signoff order and checked prerequisites block forged completion', () => {
   assert.equal(complete({}, 'qateFinal.signoff'), false);
   for (const [before, review, actor] of [
     [{}, { signoff: { gscTet: { checked: true } } }, { ...user('gsc'), department: 'gscTet', signingStep: 'checked' }],
-    [{ signoff: { gscTet: { approved: true } } }, { signoff: { gscTet: { approved: true, prepared: true } } }, { ...user('gsc'), department: 'gscTet', signingStep: 'prepared' }],
+    [{ signoff: { gscTet: { prepared: true } } }, { signoff: { gscTet: { approved: true, prepared: true } } }, { ...user('gsc'), department: 'gscTet', signingStep: 'approved' }],
     [{}, { signoff: { prodEngTet: { approved: true } } }, { ...user('productionengineering'), department: 'prodEngTet', signingStep: 'approved' }],
     [finished(), { ...finished(), tapbu: { need: false, gsc: { ...signoff }, qa: { ...signoff } } }, user('admin')]
   ]) assert.throws(() => assertReviewUpdate(before, review, actor, 'RL2'), { statusCode: 400 });

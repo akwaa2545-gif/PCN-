@@ -22,6 +22,9 @@ test('new terminal transitions require the whole route even when historical fina
     }
     assert.doesNotThrow(() => assertStatusPermission({ status: 'qualification', riskLevel: 'RL2', internalReview: { ...review, qateFinal: judgment } }, status, actor));
   }
+  const noTapbu = { signoff: review.signoff, qateFinal: review.qateFinal };
+  assert.doesNotThrow(() => assertStatusPermission({ status: 'qualification', riskLevel: 'RL0', internalReview: noTapbu }, 'approved', actor));
+  assert.doesNotThrow(() => assertStatusPermission({ status: 'qualification', riskLevel: 'RL2', internalReview: { ...noTapbu, tapbu: { noNeed: true } } }, 'approved', actor));
   assert.doesNotThrow(() => assertStatusPermission({ status: 'approved', riskLevel: 'RL2', internalReview: { qateFinal: review.qateFinal } }, 'approved', actor));
 });
 
@@ -69,7 +72,8 @@ test('changing TaPBU routing cannot remove earlier evidence beneath a retained f
 test('QA/TET Approved owns final judgment fields and terminal status transitions', () => {
   const approved = { ...qa, signingStep: 'approved' };
   const prepared = { ...qa, signingStep: 'prepared' };
-  const review = { qateFinal: { signoff: { prepared: true, checked: true, approved: true }, approve: true } };
+  const done = { prepared: true, checked: true, approved: true };
+  const review = { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { noNeed: true }, qateFinal: { signoff: done, approve: true } };
   assert.doesNotThrow(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, approved, 'RL0'));
   assert.throws(() => assertReviewUpdate({}, { qateFinal: { approve: true } }, prepared, 'RL0'), { statusCode: 403 });
   assert.doesNotThrow(() => assertStatusPermission({ status: 'qa_review', internalReview: review }, 'approved', approved));
@@ -116,9 +120,10 @@ test('supplier cannot advance an internal workflow stage or edit a locked submis
 
 test('closure requires a recorded final judgment as well as signoffs', () => {
   const qaFinal = { ...qa, signingStep: 'approved' };
-  const record={status:'qa_review',internalReview:{qateFinal:{signoff:{approved:true,checked:true,prepared:true}}}};
+  const done={approved:true,checked:true,prepared:true};
+  const record={status:'qa_review',riskLevel:'RL0',internalReview:{signoff:{gscTet:done,prodEngTet:done,qaTet:done},qateFinal:{signoff:done}}};
   assert.throws(()=>assertStatusPermission(record,'closed',qaFinal),{statusCode:400});
-  assert.doesNotThrow(()=>assertStatusPermission({...record,internalReview:{qateFinal:{...record.internalReview.qateFinal,approve:true}}},'closed',qaFinal));
+  assert.doesNotThrow(()=>assertStatusPermission({...record,internalReview:{...record.internalReview,qateFinal:{...record.internalReview.qateFinal,approve:true}}},'closed',qaFinal));
 });
 
 test('reviewers cannot change signature flags or metadata without the exact assignment', () => {
@@ -175,8 +180,9 @@ test('administrator override preserves signing order, RL0 restrictions and final
   assert.throws(() => assertReviewUpdate({}, { signoff: { prodEngTet: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });
   assert.throws(() => assertReviewUpdate({}, { tapbu: { gsc: { approved: true } } }, admin, 'RL0'), { statusCode: 400 });
   assert.throws(() => assertStatusPermission({ status: 'qa_review' }, 'approved', admin), { statusCode: 400 });
-  const record = { status: 'qa_review', internalReview: { qateFinal: { signoff: { approved: true, checked: true, prepared: true } } } };
+  const done = { approved: true, checked: true, prepared: true };
+  const record = { status: 'qa_review', riskLevel: 'RL0', internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: done }, qateFinal: { signoff: done } } };
   assert.throws(() => assertStatusPermission(record, 'closed', admin), { statusCode: 400 });
-  assert.doesNotThrow(() => assertStatusPermission({ ...record, internalReview: { qateFinal: { ...record.internalReview.qateFinal, approve: true } } }, 'closed', admin));
+  assert.doesNotThrow(() => assertStatusPermission({ ...record, internalReview: { ...record.internalReview, qateFinal: { ...record.internalReview.qateFinal, approve: true } } }, 'closed', admin));
   assert.throws(() => assertReviewUpdate({}, { signoff: { gscTet: { approved: true } } }, { ...admin, isActive: false }, 'RL0'), { statusCode: 403 });
 });

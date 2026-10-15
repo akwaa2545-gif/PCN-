@@ -1072,7 +1072,7 @@
       { key: "prodEngTet", label: "Prod.Eng/TET" },
       { key: "qaTet", label: "QA/TET" }
     ];
-    const actions = ["approved", "checked", "prepared"];
+    const actions = ["prepared", "checked", "approved"];
 
     for (let groupIndex = minimumGroupIndex; groupIndex < groups.length; groupIndex += 1) {
       const group = groups[groupIndex];
@@ -1122,7 +1122,7 @@
       card.className = "notification-department";
       card.dataset.department = key;
       card.innerHTML = `<header class="notification-department-header"><h3>${escapeHtml(label)}</h3></header>`;
-      ["approved", "checked", "prepared"].forEach((action) => {
+      ["prepared", "checked", "approved"].forEach((action) => {
         const group = state.notificationSettings.groups.find((entry) => entry.key === `department.${key}.${action}`);
         if (group) card.appendChild(createNotificationGroup(group, titleCase(action)));
       });

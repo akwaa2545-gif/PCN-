@@ -34,14 +34,14 @@ test('document workspace read APIs authorize record access before files and user
 
 test('action APIs return exact assigned people with no email or credentials', async t => {
   const api=await startApi(t,{authService:fakeAuthService({additionalUsers:[
-    {username:'assigned',displayName:'Approver',employeeCode:'001',email:'private@example.test',roles:['gsc'],department:'gscTet',signingStep:'approved'},
+    {username:'assigned',displayName:'Preparer',employeeCode:'001',email:'private@example.test',roles:['gsc'],department:'gscTet',signingStep:'prepared'},
     {username:'other-step',displayName:'Checker',roles:['gsc'],department:'gscTet',signingStep:'checked'}]})});
   const admin=await api.login('admin');
   const created=await api.request('/api/pcns',{method:'POST',session:admin,body:unsignedPayload});
   const response=await api.request(`/api/pcns/${created.body.data.id}/action`,{session:admin});
   assert.equal(response.status,200);
-  assert.deepEqual(response.body.data.people,[{displayName:'Approver',employeeCode:'001'}]);
-  assert.equal(response.body.data.field,'internalReview.signoff.gscTet.approved');
+  assert.deepEqual(response.body.data.people,[{displayName:'Preparer',employeeCode:'001'}]);
+  assert.equal(response.body.data.field,'internalReview.signoff.gscTet.prepared');
   assert.equal(response.body.data.canAct,true);
 });
 

@@ -7,7 +7,8 @@ const { SqlPcnRepository } = require('../src/sqlPcnRepository');
 const { mailGroups } = require('../src/mailRouting');
 
 const done = { approved: true, checked: true, prepared: true };
-const base = { id: 'PCN-2026-0001', version: '0000000000000001', status: 'gsc_review', riskLevel: 'RL0', mailRoutingPolicyVersion: 2, internalReview: {} };
+const base = { id: 'PCN-2026-0001', version: '0000000000000001', status: 'gsc_review', riskLevel: 'RL0',
+  mailRoutingPolicyVersion: 2, mailRoutingState: { signingOrderVersion: 2 }, internalReview: {} };
 const configured = { schemaVersion: 2, groups: mailGroups.map(group => ({ ...group, emails: 'reviewer@example.test', recipients: [] })) };
 function transaction(settings = configured, failInsert = false) {
   const calls = [];
@@ -195,7 +196,8 @@ test('empty lists and missing mail save a blocked outcome and never enqueue', as
 
 test('legacy settings preserve existing explicit notification path without automatic jobs', async () => {
   const tx = transaction({ groups: [] });
-  const prepared = await service().prepare(tx, base, { ...base, internalReview: { signoff: { gscTet: done } } });
+  const prepared = await service().prepare(tx, { ...base, mailRoutingState: undefined },
+    { ...base, mailRoutingState: undefined, internalReview: { signoff: { gscTet: done } } });
   assert.equal(prepared.record.mailRoutingState, undefined);
   assert.equal(prepared.plan, undefined);
   assert.equal(writes(tx).length, 0);
@@ -420,8 +422,7 @@ test('old-order v2 records adopt the current Prepared target on the first eligib
   for (const oldState of [undefined, { activationId: 'old-activation', stageKey: 'signoff.gscTet',
     action: 'checked', groupKey: 'department.gscTet.checked', status: 'pending' }]) {
     const tx = transaction();
-    const before = { ...base, internalReview: { signoff: { gscTet: { approved: true } } },
-      ...(oldState ? { mailRoutingState: oldState } : {}) };
+    const before = { ...base, internalReview: { signoff: { gscTet: { approved: true } } }, mailRoutingState: oldState };
     const prepared = await service().prepare(tx, before, before);
     assert.equal(prepared.record.mailRoutingState.signingOrderVersion, 2);
     assert.equal(prepared.record.mailRoutingState.groupKey, 'department.gscTet.prepared');

@@ -1,6 +1,6 @@
 const { ApiError } = require('./apiError');
 
-const actions = Object.freeze(['approved', 'checked', 'prepared']);
+const actions = Object.freeze(['prepared', 'checked', 'approved']);
 const departments = Object.freeze([
   { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
   { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' },

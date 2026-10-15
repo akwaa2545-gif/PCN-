@@ -111,14 +111,32 @@ async function main() {
     await patch({ status: 'submitted' });
     assert.equal(jobs.at(-1).to, 'prepared@example.test');
     assert.match(jobs.at(-1).subject, /GSC\/TET Prepared/);
+    const assertNextAction = async (department, action) => {
+      const response = await context.request.get(`${origin}/api/pcns/${record.id}/action`);
+      assert.equal(response.status(), 200);
+      const next = (await response.json()).data;
+      assert.equal(next.department, department); assert.equal(next.signingStep, action);
+      assert.match(next.label, new RegExp(action[0].toUpperCase() + action.slice(1)));
+      if (department === 'gscTet') assert.deepEqual(next.people.map(person => person.displayName), [`Order ${action}`]);
+    };
+    await assertNextAction('gscTet', 'prepared');
+    for (const later of ['checked', 'approved']) {
+      csrf = await login(`order-${later}`); await load();
+      await expect(page.locator(`[data-internal-field="signoff.gscTet.${later}"]`)).toBeDisabled();
+      const before = await repository.findById(record.id), jobCount = jobs.length;
+      await patch({ internalReview: { signoff: { gscTet: { [later]: true } } } }, 400);
+      assert.deepEqual(await repository.findById(record.id), before);
+      assert.equal(jobs.length, jobCount, 'Rejected out-of-order step never queues mail');
+    }
+    report.checks.push('Assigned Checker and Approver cannot skip Prepared in UI or direct API; rejected writes never queue mail');
     for (const [index, action] of actions.entries()) {
       csrf = await login(`order-${action}`); await load();
       const current = page.locator(`[data-internal-field="signoff.gscTet.${action}"]`);
       await expect(current).toBeEnabled();
       for (const other of actions.filter(value => value !== action)) await expect(page.locator(`[data-internal-field="signoff.gscTet.${other}"]`)).toBeDisabled();
-      const skipped = index === 0 ? 'approved' : 'prepared';
+      const skipped = index < 2 ? 'approved' : 'prepared';
       const before = await repository.findById(record.id);
-      await patch({ internalReview: { signoff: { gscTet: { [skipped]: true } } } }, 403);
+      await patch({ internalReview: { signoff: { gscTet: { [skipped]: before.internalReview.signoff?.gscTet?.[skipped] !== true } } } }, 403);
       assert.deepEqual(await repository.findById(record.id), before, 'Wrong signer cannot mutate a different action');
       await current.check();
       const saving = page.waitForResponse(response => response.url().endsWith(`/api/pcns/${record.id}`) && response.request().method() === 'PATCH');
@@ -131,6 +149,7 @@ async function main() {
       assert.equal(jobs.at(-1).to, next ? `${next}@example.test` : 'engineering-prepared@example.test');
       assert.match(jobs.at(-1).message, new RegExp(`GSC/TET ${action[0].toUpperCase()}${action.slice(1)}`));
       assert.match(jobs.at(-1).subject, new RegExp(next ? `GSC/TET ${next[0].toUpperCase()}${next.slice(1)}` : 'Prod.Eng/TET Prepared'));
+      await assertNextAction(next ? 'gscTet' : 'prodEngTet', next || 'prepared');
     }
     report.checks.push('Three distinct GSC users sign only their assigned step; actual outbox plans hand off Prepared → Checked → Approved → next department Prepared with correct recipients');
     csrf = await login('admin');
@@ -139,14 +158,27 @@ async function main() {
     assert.deepEqual(await repository.findById(record.id), beforeSkip);
     report.checks.push('Administrator cannot skip next department Prepared prerequisites');
     const history = (await repository.getRevisions(record.id)).toReversed();
-    const signEvents = history.filter(entry => entry.changes.some(change => /^internalReview\.signoff\.gscTet\.(prepared|checked|approved)$/.test(change.path)));
+    const signEvents = history.filter(entry => entry.changes.some(change => change.after === true && /^internalReview\.signoff\.gscTet\.(prepared|checked|approved)$/.test(change.path)));
     assert.equal(signEvents.length, 3);
-    assert.deepEqual(signEvents.map(entry => entry.actor), actions.map(action => `Order ${action}`));
+    assert.deepEqual(signEvents.map(entry => entry.actor), actions.map(action => `user:order-${action}-id`));
+    await load();
+    for (const action of actions) {
+      await expect(page.locator(`[data-internal-field="signoff.gscTet.${action}"]`).locator('..').locator('.signoff-handwritten-name')).toHaveText('Order');
+      await expect(page.locator(`[data-internal-field="signoff.gscTet.${action}"]`).locator('..')).toHaveAttribute('data-signature-tooltip',
+        `GSC/TET ${action[0].toUpperCase()}${action.slice(1)}\nSigned by: Order ${action}\nDate: ${record.internalReview.signoff.gscTet[`${action}Date`]}`);
+    }
+    await page.screenshot({ path: path.resolve('test-results/signing-order-signed-desktop.png'), fullPage: true });
+    await page.emulateMedia({ media: 'print' }); await assertPhysicalOrder();
+    await page.pdf({ path: path.resolve('test-results/signing-order-signed-print.pdf'), printBackground: true, preferCSSPageSize: true });
+    await page.emulateMedia({ media: 'screen' }); await page.setViewportSize({ width: 390, height: 844 }); await assertPhysicalOrder();
+    await page.screenshot({ path: path.resolve('test-results/signing-order-signed-mobile.png'), fullPage: true });
     const legacy = await repository.findById(historical.id);
     assert.deepEqual(legacy.internalReview.signoff, legacyReview.signoff);
     record = legacy; await load();
     await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]')).toBeChecked();
     await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]').locator('..').locator('.signoff-handwritten-name')).toContainText('Legacy');
+    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]').locator('..')).toHaveAttribute('data-signature-tooltip',
+      'GSC/TET Approved\nSigned by: Legacy Approver\nDate: 2026-01-01');
     report.checks.push('History records correct actor sequence; historical Approved flag, name and date stay attached to Approved');
     report.outbox = jobs.map(job => ({ to: job.to, subject: job.subject }));
     assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []);

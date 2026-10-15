@@ -32,14 +32,14 @@ function flatten(value, prefix = '') {
 const at = (value, path) => path.split('.').reduce((obj, key) => obj?.[key], value);
 const isEmpty = value => value === false || value === '' || value === null || value === undefined;
 const routeGroups = (risk, review = {}) => ['signoff.gscTet','signoff.prodEngTet','signoff.qaTet',...(risk === 'RL0' || review.tapbu?.noNeed === true ? [] : ['tapbu.gsc','tapbu.qa']),'qateFinal.signoff'];
-const complete = (review, group) => ['approved','checked','prepared'].every(action => at(review, `${group}.${action}`) === true);
+const complete = (review, group) => actions.every(action => at(review, `${group}.${action}`) === true);
 
 function canEditReview(user, path) {
   const signature = signaturePath(path);
   if (signature) return canSign(user, signature.department, signature.action);
   const stage = Object.keys(stageDepartments).find(value => path === value || path.startsWith(`${value}.`));
   if (stage && path !== `${stage}.comment`) return false;
-  if (path.startsWith('qateFinal.')) return canSign(user, 'qaTet', 'prepared');
+  if (path.startsWith('qateFinal.')) return canSign(user, 'qaTet', 'approved');
   if (hasRole(user, 'admin', 'reviewer')) return true;
   if (path.startsWith('supplierSignoff.')) return hasRole(user, 'supplier');
   if (/^signoff\.gscTet\./.test(path) || /^(materialCodeDescription|docs\.|tapbu\.(need|noNeed|comment))/.test(path)) return hasRole(user, 'gsc');
@@ -95,15 +95,19 @@ function assertReviewUpdate(before = {}, after = {}, user, risk) {
   if (after.tapbu?.noNeed === true && ['tapbu.gsc','tapbu.qa'].some(group => actions.some(action => at(after, `${group}.${action}`) === true))) throw new ApiError(400, 'No-need cannot include TaPBU signoffs');
   for (let index = 0; index < groups.length; index++) {
     const group = groups[index];
-    const flags = ['approved','checked','prepared'];
-    for (let action = 0; action < flags.length; action++) {
-      if (at(after, `${group}.${flags[action]}`) !== true) continue;
-      if (action > 0 && at(after, `${group}.${flags[action - 1]}`) !== true) throw new ApiError(400, 'Complete signoff prerequisites first');
-      if (index > 0 && !complete(after, groups[index - 1])) throw new ApiError(400, 'Complete the preceding approval group first');
+    for (let action = 0; action < actions.length; action++) {
+      if (at(after, `${group}.${actions[action]}`) !== true) continue;
+      const retained = at(before, `${group}.${actions[action]}`) === true;
+      const missingRequired = path => at(after, path) !== true && (!retained || at(before, path) === true);
+      // Historical gaps remain readable, but a retained signature cannot lose existing prerequisites.
+      if (actions.slice(0, action).some(step => missingRequired(`${group}.${step}`))) throw new ApiError(400, 'Complete signoff prerequisites first');
+      const previousGroups = routeGroups(risk, before);
+      const priorGroups = [...new Set([...groups.slice(0, index), ...(retained ? previousGroups.slice(0, previousGroups.indexOf(group)) : [])])];
+      if (priorGroups.some(prior => actions.some(step => missingRequired(`${prior}.${step}`)))) throw new ApiError(400, 'Complete the preceding approval group first');
       if (group.startsWith('tapbu.') && !after.tapbu?.need) throw new ApiError(400, 'TaPBU requirement must be selected before signoff');
     }
   }
-  if (risk === 'RL0' && ['tapbu.gsc','tapbu.qa'].some(group => ['approved','checked','prepared'].some(action => at(after, `${group}.${action}`)))) throw new ApiError(400, 'RL0 cannot include TaPBU signoffs');
+  if (risk === 'RL0' && ['tapbu.gsc','tapbu.qa'].some(group => actions.some(action => at(after, `${group}.${action}`)))) throw new ApiError(400, 'RL0 cannot include TaPBU signoffs');
 }
 
 function assertStatusPermission(record, nextStatus, user) {
@@ -113,8 +117,9 @@ function assertStatusPermission(record, nextStatus, user) {
     throw new ApiError(403, 'This workflow action requires an internal reviewer');
   }
   if (['approved','rejected','closed'].includes(nextStatus)) {
-    if (!canSign(user, 'qaTet', 'prepared')) throw new ApiError(403, 'Final judgment requires the QA/TET Prepared assignment');
-    if (!complete(record.internalReview || {}, 'qateFinal.signoff')) throw new ApiError(400, 'Complete final signoffs before final judgment');
+    if (!canSign(user, 'qaTet', 'approved')) throw new ApiError(403, 'Final judgment requires the QA/TET Approved assignment');
+    const review = record.internalReview || {};
+    if (!routeGroups(record.riskLevel, review).every(group => complete(review, group))) throw new ApiError(400, 'Complete all required signoffs before final judgment');
     if (nextStatus === 'approved' && !record.internalReview?.qateFinal?.approve) throw new ApiError(400, 'Record the approval judgment first');
     if (nextStatus === 'rejected' && !record.internalReview?.qateFinal?.reject) throw new ApiError(400, 'Record the rejection judgment first');
     if (nextStatus === 'closed' && !record.internalReview?.qateFinal?.approve && !record.internalReview?.qateFinal?.reject) throw new ApiError(400, 'Record the final judgment before closure');

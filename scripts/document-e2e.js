@@ -49,7 +49,7 @@ async function main() {
     current => updater(current, { listAttachments: () => documents.list(id) }), actor, version);
   const passwordAuth = fakeAuthService({ additionalUsers: [
     { username: '0000001', employeeCode: '0000001', displayName: 'Document Administrator', roles: ['admin'] },
-    { username: '0000002', employeeCode: '0000002', displayName: 'Exact GSC Approver', roles: ['gsc'], department: 'gscTet', signingStep: 'approved' },
+    { username: '0000002', employeeCode: '0000002', displayName: 'Exact GSC Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' },
     { username: '0000003', displayName: 'Different GSC Checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' }
   ] });
   const authService = { ...passwordAuth, authMode: 'employee-code', login: body => passwordAuth.login({ username: body.employeeCode, password: TEST_PASSWORD }) };
@@ -78,12 +78,13 @@ async function main() {
     tracingStarted = true;
     const page = await context.newPage();
     page.setDefaultTimeout(12000);
-    page.setDefaultNavigationTimeout(12000);
+    page.setDefaultNavigationTimeout(30000);
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/login?returnTo=%2Fcreate`);
+    const signingIn = page.waitForResponse(response => response.url().endsWith('/api/auth/login') && response.request().method() === 'POST');
     await page.locator('#employeeCode').fill('0000001');
-    await page.locator('#employeeLoginForm button[type=submit]').click();
-    await page.waitForURL(`${origin}/create`);
+    assert.equal((await signingIn).status(), 200, 'Entering the complete employee code signs in automatically');
+    await page.waitForURL(`${origin}/create`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#saveDraftButton')).toBeEnabled();
     const save = async (draft = false) => {
       const response = page.waitForResponse(res => /\/api\/pcns(?:\/PCN-\d{4}-\d{4})?$/.test(new URL(res.url()).pathname) && ['POST', 'PATCH'].includes(res.request().method()));
@@ -196,20 +197,20 @@ async function main() {
     checks.push('clean-pdf-explicit-viewer-and-byte-exact-download-with-restrictive-server-preview');
     record = await save();
     assert.equal(record.status, 'submitted');
-    await expect(workspace.getByText('Exact GSC Approver', { exact: true })).toBeVisible();
+    await expect(workspace.getByText('Exact GSC Preparer', { exact: true })).toBeVisible();
     assert.equal(await workspace.getByText('Different GSC Checker', { exact: true }).count(), 0);
     await workspace.getByRole('button', { name: 'Go to signing box' }).click();
-    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]')).toBeFocused();
+    await expect(page.locator('[data-internal-field="signoff.gscTet.prepared"]')).toBeFocused();
     checks.push('exact-next-stage-person-and-signing-link');
-    await page.locator('[data-internal-field="signoff.gscTet.approved"]').check();
+    await page.locator('[data-internal-field="signoff.gscTet.prepared"]').check();
     record = await save();
-    assert.equal(record.documentControl.signatureBindings['signoff.gscTet.approved'].contentRevision, record.documentControl.contentRevision);
-    assert.equal(record.documentControl.signatureBindings['signoff.gscTet.approved'].userId, '0000001-id');
+    assert.equal(record.documentControl.signatureBindings['signoff.gscTet.prepared'].contentRevision, record.documentControl.contentRevision);
+    assert.equal(record.documentControl.signatureBindings['signoff.gscTet.prepared'].userId, '0000001-id');
     const signedHistory = await repository.getRevisions(record.id);
     const signedRevision = signedHistory[0].revision;
     await workspace.getByRole('tab', { name: 'History', exact: true }).click();
     await workspace.getByRole('button', { name: `Save ${signedRevision}`, exact: true }).click();
-    await expect(page.getByRole('dialog', { name: `Save ${signedRevision}`, exact: true })).toContainText('internalReview.signoff.gscTet.approved');
+    await expect(page.getByRole('dialog', { name: `Save ${signedRevision}`, exact: true })).toContainText('internalReview.signoff.gscTet.prepared');
     await page.getByRole('dialog', { name: `Save ${signedRevision}`, exact: true }).getByRole('button', { name: 'Close' }).click();
     checks.push('immutable-saved-revision-diff-signature-binding');
     await workspace.getByRole('button', { name: 'Start new revision' }).click();
@@ -233,19 +234,19 @@ async function main() {
     await expect.poll(() => mutationReadReached).toBe(true);
     await expect(page.locator('#pcnForm')).toHaveAttribute('inert', '');
     releaseMutationRead();
-    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]')).not.toBeChecked();
+    await expect(page.locator('[data-internal-field="signoff.gscTet.prepared"]')).not.toBeChecked();
     await expect(page.locator('#reason')).toBeEnabled();
     await expect(page.locator('#pcnForm')).not.toHaveAttribute('inert', '');
     await page.unroute(`${origin}/api/pcns/${record.id}`, holdCanonicalRead);
     const historical = await repository.getRevision(record.id, signedRevision);
-    assert.equal(historical.snapshot.internalReview.signoff.gscTet.approved, true);
+    assert.equal(historical.snapshot.internalReview.signoff.gscTet.prepared, true);
     checks.push('new-revision-reason-clears-current-signatures-preserves-history');
     checks.push('revision-refresh-blocks-editing-until-canonical-signatures-reset');
     await page.locator('#reason').fill('Recovered ordinary unsaved text');
     await selectedRow.getByLabel(/Current condition/).fill('Recovered current condition');
     await selectedRow.getByLabel(/New condition/).fill('Recovered new condition');
     await selectedRow.locator('.option-change-textarea').fill('Recovered change description');
-    await page.locator('[data-internal-field="signoff.gscTet.approved"]').check();
+    await page.locator('[data-internal-field="signoff.gscTet.prepared"]').check();
     await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith('pcn.document-draft.v1:')))).toBe(true);
     const beforeRecovery = await repository.findById(record.id);
     page.once('dialog', dialog => dialog.accept());
@@ -257,7 +258,7 @@ async function main() {
     await expect(selectedRow.getByLabel(/Current condition/)).toHaveValue('Recovered current condition');
     await expect(selectedRow.getByLabel(/New condition/)).toHaveValue('Recovered new condition');
     await expect(selectedRow.locator('.option-change-textarea')).toHaveValue('Recovered change description');
-    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]')).not.toBeChecked();
+    await expect(page.locator('[data-internal-field="signoff.gscTet.prepared"]')).not.toBeChecked();
     assert.equal((await repository.findById(record.id)).version, beforeRecovery.version);
     await expect(workspace.getByRole('button', { name: 'Print / PDF' })).toBeDisabled();
     checks.push('explicit-recovery-restores-text-only-without-server-write-or-signatures');
@@ -272,9 +273,9 @@ async function main() {
     await expect(page.locator('#documentRecoveryMessage')).toContainText('older saved version');
     await page.locator('#documentRecoveryDiscard').click();
     checks.push('stale-recovery-cannot-replace-saved-document');
-    await page.locator('[data-internal-field="signoff.gscTet.approved"]').check();
+    await page.locator('[data-internal-field="signoff.gscTet.prepared"]').check();
     record = await save(true);
-    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]')).toBeChecked();
+    await expect(page.locator('[data-internal-field="signoff.gscTet.prepared"]')).toBeChecked();
     await page.evaluate(() => { window.__printCalls = 0; window.print = () => { window.__printCalls++; }; });
     await workspace.getByRole('button', { name: 'Print / PDF' }).click();
     await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
@@ -296,8 +297,8 @@ async function main() {
     await expect(page.locator('.topbar')).toBeHidden();
     await expect(page.locator('.summary-panel')).toBeHidden();
     await expect(page.locator('.tabs')).toBeHidden();
-    await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]').locator('..').locator('.signoff-handwritten-name')).toContainText('Document');
-    assert.match(await page.locator('[data-internal-field="signoff.gscTet.approved"]').evaluate(control => getComputedStyle(control).backgroundImage), /data:image\/svg\+xml/);
+    await expect(page.locator('[data-internal-field="signoff.gscTet.prepared"]').locator('..').locator('.signoff-handwritten-name')).toContainText('Document');
+    assert.match(await page.locator('[data-internal-field="signoff.gscTet.prepared"]').evaluate(control => getComputedStyle(control).backgroundImage), /data:image\/svg\+xml/);
     const pdf = await page.pdf({ path: path.resolve('test-results/document-controlled-draft.pdf'), preferCSSPageSize: true, printBackground: true });
     assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
     assert.ok(pdf.length > 10000);

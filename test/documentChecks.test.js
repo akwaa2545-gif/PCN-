@@ -51,15 +51,15 @@ test('sample date is an advisory item only when sample has been submitted', () =
   assert.equal(buildChecks(full,[]).items.some(item=>item.key==='sampleSubmittedDate'),false);
 });
 test('action follows ordered signatures, filters assigned active people, and exposes no private user data', () => {
-  const users=[{id:'a',displayName:'Ann',employeeCode:'001',roles:['gsc'],department:'gscTet',signingStep:'approved',isActive:true,email:'private'},
+  const users=[{id:'a',displayName:'Ann',employeeCode:'001',roles:['gsc'],department:'gscTet',signingStep:'prepared',isActive:true,email:'private'},
     {id:'b',displayName:'Bob',roles:['gsc'],department:'gscTet',signingStep:'checked',isActive:true},
-    {id:'c',displayName:'Inactive',roles:['gsc'],department:'gscTet',signingStep:'approved',isActive:false}];
+    {id:'c',displayName:'Inactive',roles:['gsc'],department:'gscTet',signingStep:'prepared',isActive:false}];
   const action=buildAction(full,admin,users);
-  assert.equal(action.field,'internalReview.signoff.gscTet.approved');
+  assert.equal(action.field,'internalReview.signoff.gscTet.prepared');
   assert.equal(action.canAct,true);
   assert.deepEqual(action.people,[{displayName:'Ann',employeeCode:'001'}]);
   assert.equal(buildAction(full,users[1],users).canAct,false);
-  const signed={...full,internalReview:{signoff:{gscTet:{approved:true}}}};
+  const signed={...full,internalReview:{signoff:{gscTet:{prepared:true}}}};
   assert.equal(buildAction(signed,users[1],users).signingStep,'checked');
 });
 test('supplier sees no reviewer enumeration and terminal actions are empty', () => {
@@ -74,6 +74,6 @@ test('supplier sees no reviewer enumeration and terminal actions are empty', () 
 test('RL0 and explicit TaPBU no-need skip TaPBU signatures', () => {
   const signed={gscTet:{approved:true,checked:true,prepared:true},prodEngTet:{approved:true,checked:true,prepared:true},qaTet:{approved:true,checked:true,prepared:true}};
   for(const record of [{...full,riskLevel:'RL0',internalReview:{signoff:signed}},{...full,internalReview:{signoff:signed,tapbu:{need:false,noNeed:true}}}]) {
-    assert.equal(buildAction(record,admin,[]).field,'internalReview.qateFinal.signoff.approved');
+    assert.equal(buildAction(record,admin,[]).field,'internalReview.qateFinal.signoff.prepared');
   }
 });

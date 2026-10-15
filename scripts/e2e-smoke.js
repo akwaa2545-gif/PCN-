@@ -180,7 +180,7 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
       const id='PCN-2026-9001';
       const next={...record,...payload,id,version:String(writes+1).padStart(16,'0'),mailRoutingPolicyVersion:2};
       record=writes===0?{...next,internalReview:{...next.internalReview,signoff:{...next.internalReview.signoff,
-        gscTet:{...next.internalReview.signoff.gscTet,approved:true,checked:true,prepared:false}}}}:next;
+        gscTet:{...next.internalReview.signoff.gscTet,approved:false,checked:false,prepared:false}}}}:next;
       const notification=outcomes[writes++]||outcomes[3];
       assert(notification,'Unexpected extra PCN save');
       return route.fulfill({status:request.method()==='POST'?201:200,json:{success:true,data:{...record,notification}}});
@@ -299,7 +299,7 @@ async function verifyHandwrittenSignoffs(browser) {
   repository.getMasterData = async () => ({...masterData,versionId:1});
   const service = new PcnService(repository);
   const author = {id:'pen-author-id',username:'pen-author',displayName:'Alexandertheodorewilliamchristopher Supplier',roles:['supplier']};
-  const signer = {id:'pen-signer-id',username:'pen-signer',displayName:'WATCHARAPHONG Approver',roles:['gsc'],department:'gscTet',signingStep:'approved'};
+  const signer = {id:'pen-signer-id',username:'pen-signer',displayName:'WATCHARAPHONG Preparer',roles:['gsc'],department:'gscTet',signingStep:'prepared'};
   const record = await service.create({...unsignedPayload,status:'draft'},'isolated-fixture',author);
   await repository.seedHistoricalReview(record.id,{supplierSignoff:{approved:{checked:true,date:'2026-10-01'}}});
   const authService = fakeAuthService({additionalUsers:[author,signer,
@@ -349,8 +349,8 @@ async function verifyHandwrittenSignoffs(browser) {
       await page.locator('#submitButton:not([disabled])').waitFor();
     };
     await login(signer.username);
-    const approved = page.locator('[data-internal-field="signoff.gscTet.approved"]');
-    const signedLabel = approved.locator('..');
+    const prepared = page.locator('[data-internal-field="signoff.gscTet.prepared"]');
+    const signedLabel = prepared.locator('..');
     const historical = page.locator('[data-internal-field="supplierSignoff.approved.checked"]').locator('..');
     const tooltip = page.locator('#signatureTooltip');
     const expectTooltip = async (label, patterns) => {
@@ -379,16 +379,16 @@ async function verifyHandwrittenSignoffs(browser) {
     await hideTooltip();
     await signedLabel.hover();
     assert.equal(await tooltip.isVisible(),false,'Unchecked signatures do not show signed details');
-    await approved.focus();
+    await prepared.focus();
     await page.keyboard.press('Space');
-    assert.equal(await approved.isChecked(),true,'The pen checkbox remains keyboard-operable');
+    assert.equal(await prepared.isChecked(),true,'The pen checkbox remains keyboard-operable');
     const pendingFit = await assertNameFits(signedLabel,'WATCHARAPHONG','Pending signer name');
     assert.ok(pendingFit.font<11,'A long name shrinks below the normal handwriting size');
     assert.equal(await signedLabel.evaluate(label=>label.classList.contains('is-unsaved-signoff')),true);
-    assert.match(await approved.getAttribute('aria-label'),/selected by WATCHARAPHONG Approver.*not saved/);
-    assert.match(await approved.evaluate(input=>getComputedStyle(input).backgroundImage),/svg/);
+    assert.match(await prepared.getAttribute('aria-label'),/selected by WATCHARAPHONG Preparer.*not saved/);
+    assert.match(await prepared.evaluate(input=>getComputedStyle(input).backgroundImage),/svg/);
     await tooltip.waitFor({state:'visible'});
-    assert.match(await tooltip.textContent(),/Selected by:\s*WATCHARAPHONG Approver/,'Keyboard selection exposes pending details');
+    assert.match(await tooltip.textContent(),/Selected by:\s*WATCHARAPHONG Preparer/,'Keyboard selection exposes pending details');
     assert.match(await tooltip.textContent(),/Not saved yet/);
     assert.doesNotMatch(await tooltip.textContent(),/Signed by:|Date:/,'Pending previews never claim a saved signer or date');
     await page.mouse.move(0,0);
@@ -396,20 +396,20 @@ async function verifyHandwrittenSignoffs(browser) {
     assert.equal(await tooltip.isVisible(),true,'A focused signing checkbox retains its tooltip when the pointer leaves');
     await page.keyboard.press('Escape');
     await tooltip.waitFor({state:'hidden'});
-    assert.equal(await approved.getAttribute('aria-describedby'),null,'Closing the tooltip removes stale accessible descriptions');
-    await expectTooltip(signedLabel,[/Selected by:\s*WATCHARAPHONG Approver/,/Not saved yet/]);
+    assert.equal(await prepared.getAttribute('aria-describedby'),null,'Closing the tooltip removes stale accessible descriptions');
+    await expectTooltip(signedLabel,[/Selected by:\s*WATCHARAPHONG Preparer/,/Not saved yet/]);
     await hideTooltip();
     const save = page.waitForResponse(response=>response.url().endsWith('/api/pcns/'+record.id)&&response.request().method()==='PATCH');
     await page.locator('#saveDraftButton').click();
     const signerResponse = await save;
     assert.equal(signerResponse.status(),200,await signerResponse.text());
-    await page.locator('#submissionView [aria-label="GSC/TET Approved, signed by WATCHARAPHONG Approver"]').waitFor();
+    await page.locator('#submissionView [aria-label="GSC/TET Prepared, signed by WATCHARAPHONG Preparer"]').waitFor();
     await assertNameFits(signedLabel,'WATCHARAPHONG','Saved signer name');
     assert.equal(await signedLabel.evaluate(label=>label.classList.contains('is-unsaved-signoff')),false);
-    assert.equal((await repository.findById(record.id)).internalReview.signoff.gscTet.approvedName,signer.displayName);
-    const savedSigningDate=(await repository.findById(record.id)).internalReview.signoff.gscTet.approvedDate;
+    assert.equal((await repository.findById(record.id)).internalReview.signoff.gscTet.preparedName,signer.displayName);
+    const savedSigningDate=(await repository.findById(record.id)).internalReview.signoff.gscTet.preparedDate;
     assert.match(savedSigningDate,/^\d{4}-\d{2}-\d{2}$/,'The browser fixture receives a server-stamped signing date');
-    await expectTooltip(signedLabel,[/Signed by:\s*WATCHARAPHONG Approver/,new RegExp('Date:\\s*'+savedSigningDate)]);
+    await expectTooltip(signedLabel,[/Signed by:\s*WATCHARAPHONG Preparer/,new RegExp('Date:\\s*'+savedSigningDate)]);
     await page.screenshot({path:path.resolve('test-results/signature-tooltip-desktop.png')});
     await page.getByRole('button',{name:'Workflow',exact:true}).click();
     await tooltip.waitFor({state:'hidden'});
@@ -419,7 +419,7 @@ async function verifyHandwrittenSignoffs(browser) {
     assert.ok(narrowedFit.font<pendingFit.font,'A narrowed cell dynamically reduces the name size');
     await signedLabel.evaluate(label=>{label.style.removeProperty('width');});
     await page.waitForFunction(previous=>{
-      const name=document.querySelector('[data-internal-field="signoff.gscTet.approved"]').closest('label').querySelector('.signoff-handwritten-name');
+      const name=document.querySelector('[data-internal-field="signoff.gscTet.prepared"]').closest('label').querySelector('.signoff-handwritten-name');
       return parseFloat(getComputedStyle(name).fontSize)>previous;
     },narrowedFit.font);
     await assertNameFits(signedLabel,'WATCHARAPHONG','Name after its cell expands');
@@ -429,7 +429,7 @@ async function verifyHandwrittenSignoffs(browser) {
     await assertNameFits(signedLabel,'WATCHARAPHONG','Name after Submission becomes visible');
     await page.locator('.signoff-box[data-role="gscTet"]').screenshot({path:path.resolve('test-results/handwritten-signoff-desktop.png')});
     await page.emulateMedia({media:'print'});
-    assert.match(await approved.evaluate(input=>getComputedStyle(input).backgroundImage),/svg/,'Pen marks remain present in print');
+    assert.match(await prepared.evaluate(input=>getComputedStyle(input).backgroundImage),/svg/,'Pen marks remain present in print');
     await assertNameFits(signedLabel,'WATCHARAPHONG','Printed signer name');
     await page.emulateMedia({media:'screen'});
     await page.setViewportSize({width:390,height:844});
@@ -439,14 +439,14 @@ async function verifyHandwrittenSignoffs(browser) {
     await context.clearCookies();
     await login('pen-viewer');
     await assertNameFits(signedLabel,'WATCHARAPHONG','A different viewer sees the original signer');
-    assert.equal(await approved.isDisabled(),true,'Pen styling does not grant signing permissions');
+    assert.equal(await prepared.isDisabled(),true,'Pen styling does not grant signing permissions');
     assert.equal(await historical.locator('.signoff-handwritten-name').isVisible(),false);
-    await expectTooltip(signedLabel,[/Signed by:\s*WATCHARAPHONG Approver/,new RegExp('Date:\\s*'+savedSigningDate)]);
+    await expectTooltip(signedLabel,[/Signed by:\s*WATCHARAPHONG Preparer/,new RegExp('Date:\\s*'+savedSigningDate)]);
     assert.doesNotMatch(await tooltip.textContent(),/Different Viewer/,'A disabled signature still reports its original signer');
     await hideTooltip();
     await signedLabel.focus();
     await tooltip.waitFor({state:'visible'});
-    assert.match(await tooltip.textContent(),/Signed by:\s*WATCHARAPHONG Approver/,'Read-only signatures remain available to keyboard users');
+    assert.match(await tooltip.textContent(),/Signed by:\s*WATCHARAPHONG Preparer/,'Read-only signatures remain available to keyboard users');
     await page.keyboard.press('Escape');
     await tooltip.waitFor({state:'hidden'});
     await expectTooltip(historical,[/Signed by:\s*Not recorded/,/Date:\s*2026-10-01/]);
@@ -474,7 +474,7 @@ async function verifyHandwrittenSignoffs(browser) {
     await page.locator('.pcn-header-signatures').screenshot({path:path.resolve('test-results/handwritten-supplier-signoff.png')});
     await context.clearCookies();
     await login('pen-admin');
-    assert.equal(await approved.isDisabled(),false,'Administrators can sign without a department or signing-step assignment');
+    assert.equal(await prepared.isDisabled(),false,'Administrators can sign without a department or signing-step assignment');
     const adminChecked = page.locator('[data-internal-field="signoff.gscTet.checked"]');
     assert.equal(await adminChecked.isDisabled(),false,'An administrator can continue a completed prior signoff');
     assert.equal(await page.locator('[data-internal-field="signoff.prodEngTet.approved"]').isDisabled(),true,'Administrators still follow preceding-department prerequisites');
@@ -505,7 +505,7 @@ async function verifyHandwrittenSignoffs(browser) {
       const signature = group.split('.').reduce((value,key)=>value[key],adminSigned.internalReview);
       assert.equal(signature.approved&&signature.checked&&signature.prepared,true,group);
     }
-    assert.equal(adminSigned.internalReview.signoff.gscTet.approvedName,signer.displayName,'Administrator access preserves existing signer attribution');
+    assert.equal(adminSigned.internalReview.signoff.gscTet.preparedName,signer.displayName,'Administrator access preserves existing signer attribution');
     assert.equal(adminSigned.internalReview.signoff.gscTet.checkedName,'Morgan Administrator');
     assert.equal(adminSigned.internalReview.qateFinal.approve,true);
     await page.reload();
@@ -862,7 +862,7 @@ async function main() {
     assert.equal(await page.locator('#notificationReloadButton').isVisible(),false,'Reload is offered only after a conflict');
     assert.equal(await page.locator('.notification-department').count(),5);
     for(const department of ['gscTet','prodEngTet','qaTet','gscTapbu','qaTapbu']) {
-      assert.deepEqual(await page.locator(`[data-department="${department}"] [data-notification-group]`).evaluateAll(groups=>groups.map(group=>group.dataset.notificationGroup)),['approved','checked','prepared'].map(action=>`department.${department}.${action}`));
+      assert.deepEqual(await page.locator(`[data-department="${department}"] [data-notification-group]`).evaluateAll(groups=>groups.map(group=>group.dataset.notificationGroup)),['prepared','checked','approved'].map(action=>`department.${department}.${action}`));
     }
     assert.equal(await page.locator('[data-department=qaTet] .notification-department-header h3').textContent(),'QA/TET');
     assert.equal(await page.locator('#notificationGroups [data-notification-group="qateFinal.signoff"]').count(),0);
@@ -1074,7 +1074,7 @@ async function main() {
     markPhase('notification-routing-save');
     await page.locator('#notificationSaveButton').click();
     await page.locator('#mailRoutingMessage').filter({hasText:'Mail routing saved.'}).waitFor();
-    const savedRouting=(await repository.getNotificationSettings()).groups[0];
+    const savedRouting=(await repository.getNotificationSettings()).groups.find(group=>group.key==='department.gscTet.approved');
     assert.equal(savedRouting.emails,'reviewer@example.test');
     assert.deepEqual(savedRouting.recipients,[{email:'reviewer@example.test',displayName:'Browser Reviewer',jobTitle:'Quality Reviewer',department:'Supplier Quality',photo:directoryPhoto}]);
     const storedSettings=await repository.getNotificationSettings();
@@ -1183,9 +1183,9 @@ async function main() {
     await page.locator('#adminOverviewSelected').filter({hasText:record.id}).waitFor();
     const selectedPreview=await page.locator('#adminDetailPreview').textContent();
     await page.locator('#adminMailRoutingButton').click();
-    assert.equal(await page.locator('[data-recipient-email]').first().inputValue(),'reviewer@example.test');
-    assert.equal(await page.locator('.notification-person-meta').first().textContent(),'Quality Reviewer - Supplier Quality','Saved directory metadata survives reload');
-    assert.equal(await page.locator('.notification-person-avatar img').first().getAttribute('src'),directoryPhoto,'Saved inline photo survives reload');
+    assert.equal(await approvedList.locator('[data-recipient-email]').inputValue(),'reviewer@example.test');
+    assert.equal(await approvedList.locator('.notification-person-meta').textContent(),'Quality Reviewer - Supplier Quality','Saved directory metadata survives reload');
+    assert.equal(await approvedList.locator('.notification-person-avatar img').getAttribute('src'),directoryPhoto,'Saved inline photo survives reload');
     await page.locator('#notificationHealthRefreshButton').click();
     await page.locator('#notificationHealthStatus').filter({hasText:'Unavailable'}).waitFor();
     assert.equal(await page.locator('#adminDetailPreview').textContent(),selectedPreview,'Health failures preserve current PCN selection');
@@ -1271,7 +1271,7 @@ async function main() {
     assert.equal(await page.locator('#employeeUserForm').isVisible(),false,'Employee creation opens in a popup');
     await page.locator('#usersAddRoleButton').click();
     assert.deepEqual(await page.locator('#employeeRole option').evaluateAll(options=>options.map(option=>({value:option.value,label:option.textContent}))),[
-      {value:'',label:'Select role'},{value:'admin',label:'Administrator'},{value:'developer',label:'Developer'},{value:'approved',label:'Approved'},{value:'checked',label:'Checked'},{value:'prepared',label:'Prepared'}
+      {value:'',label:'Select role'},{value:'admin',label:'Administrator'},{value:'developer',label:'Developer'},{value:'prepared',label:'Prepared'},{value:'checked',label:'Checked'},{value:'approved',label:'Approved'}
     ],'One PCN role select contains Administrator, Developer and the three signing choices');
     assert.equal(await page.locator('#employeeSigningStep').count(),0,'There is no duplicate signing-step select');
     const employeeSearch=page.locator('#employeeSearch');

@@ -49,6 +49,8 @@ jobs:
         run: npm run test:auto-refresh
       - name: Isolated Portal timeline browser tests
         run: npm run test:timeline
+      - name: Isolated signing sequence and notification browser tests
+        run: npm run test:signing-order
       - name: Isolated Records dashboard browser tests
         run: npm run test:records-dashboard
       - name: Isolated Developer access browser tests
