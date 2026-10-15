@@ -1,8 +1,9 @@
 /* Keep the records action beside the list it updates. */
-.create-start-dropdown { position: relative; }
+.create-start-dropdown { position: relative; display: flex; align-items: stretch; }
+body.admin-page .topbar-actions .create-start-dropdown .create-start-link { min-width: 112px; padding-inline: 14px; border-right: 0; }
 .user-access-badge {
   display: inline-flex; align-items: center; min-height: 28px; max-width: 100%;
-  padding: 5px 10px; border: 1px solid transparent; border-radius: 5px;
+  padding: 5px 10px; border: 1px solid transparent; border-radius: 0;
   font-size: 12px; font-weight: 700; line-height: 1.4; white-space: normal; overflow-wrap: anywhere;
 }
 .user-access-badge--assigned { background: #20252b; color: #fff; border-color: #20252b; }
@@ -11,7 +12,7 @@
 .user-access-badge--pending { background: #fff3cd; color: #704f00; border-color: #e5c35d; }
 body.admin-page .topbar-actions .create-start-toggle {
   display: flex; align-items: center; justify-content: center; gap: 14px;
-  min-width: 144px; border-color: #c58c00; background: var(--mes-gold); color: #172b3d; font-weight: 700;
+  min-width: 36px; width: 36px; padding-inline: 0; border-color: #c58c00; background: var(--mes-gold); color: #172b3d; font-weight: 700;
 }
 body.admin-page .topbar-actions .create-start-toggle:hover:not(:disabled),
 body.admin-page .topbar-actions .create-start-toggle[aria-expanded="true"] { background: #ffc32c; border-color: #a57900; color: #172b3d; }
