@@ -17,7 +17,7 @@ function motion({ reduced = false, supported = true, duration = '0.16s', delay =
     clearTimeout(id) { timers.delete(id); }
   };
   vm.runInNewContext(fs.readFileSync(require.resolve('../session-client.js'), 'utf8'), { window, URL, Headers });
-  return { api: window.PCN_UI_MOTION, element, timers, listeners,
+  return { api: window.PCN_UI_MOTION, window, element, timers, listeners,
     transition(propertyName = 'opacity', target = element) { listeners.get('transitionend')?.({ propertyName, target }); },
     expire() { const timer = [...timers.values()][0]; assert.ok(timer, 'fallback is scheduled'); timer.callback(); } };
 }
@@ -69,4 +69,57 @@ test('invalidated synchronous cleanup also respects the generation guard', () =>
   const fixture = motion({ reduced: true }); let completed = 0;
   fixture.api.afterExit(fixture.element, () => completed++, { current: () => false });
   assert.equal(completed, 0); assert.equal(fixture.timers.size, 0);
+});
+
+function visibilityMotion({ reduced = false, animatable = true } = {}) {
+  const fixture = motion({ supported: false, reduced });
+  const classes = new Set(), animations = [];
+  fixture.element.hidden = true; fixture.element.inert = true;
+  fixture.element.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name) };
+  fixture.element.style = { removeProperty() {}, setProperty() {} };
+  if (animatable) fixture.element.animate = (frames, options) => {
+    let resolve; const listeners = new Map();
+    const animation = { finished: new Promise(done => { resolve = done; }), frames, options, cancelled: false,
+      addEventListener(name, callback) { listeners.set(name, callback); },
+      cancel() { this.cancelled = true; },
+      finish() { resolve(); this.onfinish?.(); listeners.get('finish')?.(); } };
+    animations.push(animation); return animation;
+  };
+  return { ...fixture, classes, animations };
+}
+const flushMotion = () => new Promise(setImmediate);
+
+test('managed dropdown visibility animates without discrete CSS and closes logically before presentation finishes', async () => {
+  const fixture = visibilityMotion();
+  fixture.api.setVisible(fixture.element, true);
+  assert.equal(fixture.element.hidden, false); assert.equal(fixture.element.inert, false);
+  assert.equal(fixture.animations.length, 1, 'ordinary WAAPI works when allow-discrete is unsupported');
+  fixture.animations[0].finish(); await flushMotion(); assert.equal(fixture.classes.size, 0);
+  fixture.api.setVisible(fixture.element, false);
+  assert.equal(fixture.element.hidden, true); assert.equal(fixture.element.inert, true);
+  assert.equal(fixture.animations.length, 2); assert(fixture.classes.size > 0, 'presentation remains while closed controls are inert');
+  fixture.animations[1].finish(); await flushMotion(); assert.equal(fixture.classes.size, 0);
+});
+
+test('rapid close/reopen cancels stale dropdown animation completion without hiding the reopened menu', async () => {
+  const fixture = visibilityMotion();
+  fixture.api.setVisible(fixture.element, true); fixture.animations[0].finish(); await flushMotion();
+  fixture.api.setVisible(fixture.element, false); const oldExit = fixture.animations.at(-1);
+  fixture.api.setVisible(fixture.element, true); const newEntry = fixture.animations.at(-1);
+  assert.equal(oldExit.cancelled, true, 'reopening cancels the obsolete exit');
+  oldExit.finish(); await flushMotion();
+  assert.equal(fixture.element.hidden, false); assert.equal(fixture.element.inert, false);
+  newEntry.finish(); await flushMotion();
+  assert.equal(fixture.element.hidden, false); assert.equal(fixture.classes.size, 0);
+});
+
+test('managed dropdowns remain immediate with reduced motion or without a browser animation API', () => {
+  for (const options of [{ reduced: true }, { animatable: false }]) {
+    const fixture = visibilityMotion(options);
+    fixture.api.setVisible(fixture.element, true);
+    assert.equal(fixture.element.hidden, false); assert.equal(fixture.element.inert, false);
+    fixture.api.setVisible(fixture.element, false);
+    assert.equal(fixture.element.hidden, true); assert.equal(fixture.element.inert, true);
+    assert.equal(fixture.animations.length, 0); assert.equal(fixture.classes.size, 0);
+  }
 });

@@ -10,6 +10,9 @@ const { memoryRepository, fakeAuthService, TEST_PASSWORD, unsignedPayload } = re
 const { mailGroups } = require('../src/mailRouting');
 const masterData = require('../src/masterData');
 const expect = baseExpect.configure({ timeout: 10000 });
+const compatibilityOnly = process.argv.includes('--compatibility-only');
+const nativeSelectOnly = process.argv.includes('--native-select-only');
+const artifactSuffix = compatibilityOnly ? '-compatibility' : nativeSelectOnly ? '-native-select' : '';
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], forbidden: [] };
 
 // Sample the browser's rendered frames, rather than trusting CSS declarations.
@@ -39,6 +42,26 @@ async function fade(surface, action, opening, label, preservedText) {
   if (opening) { assert(final.displayed && final.opacity > 0.98, `${label} finishes visible`); await expect(surface).toBeVisible(); }
   else { assert(!final.displayed, `${label} finishes removed from layout`); await expect(surface).toBeHidden(); }
 }
+// Sample concurrently with trusted input: synthetic .click() cannot open an OS picker.
+async function pickerFrames(select, action) {
+  const reading = select.evaluate(async node => {
+    const samples = [], deadline = performance.now() + 450;
+    while (performance.now() < deadline) {
+      const style = getComputedStyle(node, '::picker(select)');
+      samples.push({ opacity: Number(style.opacity), open: node.matches(':open'), display: style.display, time: performance.now() });
+      await new Promise(requestAnimationFrame);
+    }
+    return samples;
+  });
+  await action(); return reading;
+}
+async function pickerFade(select, action, opening, label) {
+  const samples = await pickerFrames(select, action);
+  report.pickers ||= []; report.pickers.push({ label, opening, frames: samples });
+  assert(samples.some(frame => frame.opacity > 0.02 && frame.opacity < 0.98), label + ' renders intermediate picker opacity on ' + (opening ? 'entry' : 'exit'));
+  assert.equal(samples.at(-1).open, opening, label + ' finishes in its expected open state');
+  if (opening) assert(samples.at(-1).opacity > 0.98, label + ' finishes opaque');
+}
 async function fit(page, surface, label) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${label}: no document horizontal overflow`);
   if (surface) assert(await surface.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= -1 && box.right <= innerWidth + 1 && box.top >= -1 && box.bottom <= innerHeight + 1 && node.scrollWidth <= node.clientWidth + 1; }), `${label}: popup fits viewport without horizontal overflow`);
@@ -60,11 +83,22 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     context = await browser.newContext({ viewport: { width: 1366, height: 768 }, reducedMotion: 'no-preference', serviceWorkers: 'block' });
     await context.tracing.start({ screenshots: true, snapshots: true });
+    if (compatibilityOnly) await context.addInitScript(() => {
+      const supports = CSS.supports.bind(CSS);
+      CSS.supports = (...args) => args.some(value => String(value).includes('transition-behavior') || String(value).includes('allow-discrete')) ? false : supports(...args);
+    });
     const login = await context.request.post(`${origin}/api/auth/login`, { headers: { origin }, data: { username: 'admin', password: TEST_PASSWORD } });
     assert.equal(login.status(), 200);
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin !== origin) { report.external.push(url.pathname); return route.abort(); }
+      if (compatibilityOnly && url.pathname.endsWith('.css')) {
+        // Model a browser which does not parse allow-discrete rules. Merely stubbing
+        // CSS.supports would leave modern Chromium's CSS engine applying the guard.
+        const file = path.join(__dirname, '..', path.basename(url.pathname));
+        const source = await fs.readFile(file, 'utf8');
+        return route.fulfill({ contentType: 'text/css', body: source.replaceAll('@supports (transition-behavior: allow-discrete)', '@supports (transition-behavior: fixture-unsupported)') });
+      }
       if (!url.pathname.startsWith('/api/')) return route.continue();
       const send = data => route.fulfill({ json: { success: true, data } });
       if (!['GET', 'HEAD'].includes(request.method())) { report.forbidden.push({ method: request.method(), path: url.pathname }); return route.abort(); }
@@ -81,7 +115,45 @@ async function main() {
     page.on('pageerror', error => report.errors.push(error.message));
     await page.goto(`${origin}/admin`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.account-trigger')).toBeVisible();
+    if (nativeSelectOnly) {
+      assert.equal(await page.evaluate(() => CSS.supports('appearance', 'base-select')), true, 'Bundled browser supports progressive native select styling');
+      const failures = [];
+      await page.locator('#adminUsersButton').click(); await page.locator('#usersCreateButton').click();
+      const cases = [['#employeeRole', 'PCN role'], ['#employeeDepartment', 'PCN department']];
+      for (const [selector, label] of cases) {
+        const select = page.locator(selector), original = await select.inputValue();
+        try { await pickerFade(select, () => select.click(), true, label); } catch (error) { failures.push(error.message); }
+        try { await pickerFade(select, () => page.keyboard.press('Escape'), false, label); } catch (error) { failures.push(error.message); }
+        await expect(select).toHaveValue(original); await expect(select).toBeFocused();
+      }
+      await page.locator('#employeeCancelButton').click(); await expect(page.locator('#employeeUserDialog')).toBeHidden();
+      const filter = page.locator('#usersRoleFilter'), original = await filter.inputValue();
+      try { await pickerFade(filter, () => filter.click(), true, 'Users role filter'); } catch (error) { failures.push(error.message); }
+      try { await pickerFade(filter, () => page.keyboard.press('Escape'), false, 'Users role filter'); } catch (error) { failures.push(error.message); }
+      await expect(filter).toHaveValue(original); await expect(filter).toBeFocused();
+      if (failures.length) throw new Error(failures.join('; '));
+      report.checks.push('Native role, department and filter pickers render entry/exit opacity frames and Escape preserves selection/focus');
+      assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []);
+      assert.deepEqual(await repository.list(), before); report.status = 'passed'; return;
+    }
     const menu = page.locator('#createStartOptions');
+    if (compatibilityOnly) {
+      assert.equal(await page.evaluate(() => CSS.supports('transition-behavior', 'allow-discrete')), false);
+      const failures = [];
+      for (const [selector, trigger, label] of [['#createStartOptions', '#createStartToggle', 'Create dropdown without discrete CSS'], ['#accountProfilePanel', '.account-trigger', 'Account dropdown without discrete CSS']]) {
+        const surface = page.locator(selector);
+        for (const [opening, action] of [[true, { selector: trigger }], [false, { kind: 'escape' }]]) {
+          try { await fade(surface, action, opening, label); }
+          catch (error) { failures.push(error.message); }
+        }
+        await expect(surface).toBeHidden(); await expect(page.locator(trigger)).toBeFocused();
+      }
+      assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []);
+      assert.deepEqual(await repository.list(), before);
+      if (failures.length) throw new Error(failures.join('; '));
+      report.checks.push('Create and profile entry/exit fades work without allow-discrete CSS, close noninteractively and preserve focus');
+      report.status = 'passed'; return;
+    }
     await fade(menu, { selector: '#createStartToggle' }, true, 'Create dropdown');
     await fade(menu, { kind: 'escape' }, false, 'Create dropdown');
     await expect(page.locator('#createStartToggle')).toBeFocused();
@@ -195,8 +267,8 @@ async function main() {
     report.status = 'passed';
   } catch (error) { report.status = 'failed'; report.failure = error.message; throw error; }
   finally {
-    await fs.writeFile(path.resolve('test-results/motion-ui-acceptance.json'), JSON.stringify(report, null, 2));
-    if (context) { await context.tracing.stop({ path: path.resolve('test-results/motion-ui-trace.zip') }); await context.close(); }
+    await fs.writeFile(path.resolve('test-results/motion-ui' + artifactSuffix + '-acceptance.json'), JSON.stringify(report, null, 2));
+    if (context) { await context.tracing.stop({ path: path.resolve('test-results/motion-ui' + artifactSuffix + '-trace.zip') }); await context.close(); }
     if (browser) await browser.close();
     if (server.listening) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
     console.log(JSON.stringify({ storage: report.storage, status: report.status, checks: report.checks, errors: report.errors, external: report.external, forbidden: report.forbidden, ...(report.failure ? { failure: report.failure } : {}) }));
