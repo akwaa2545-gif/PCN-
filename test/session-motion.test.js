@@ -75,6 +75,11 @@ function visibilityMotion({ reduced = false, animatable = true } = {}) {
   const fixture = motion({ supported: false, reduced });
   const classes = new Set(), animations = [];
   fixture.element.hidden = true; fixture.element.inert = true;
+  fixture.element.dataset = {}; const attributes = new Map();
+  fixture.element.setAttribute = (name, value) => attributes.set(name, String(value));
+  fixture.element.getAttribute = name => attributes.get(name) ?? null;
+  fixture.element.hasAttribute = name => attributes.has(name);
+  fixture.element.removeAttribute = name => attributes.delete(name);
   fixture.element.classList = { add: name => classes.add(name), remove: name => classes.delete(name), contains: name => classes.has(name) };
   fixture.element.style = { removeProperty() {}, setProperty() {} };
   if (animatable) fixture.element.animate = (frames, options) => {
@@ -122,4 +127,35 @@ test('managed dropdowns remain immediate with reduced motion or without a browse
     assert.equal(fixture.element.hidden, true); assert.equal(fixture.element.inert, true);
     assert.equal(fixture.animations.length, 0); assert.equal(fixture.classes.size, 0);
   }
+});
+
+test('repeating an unchanged dropdown state cannot flash a closed menu or restart an open fade', async () => {
+  const fixture = visibilityMotion();
+  fixture.api.setVisible(fixture.element, false);
+  assert.equal(fixture.animations.length, 0); assert.equal(fixture.classes.size, 0);
+  fixture.api.setVisible(fixture.element, true); assert.equal(fixture.animations.length, 1);
+  fixture.api.setVisible(fixture.element, true); assert.equal(fixture.animations.length, 1);
+  fixture.animations[0].finish(); await flushMotion();
+  fixture.api.setVisible(fixture.element, true); assert.equal(fixture.animations.length, 1);
+});
+
+test('a missing browser finish event cannot leave a managed dropdown presentation behind', () => {
+  const fixture = visibilityMotion();
+  fixture.api.setVisible(fixture.element, true);
+  assert.equal(fixture.timers.size, 1); assert(fixture.classes.size > 0);
+  assert([...fixture.timers.values()][0].milliseconds <= 300);
+  fixture.expire();
+  assert.equal(fixture.classes.size, 0); assert.equal(fixture.timers.size, 0);
+  assert.equal(fixture.animations[0].cancelled, true);
+  assert.equal(fixture.element.hidden, false); assert.equal(fixture.element.inert, false);
+});
+
+test('a browser that exposes an unusable animation API falls back to immediate visibility', () => {
+  const fixture = visibilityMotion();
+  fixture.element.animate = () => { throw new Error('Animation properties unsupported'); };
+  assert.doesNotThrow(() => fixture.api.setVisible(fixture.element, true));
+  assert.equal(fixture.element.hidden, false); assert.equal(fixture.element.inert, false);
+  assert.equal(fixture.classes.size, 0); assert.equal(fixture.timers.size, 0);
+  fixture.api.setVisible(fixture.element, false);
+  assert.equal(fixture.element.hidden, true); assert.equal(fixture.element.inert, true); assert.equal(fixture.classes.size, 0);
 });

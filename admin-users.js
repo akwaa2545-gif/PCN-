@@ -704,6 +704,8 @@
     });
     els.employeeUserDialog.addEventListener('keydown', (event) => {
       if (event.key === 'Escape' && !event.defaultPrevented) {
+        // Let the first Escape close an open native picker before the dialog.
+        if (window.CSS?.supports?.('selector(select:open)') && els.employeeUserDialog.querySelector('select:open')) return;
         cancelUserDialog(event);
         return;
       }

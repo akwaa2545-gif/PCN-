@@ -12,7 +12,9 @@ const masterData = require('../src/masterData');
 const expect = baseExpect.configure({ timeout: 10000 });
 const compatibilityOnly = process.argv.includes('--compatibility-only');
 const nativeSelectOnly = process.argv.includes('--native-select-only');
-const artifactSuffix = compatibilityOnly ? '-compatibility' : nativeSelectOnly ? '-native-select' : '';
+const usersLayoutOnly = process.argv.includes('--users-layout-only');
+const recordsDensityOnly = process.argv.includes('--records-density-only');
+const artifactSuffix = compatibilityOnly ? '-compatibility' : nativeSelectOnly ? '-native-select' : usersLayoutOnly ? '-users-layout' : recordsDensityOnly ? '-records-density' : '';
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], forbidden: [] };
 
 // Sample the browser's rendered frames, rather than trusting CSS declarations.
@@ -45,8 +47,10 @@ async function fade(surface, action, opening, label, preservedText) {
 // Sample concurrently with trusted input: synthetic .click() cannot open an OS picker.
 async function pickerFrames(select, action) {
   const reading = select.evaluate(async node => {
-    const samples = [], deadline = performance.now() + 450;
+    const samples = [], initialOpen = node.matches(':open');
+    let deadline = performance.now() + 1600, observedChange = false;
     while (performance.now() < deadline) {
+      if (!observedChange && node.matches(':open') !== initialOpen) { observedChange = true; deadline = performance.now() + 360; }
       const style = getComputedStyle(node, '::picker(select)');
       samples.push({ opacity: Number(style.opacity), open: node.matches(':open'), display: style.display, time: performance.now() });
       await new Promise(requestAnimationFrame);
@@ -66,12 +70,28 @@ async function fit(page, surface, label) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${label}: no document horizontal overflow`);
   if (surface) assert(await surface.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= -1 && box.right <= innerWidth + 1 && box.top >= -1 && box.bottom <= innerHeight + 1 && node.scrollWidth <= node.clientWidth + 1; }), `${label}: popup fits viewport without horizontal overflow`);
 }
+function laptopUsers() {
+  return Array.from({ length: 10 }, (_, index) => {
+    const id = 'laptop-user-' + index, email = 'fixture.' + index + '.supplier.quality.and.process.engineering@example.test';
+    const developer = index === 3, pending = index >= 8;
+    const department = developer ? 'developer' : index <= 1 ? 'it' : index === 5 ? 'qaTet' : index === 6 ? 'prodEngTet' : index === 7 ? 'qaTapbu' : 'gscTet';
+    const departmentRole = { qaTet: 'qa', prodEngTet: 'productionengineering', qaTapbu: 'tapbu' }[department] || 'gsc';
+    return { id, username: id, employeeCode: index === 0 ? null : String(7100000 + index),
+      displayName: 'Fixture ' + index + ' Long Employee Name for Cross Functional Supplier Quality Engineering',
+      email, mailProfile: { id: 'mail-' + id, displayName: 'Directory ' + index, email, jobTitle: 'Senior supplier process quality engineering specialist', department: 'International Manufacturing Quality and Engineering' },
+      roles: pending ? [] : developer ? ['developer'] : index <= 1 ? ['admin'] : index === 4 ? ['reviewer'] : [departmentRole],
+      department, signingStep: pending || developer || index <= 1 || index === 4 ? null : ['prepared', 'checked', 'approved'][index % 3],
+      identityProvider: [0, 4].includes(index) ? 'password' : [1, 9].includes(index) ? 'pcn-local' : 'employee-code',
+      isActive: index !== 9, version: '0000000000000001', presence: { status: index === 4 ? 'unavailable' : index % 2 ? 'offline' : 'online' } };
+  });
+}
 async function main() {
   const repository = memoryRepository();
   repository.getMasterData = async () => ({ ...masterData, versionId: 1 });
   const service = new PcnService(repository);
   const admin = { id: 'admin-id', displayName: 'Motion Fixture Administrator', roles: ['admin'] };
   await service.create({ ...unsignedPayload, status: 'draft', supplierName: 'Responsive motion supplier', materialName: 'Fixture material' }, admin.displayName, admin);
+  if (recordsDensityOnly) for (let index = 1; index <= 4; index++) await service.create({ ...unsignedPayload, status: 'draft', supplierName: 'Fixture Supplier ' + index, materialName: 'Copper alloy material ' + index }, admin.displayName, admin);
   const before = await repository.list();
   const settings = { schemaVersion: 2, version: 'motion-v1', directoryConfigured: true, flowConfigured: false, legacyGroups: [], groups: mailGroups.map(group => ({ ...group, emails: '', recipients: [], automaticRecipients: [] })) };
   const server = http.createServer(); let browser, context;
@@ -104,7 +124,7 @@ async function main() {
       if (!['GET', 'HEAD'].includes(request.method())) { report.forbidden.push({ method: request.method(), path: url.pathname }); return route.abort(); }
       if (url.pathname === '/api/profile') return send({ status: 'unavailable' });
       if (url.pathname === '/api/auth/config') return send({ mode: 'password', employeeProvisioningConfigured: true });
-      if (url.pathname === '/api/admin/users') return send([]);
+      if (url.pathname === '/api/admin/users') return send(usersLayoutOnly ? laptopUsers() : []);
       if (url.pathname === '/api/notification-settings') return send(settings);
       if (url.pathname === '/api/admin/notifications/health') return send({ configuration: { status: 'not_configured' }, worker: {}, queue: {} });
       if (url.pathname === '/api/admin/employees') return send(Array.from({ length: 30 }, (_, index) => ({ employeeCode: String(7000000 + index), displayName: `Motion employee ${index}`, englishName: `Motion employee ${index}`, jobTitle: 'Fixture engineer', sourceDepartment: 'Fixture' })));
@@ -115,15 +135,168 @@ async function main() {
     page.on('pageerror', error => report.errors.push(error.message));
     await page.goto(`${origin}/admin`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.account-trigger')).toBeVisible();
+    if (recordsDensityOnly) {
+      await expect(page.locator('#adminPcnRows tr')).toHaveCount(5);
+      // The density target must include the extra navigation visible to a Developer.
+      // Showing an existing link changes only this isolated page's geometry.
+      await page.locator('#adminDeveloperLink').evaluate(node => { node.hidden = false; });
+      await page.evaluate(() => document.fonts.ready);
+      const failures = [], verify = (condition, message) => { if (!condition) failures.push(message); };
+      const wrapper = page.locator('#pcnAdminView .admin-table-wrap');
+      report.recordsDensity = [];
+      for (const viewport of [{ width: 1536, height: 864 }, { width: 1366, height: 768 }, { width: 1280, height: 720 }]) {
+        await page.setViewportSize(viewport); await page.mouse.move(0, viewport.height - 1);
+        await expect(page.locator('#createStartOptions')).toBeHidden();
+        await wrapper.evaluate(node => { node.scrollLeft = 0; });
+        const firstRow = page.locator('#adminPcnRows tr').first();
+        await firstRow.locator('[data-column="status"]').click();
+        await expect(firstRow).toHaveAttribute('aria-selected', 'true');
+        const metrics = await page.evaluate(() => {
+          const workspace = document.querySelector('#pcnAdminView .admin-workspace');
+          const pane = workspace.querySelector(':scope > .admin-panel'), side = workspace.querySelector('.admin-detail-panel');
+          const left = pane.getBoundingClientRect(), right = side.getBoundingClientRect();
+          const wrap = pane.querySelector('.admin-table-wrap'), table = wrap.querySelector('table');
+          const controls = [...pane.querySelectorAll('.admin-table-toolbar input, .admin-table-toolbar select, .rd-filters input, .rd-filters select')];
+          const filterControls = [...pane.querySelectorAll('.rd-filters input, .rd-filters select')];
+          const cells = [...table.querySelectorAll('tbody tr:first-child td')];
+          const nav = [...document.querySelectorAll('.topbar-actions > button:not([hidden]), .topbar-actions > a:not([hidden]), .create-start-dropdown, .account-trigger')];
+          return { viewport: innerWidth, body: document.documentElement.scrollWidth, htmlZoom: getComputedStyle(document.documentElement).zoom, bodyZoom: getComputedStyle(document.body).zoom, scale: visualViewport.scale,
+            twoColumns: right.left >= left.right - 1 && Math.abs(right.top - left.top) <= 1, sidebar: right.width, sidebarOverflow: side.scrollWidth > side.clientWidth + 1,
+            topbar: document.querySelector('.topbar').getBoundingClientRect().height, navFits: nav.every(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; }),
+            filterCount: filterControls.length, filterRows: new Set(filterControls.map(control => Math.round(control.getBoundingClientRect().bottom))).size,
+            maxInputHeight: Math.max(...controls.map(control => control.getBoundingClientRect().height)),
+            header: table.querySelector('thead').getBoundingClientRect().height,
+            maxCellPadding: Math.max(...cells.map(cell => Math.max(parseFloat(getComputedStyle(cell).paddingTop), parseFloat(getComputedStyle(cell).paddingBottom)))),
+            minFont: Math.min(...cells.map(cell => parseFloat(getComputedStyle(cell).fontSize))),
+            supplierFont: parseFloat(getComputedStyle(cells.find(cell => cell.dataset.column === 'supplierName')).fontSize),
+            materialFont: parseFloat(getComputedStyle(cells.find(cell => cell.dataset.column === 'materialName')).fontSize),
+            containedScroll: wrap.scrollWidth > wrap.clientWidth && ['auto', 'scroll'].includes(getComputedStyle(wrap).overflowX),
+            tableColumns: cells.length, allColumnsVisible: cells.every(cell => getComputedStyle(cell).display !== 'none') };
+        });
+        report.recordsDensity.push(metrics); const label = viewport.width + 'px Records';
+        verify(metrics.htmlZoom === '1' && metrics.bodyZoom === '1' && metrics.scale === 1, label + ' uses the normal 100% viewport without CSS or browser zoom');
+        verify(metrics.body <= viewport.width + 1, label + ' contains horizontal scrolling inside the record list');
+        verify(metrics.twoColumns && metrics.sidebar >= 270 && metrics.sidebar <= 290, label + ' keeps a 270-290px selected-document sidebar beside the table');
+        verify(!metrics.sidebarOverflow, label + ' selected-document sidebar contents fit');
+        verify(metrics.topbar <= 76 && metrics.navFits, label + ' complete Developer navigation fits in a compact header');
+        verify(metrics.filterCount === 5 && metrics.filterRows === 1, label + ' keeps all five additional filters on one row');
+        verify(metrics.maxInputHeight <= 38, label + ' filter controls are at most 38px high');
+        verify(metrics.header <= 44 && metrics.maxCellPadding <= 12, label + ' table headers and cell spacing retain compact density');
+        verify(metrics.minFont >= 12 && metrics.supplierFont >= 14 && metrics.materialFont >= 14, label + ' preserves legible table and Supplier/Material type');
+        verify(metrics.containedScroll && metrics.allColumnsVisible && metrics.tableColumns >= 10, label + ' preserves every column in a contained horizontal table');
+        const open = firstRow.locator('.rd-open-button'); await open.focus();
+        verify(await open.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight && document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('a') === node; }), label + ' Open PCN remains reachable in the code column');
+        await expect(open).toHaveAttribute('href', new RegExp(await firstRow.getAttribute('data-pcn-id')));
+        await wrapper.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+        for (const control of await firstRow.locator('.rd-secondary-actions button, .rd-secondary-actions summary').all()) verify(await control.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('button, summary') === node; }), label + ' secondary action icons remain reachable');
+        const quick = firstRow.locator('.rd-preview-button'); await quick.click(); await expect(page.locator('#rdPreviewDialog')).toHaveJSProperty('open', true);
+        await page.locator('#rdPreviewDialog [aria-label="Close preview"]').click(); await expect(page.locator('#rdPreviewDialog')).toBeHidden();
+        await wrapper.evaluate(node => { node.scrollLeft = 0; });
+        await page.screenshot({ path: path.resolve('test-results/motion-ui-records-density-' + viewport.width + '.png') });
+      }
+      await page.setViewportSize({ width: 1024, height: 768 }); await page.mouse.move(0, 767);
+      verify(await page.locator('#pcnAdminView .admin-workspace').evaluate(node => { const main = node.querySelector(':scope > .admin-panel').getBoundingClientRect(), side = node.querySelector('.admin-detail-panel').getBoundingClientRect(); return side.top >= main.bottom - 1 && document.documentElement.scrollWidth <= innerWidth; }), '1024px Records keeps the stacked layout without whole-page overflow');
+      assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []); assert.deepEqual(await repository.list(), before);
+      if (failures.length) throw new Error(failures.join('; '));
+      report.checks.push('Records has compact 100% density with full Developer navigation, five filters, a right sidebar and reachable actions at 1536/1366/1280; 1024 retains stacking');
+      report.status = 'passed'; return;
+    }
+    if (usersLayoutOnly) {
+      await page.locator('#adminUsersButton').click();
+      await expect(page.locator('#adminUsersRows tr')).toHaveCount(8);
+      await expect(page.locator('#pendingUsersRows tr')).toHaveCount(2);
+      await page.evaluate(() => document.fonts.ready);
+      const failures = [], verify = (condition, message) => { if (!condition) failures.push(message); };
+      report.usersLayouts = [];
+      const wrapper = page.locator('.users-table-wrap').filter({ has: page.locator('#adminUsersRows') });
+      for (const viewport of [{ width: 1366, height: 768 }, { width: 1280, height: 720 }, { width: 1024, height: 768 }]) {
+        await page.setViewportSize(viewport);
+        // Resizing can place a stationary cursor over Create's hover menu. A real
+        // row interaction moves the cursor away from navigation before clicking.
+        await page.mouse.move(0, viewport.height - 1);
+        await expect(page.locator('#createStartOptions')).toBeHidden();
+        await wrapper.evaluate(node => { node.scrollLeft = 0; });
+        const metrics = await wrapper.evaluate(node => {
+          const table = node.querySelector('table'), cells = [...table.querySelector('tbody tr').cells];
+          const badge = cells[2].querySelector('.user-access-badge'), range = document.createRange(); range.selectNodeContents(badge);
+          const rows = [...new Set([...document.querySelectorAll('.users-filters input, .users-filters select, #usersClearFiltersButton')].map(control => Math.round(control.getBoundingClientRect().bottom)))];
+          const text = cells[1].querySelector('.notification-person-identity');
+          const legacyBadge = [...table.querySelectorAll('tbody td:nth-child(3) .user-access-badge')].find(badge => badge.textContent === 'No signing assignment');
+          const legacyCell = legacyBadge?.closest('td');
+          const departmentBadge = [...table.querySelectorAll('tbody td:nth-child(4) .user-access-badge')].find(badge => badge.textContent === 'Prod.Eng/TET');
+          const presenceBadge = [...table.querySelectorAll('.user-presence-badge')].find(badge => badge.textContent === 'Unavailable');
+          const fitsCell = badge => Boolean(badge) && badge.scrollWidth <= badge.clientWidth + 1 && badge.getBoundingClientRect().right <= badge.closest('td').getBoundingClientRect().right + 1;
+          const signInCell = cells[7], signInText = signInCell.firstChild;
+          const signInWordsWhole = ['Password', 'maintenance'].every(word => {
+            const start = signInCell.textContent.indexOf(word); if (start < 0 || signInText?.nodeType !== Node.TEXT_NODE) return false;
+            const wordRange = document.createRange(); wordRange.setStart(signInText, start); wordRange.setEnd(signInText, start + word.length);
+            const fragments = [...wordRange.getClientRects()]; return fragments.length === 1 && fragments[0].right <= signInCell.getBoundingClientRect().right + 1;
+          });
+          return { viewport: innerWidth, body: document.documentElement.scrollWidth, table: table.getBoundingClientRect().width, wrapper: node.clientWidth,
+            actions: cells.at(-1).getBoundingClientRect().width, actionPosition: getComputedStyle(cells.at(-1)).position,
+            filterRows: rows.length, badgeLines: range.getClientRects().length, badgeOverflow: badge.scrollWidth > badge.clientWidth + 1,
+            signInWordsWhole, departmentBadgeFits: fitsCell(departmentBadge), presenceBadgeFits: fitsCell(presenceBadge),
+            legacyBadgeFits: Boolean(legacyBadge) && legacyBadge.scrollWidth <= legacyBadge.clientWidth + 1 && legacyBadge.getBoundingClientRect().right <= legacyCell.nextElementSibling.getBoundingClientRect().left + 1,
+            font: Number.parseFloat(getComputedStyle(text).fontSize), coreColumns: cells.map(cell => getComputedStyle(cell).display !== 'none'),
+            horizontalScroller: ['auto', 'scroll'].includes(getComputedStyle(node).overflowX),
+            textClipped: getComputedStyle(text).textOverflow === 'ellipsis' || text.scrollHeight > text.clientHeight + 1 };
+        });
+        report.usersLayouts.push(metrics); const label = viewport.width + 'px Users';
+        verify(metrics.body <= viewport.width + 1, label + ' has no whole-page horizontal overflow');
+        verify(metrics.table <= 1240, label + ' populated table stays near 1200px rather than growing beyond 1500px');
+        verify(metrics.actions <= 170, label + ' sticky Actions occupies at most 170px');
+        verify(metrics.actionPosition === 'sticky', label + ' Actions stays reachable while other columns scroll');
+        verify(metrics.filterRows <= 2, label + ' search and filters fit at most two rows');
+        verify(metrics.badgeLines === 1 && !metrics.badgeOverflow, label + ' Administrator badge remains one readable line');
+        verify(metrics.signInWordsWhole, label + ' Password maintenance wraps only between whole words');
+        verify(metrics.departmentBadgeFits, label + ' Prod.Eng/TET badge fits its department column');
+        verify(metrics.presenceBadgeFits, label + ' Unavailable presence fits its status column');
+        verify(metrics.legacyBadgeFits, label + ' legacy No signing assignment remains fully readable inside its role column');
+        verify(metrics.font >= 14, label + ' employee names preserve the established 14px minimum without shrinking');
+        verify(metrics.coreColumns.length === 9 && metrics.coreColumns.every(Boolean), label + ' preserves every core column');
+        verify(!metrics.textClipped, label + ' preserves long employee names without ellipsis or clipping');
+        verify(metrics.horizontalScroller, label + ' confines any horizontal scrolling to the table wrapper');
+        for (const user of laptopUsers()) {
+          const row = page.locator('tr').filter({ has: page.locator('[data-user-id="' + user.id + '"]') });
+          await expect(row).toContainText(user.displayName); await expect(row).toContainText(user.mailProfile.email);
+        }
+        const maintenance = page.locator('#adminUsersRows tr').filter({ has: page.locator('[data-user-id="laptop-user-0"]') });
+        await expect(maintenance.locator('[data-user-action]')).toHaveCount(3);
+        await maintenance.evaluate(node => node.scrollIntoView({ block: 'center' }));
+        await wrapper.evaluate(node => { node.scrollLeft = 0; });
+        for (const action of ['link', 'edit', 'remove']) {
+          const control = maintenance.locator('[data-user-action="' + action + '"]');
+          await expect(control).toBeEnabled(); await control.focus();
+          const geometry = await control.evaluate(node => { const box = node.getBoundingClientRect(), wrap = node.closest('.users-table-wrap').getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return { passed: box.left >= wrap.left && box.right <= Math.min(wrap.right, innerWidth) && box.top >= 0 && box.bottom <= innerHeight && hit?.closest('button') === node, button: { left: box.left, right: box.right, top: box.top, bottom: box.bottom }, wrapper: { left: wrap.left, right: wrap.right }, hit: { tag: hit?.tagName, id: hit?.id, class: hit?.className }, viewport: { width: innerWidth, height: innerHeight }, tableScroll: node.closest('.users-table-wrap').scrollLeft, pageScroll: scrollY }; });
+          report.userActionBounds ||= []; report.userActionBounds.push({ width: viewport.width, action, ...geometry });
+          verify(geometry.passed, label + ' ' + action + ' action is reachable without horizontal scrolling');
+        }
+        const documentBefore = await page.evaluate(() => document.documentElement.scrollLeft);
+        await wrapper.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+        verify(await page.evaluate(() => document.documentElement.scrollLeft) === documentBefore, label + ' table scrolling does not scroll the page');
+        await wrapper.evaluate(node => { node.scrollLeft = 0; });
+        await page.screenshot({ path: path.resolve('test-results/motion-ui-users-layout-' + viewport.width + '.png') });
+      }
+      const developerActions = page.locator('[data-user-id="laptop-user-3"]');
+      for (const control of await developerActions.all()) await expect(control).toBeDisabled();
+      assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []);
+      assert.deepEqual(await repository.list(), before);
+      if (failures.length) throw new Error(failures.join('; '));
+      report.checks.push('Ten populated Users fixtures keep all content and established 14px names, narrow reachable sticky actions, one-line role badges and at most two filter rows on 1366/1280/1024px laptops');
+      report.status = 'passed'; return;
+    }
     if (nativeSelectOnly) {
       assert.equal(await page.evaluate(() => CSS.supports('appearance', 'base-select')), true, 'Bundled browser supports progressive native select styling');
       const failures = [];
+      await page.evaluate(() => { window.__pickerKeys = []; document.addEventListener('keydown', event => { if (event.key === 'Escape') window.__pickerKeys.push({ target: event.target.tagName, id: event.target.id, selectOpen: event.target.matches?.('select:open'), closestSelect: event.target.closest?.('select')?.id, closestOpen: event.target.closest?.('select')?.matches(':open'), supported: CSS.supports('selector(select:open)'), path: event.composedPath().slice(0, 4).map(node => node.tagName || node.nodeName) }); }, true); });
       await page.locator('#adminUsersButton').click(); await page.locator('#usersCreateButton').click();
       const cases = [['#employeeRole', 'PCN role'], ['#employeeDepartment', 'PCN department']];
       for (const [selector, label] of cases) {
         const select = page.locator(selector), original = await select.inputValue();
         try { await pickerFade(select, () => select.click(), true, label); } catch (error) { failures.push(error.message); }
         try { await pickerFade(select, () => page.keyboard.press('Escape'), false, label); } catch (error) { failures.push(error.message); }
+        report.nativeKeyEvents = await page.evaluate(() => window.__pickerKeys);
+        await expect(page.locator('#employeeUserDialog')).toHaveJSProperty('open', true);
         await expect(select).toHaveValue(original); await expect(select).toBeFocused();
       }
       await page.locator('#employeeCancelButton').click(); await expect(page.locator('#employeeUserDialog')).toBeHidden();
@@ -133,6 +306,14 @@ async function main() {
       await expect(filter).toHaveValue(original); await expect(filter).toBeFocused();
       if (failures.length) throw new Error(failures.join('; '));
       report.checks.push('Native role, department and filter pickers render entry/exit opacity frames and Escape preserves selection/focus');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      const reducedEntry = await pickerFrames(filter, () => filter.click());
+      assert.equal(reducedEntry.at(-1).open, true);
+      assert(reducedEntry.every(frame => !(frame.opacity > 0.02 && frame.opacity < 0.98)), 'Reduced motion skips native picker entry fade');
+      const reducedExit = await pickerFrames(filter, () => page.keyboard.press('Escape'));
+      assert.equal(reducedExit.at(-1).open, false);
+      assert(reducedExit.every(frame => !(frame.opacity > 0.02 && frame.opacity < 0.98)), 'Reduced motion skips native picker exit fade');
+      report.checks.push('Reduced motion skips native picker opacity interpolation without changing normal selection controls');
       assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []);
       assert.deepEqual(await repository.list(), before); report.status = 'passed'; return;
     }

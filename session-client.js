@@ -282,15 +282,13 @@
     }
 
     const close = (returnFocus = false) => {
-      panel.hidden = true;
-      panel.inert = true;
+      setVisible(panel, false);
       trigger.setAttribute('aria-expanded', 'false');
       if (returnFocus) trigger.focus();
     };
     trigger.addEventListener('click', () => {
       const opening = panel.hidden;
-      panel.hidden = !opening;
-      panel.inert = !opening;
+      setVisible(panel, opening);
       trigger.setAttribute('aria-expanded', String(opening));
     });
     document.addEventListener('click', (event) => {
@@ -310,7 +308,54 @@
   }
 
   window.PCN_SESSION = Object.freeze({ fetch: apiFetch, load, require: requireSession, safeReturnTo, logout, mountProfile });
-  window.PCN_UI_MOTION = Object.freeze({ afterExit });
+  const visibilityAnimations = new WeakMap();
+  window.PCN_UI_MOTION = Object.freeze({ afterExit, setVisible });
+
+  // Logical visibility changes immediately; only inert presentation survives an exit.
+  function setVisible(element, open) {
+    const previous = visibilityAnimations.get(element);
+    const unchanged = element.hidden === !open;
+    element.inert = !open;
+    if (unchanged) return previous?.handle || { cancel() {} };
+    const wasPainted = !element.hidden || Boolean(previous);
+    const style = wasPainted ? window.getComputedStyle?.(element) : null;
+    const opacity = wasPainted ? Number.parseFloat(style?.opacity ?? '1') : 0;
+    const translate = wasPainted && style?.translate && style.translate !== 'none' ? style.translate : (wasPainted ? '0 0' : '0 6px');
+    previous?.handle.cancel();
+    element.hidden = !open;
+    element.setAttribute?.('data-pcn-dropdown-managed', '');
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (reduced || typeof element.animate !== 'function' || !element.classList) return { cancel() {} };
+
+    const record = { animation: null, timer: null, handle: null };
+    const finish = () => {
+      if (visibilityAnimations.get(element) !== record) return;
+      visibilityAnimations.delete(element);
+      if (record.timer !== null) window.clearTimeout?.(record.timer);
+      if (record.animation) {
+        record.animation.onfinish = null;
+        record.animation.oncancel = null;
+        record.animation.cancel();
+      }
+      element.classList.remove('pcn-dropdown-rendering');
+    };
+    record.handle = { cancel: finish };
+    visibilityAnimations.set(element, record);
+    element.classList.add('pcn-dropdown-rendering');
+    try {
+      record.animation = element.animate([
+        { opacity: Number.isFinite(opacity) ? opacity : 1, translate },
+        { opacity: open ? 1 : 0, translate: open ? '0 0' : '0 6px' }
+      ], { duration: 240, easing: 'ease-out', fill: 'both' });
+      record.animation.onfinish = finish;
+      record.animation.oncancel = finish;
+      record.timer = window.setTimeout?.(finish, 280) ?? null;
+    } catch {
+      // Some embedded browsers expose animate without supporting these properties.
+      finish();
+    }
+    return record.handle;
+  }
 
   // Only presentation cleanup waits; callers close and invalidate their work first.
   function afterExit(element, cleanup, { current = () => true } = {}) {

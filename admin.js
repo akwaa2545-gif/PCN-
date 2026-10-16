@@ -133,8 +133,10 @@
     const links = [...panel.querySelectorAll('a')];
     let openedByHover = false;
     const setOpen = (open, returnFocus = false) => {
-      panel.hidden = !open;
-      panel.inert = !open;
+      if (!window.PCN_UI_MOTION?.setVisible?.(panel, open)) {
+        panel.hidden = !open;
+        panel.inert = !open;
+      }
       trigger.setAttribute('aria-expanded', String(open));
       if (!open) openedByHover = false;
       if (returnFocus) trigger.focus();

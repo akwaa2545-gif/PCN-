@@ -9631,14 +9631,14 @@ body.pcn-page.document-preview-only #submissionView .supplier-sheet {
       opacity: 0; transition: opacity 160ms ease-out, display 160ms allow-discrete, overlay 160ms allow-discrete;
     }
     :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open]::backdrop { opacity: 1; }
-    :is(.account-panel, .create-start-options, .admin-confirm-backdrop) {
+    :is(.account-panel, .create-start-options, .admin-confirm-backdrop):not([data-pcn-dropdown-managed]) {
       opacity: 1; translate: 0 0;
       transition: opacity 160ms ease-out, translate 160ms ease-out, display 160ms allow-discrete;
     }
-    :is(.account-panel, .create-start-options, .admin-confirm-backdrop)[hidden] { opacity: 0; translate: 0 6px; }
+    :is(.account-panel, .create-start-options, .admin-confirm-backdrop):not([data-pcn-dropdown-managed])[hidden] { opacity: 0; translate: 0 6px; }
     @starting-style {
       :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open],
-      :is(.account-panel, .create-start-options, .admin-confirm-backdrop):not([hidden]) { opacity: 0; translate: 0 6px; }
+      :is(.account-panel, .create-start-options, .admin-confirm-backdrop):not([data-pcn-dropdown-managed]):not([hidden]) { opacity: 0; translate: 0 6px; }
       :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open]::backdrop { opacity: 0; }
     }
   }
@@ -9655,6 +9655,52 @@ body.pcn-page.document-preview-only #submissionView .supplier-sheet {
     body:is(.admin-page, .pcn-page) .topbar { padding-block: 12px; }
     .admin-confirm-card { max-height: calc(100dvh - 32px); overflow-y: auto; }
   }
+}
+
+/* Managed navigation menus also animate in browsers without discrete transitions. */
+@media screen {
+  [data-pcn-dropdown-managed] { transition: none !important; }
+  body .pcn-dropdown-rendering[hidden] { display: block !important; }
+}
+
+/* Real single-select controls retain their native events, validation and fallback. */
+@media screen {
+  @supports (appearance: base-select) {
+    :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size]),
+    body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size])),
+    :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size])::picker(select),
+    body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size]))::picker(select) { appearance: base-select; }
+    body.create-page select:not([multiple]):not([size]) { display: inline-flex; align-items: center; justify-content: space-between; }
+
+    :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size])::picker(select),
+    body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size]))::picker(select) {
+      opacity: 0;
+      translate: 0 6px;
+      transition: opacity 240ms ease-out, translate 240ms ease-out, display 240ms allow-discrete, overlay 240ms allow-discrete;
+      max-block-size: min(320px, 50dvh);
+      min-inline-size: min(anchor-size(self-inline), calc(100vw - 24px));
+      max-inline-size: calc(100vw - 24px);
+      overflow: auto;
+      overscroll-behavior: contain;
+      box-sizing: border-box;
+      border: 1px solid #b8cadb;
+      background: #fff;
+      color: #153b5d;
+      box-shadow: 0 8px 24px #17355026;
+    }
+    :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size]) option,
+    body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size])) option { white-space: normal; overflow-wrap: anywhere; }
+    :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size]):open::picker(select),
+    body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size])):open::picker(select) { opacity: 1; translate: 0 0; }
+    @starting-style {
+      :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size]):open::picker(select),
+      body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size])):open::picker(select) { opacity: 0; translate: 0 6px; }
+    }
+  }
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  :is(body.admin-page, body.create-page, body.developer-page) select:not([multiple]):not([size])::picker(select),
+  body.pcn-page :is(#changeForm, #riskLevel, .dw-dialog select:not([multiple]):not([size]))::picker(select) { transition: none !important; translate: none !important; }
 }
 @media screen and (prefers-reduced-motion: reduce) {
   :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog, .account-panel, .create-start-options, .admin-confirm-backdrop),
