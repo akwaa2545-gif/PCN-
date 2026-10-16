@@ -47,12 +47,12 @@ function readServerConfig(env = process.env) {
     const loopbackHost = host === 'localhost' || host === '::1' || (net.isIP(host) === 4 && host.startsWith('127.'));
     if (!loopbackHost || trustProxy !== 'loopback') throw new Error('Internal HTTP requires loopback HOST and TRUST_PROXY=loopback');
   } else if (env.NODE_ENV === 'production' && origin.protocol !== 'https:') throw new Error('Production requires HTTPS PUBLIC_ORIGIN');
-  return {port,host,trustProxy,publicOrigin,secureCookies:env.NODE_ENV === 'production' && !allowInternalHttp,sessionCookieName:allowInternalHttp ? HTTP_COOKIE_NAME : COOKIE_NAME};
+  return {port,host,trustProxy,publicOrigin,runtimeEnvironment:env.NODE_ENV,secureCookies:env.NODE_ENV === 'production' && !allowInternalHttp,sessionCookieName:allowInternalHttp ? HTTP_COOKIE_NAME : COOKIE_NAME};
 }
 
 async function main() {
   await loadRuntimeEnv();
-  const {port,host,trustProxy,publicOrigin,secureCookies,sessionCookieName} = readServerConfig();
+  const {port,host,trustProxy,publicOrigin,runtimeEnvironment,secureCookies,sessionCookieName} = readServerConfig();
   const authConfiguration = readAuthConfiguration(process.env,{host,trustProxy});
   const attachmentScanner = createAttachmentScanner();
   if (attachmentScanner) await attachmentScanner.ready();
@@ -67,7 +67,7 @@ async function main() {
   await repository.readiness();
   const worker = new NotificationWorker(pool,{integrationService});
   const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,developerPasswordHash:authConfiguration.developerPasswordHash,employeeDirectory,integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,secureCookies,sessionCookieName});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,runtimeEnvironment,secureCookies,sessionCookieName});
   let sending = false;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;

@@ -41,6 +41,8 @@ Copy-Item .env.example .env
 
 Set `SQL_SERVER`, `SQL_DATABASE`, `SQL_USER`, `SQL_PORT`, `PORT` and `PUBLIC_ORIGIN` for the installation. Supply `SQL_PASSWORD` through the process environment or a protected credential. Keep `.env` private; it is excluded from source control. The SQL login is the API connection account, separate from application users.
 
+For local LAN development, use `HOST=0.0.0.0`, set `PUBLIC_ORIGIN` to the laptop's LAN origin and explicitly set `NODE_ENV=development`. This also permits matching `localhost`, `127.0.0.1` and `[::1]` origins on the configured scheme and port. Each alias must match the request Host; unrelated origins remain rejected and CSRF checks still apply. Production retains its exact configured origin. This localhost follow-up and the [popup motion/laptop layout changes](plans/ui-motion.md) are local changes awaiting a separate deployment instruction.
+
 To enable Developer assignment changes, configure `PCN_DEVELOPER_PASSWORD_HASH` privately using the format described in [Developer access](plans/developer-access.md#private-configuration). Keep the committed template blank. The shared password belongs to the access-setting dialog; it is not requested during employee-code, PCN-local or ordinary password-maintenance sign-in.
 
 Before linking an existing Developer account to another employee identity, remove its Developer access. Direct linking is rejected with HTTP 409 and no writes; after linking, assigning Developer again requires the shared password.

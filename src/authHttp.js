@@ -26,8 +26,20 @@ function clearSessionCookie(res, { secure = true, cookieName = COOKIE_NAME } = {
   res.setHeader('Set-Cookie', `${cookieName}=; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}; Max-Age=0`);
 }
 
-function enforceSameOrigin(req, publicOrigin) {
-  if (!publicOrigin || req.headers.origin !== new URL(publicOrigin).origin) throw new ApiError(403, 'Request origin is not allowed');
+function developmentLoopbackOrigins(publicOrigin, runtimeEnvironment) {
+  if (runtimeEnvironment !== 'development') return Object.freeze([]);
+  const configured = new URL(publicOrigin);
+  if (!['http:', 'https:'].includes(configured.protocol) || configured.origin !== publicOrigin) return Object.freeze([]);
+  const port = configured.port ? `:${configured.port}` : '';
+  return Object.freeze(['localhost', '127.0.0.1', '[::1]'].map(host => `${configured.protocol}//${host}${port}`));
+}
+
+function enforceSameOrigin(req, publicOrigin, loopbackOrigins = []) {
+  const origin = req.headers.origin;
+  if (publicOrigin && origin === new URL(publicOrigin).origin) return;
+  // Development aliases must be same-host requests, never proxy-header or Host-derived origins.
+  if (loopbackOrigins.includes(origin) && req.headers.host === new URL(origin).host) return;
+  throw new ApiError(403, 'Request origin is not allowed');
 }
 
 function enforceCsrf(req, principal) {
@@ -50,4 +62,4 @@ function requirePrincipal(principal, { roles = [], allowPasswordChange = false }
   return principal.user;
 }
 
-module.exports = { COOKIE_NAME, HTTP_COOKIE_NAME, validateSessionCookieName, readSessionToken, setSessionCookie, clearSessionCookie, enforceSameOrigin, enforceCsrf, requirePrincipal };
+module.exports = { COOKIE_NAME, HTTP_COOKIE_NAME, validateSessionCookieName, readSessionToken, setSessionCookie, clearSessionCookie, developmentLoopbackOrigins, enforceSameOrigin, enforceCsrf, requirePrincipal };

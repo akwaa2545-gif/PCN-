@@ -24,7 +24,7 @@ async function handleApi(req, res, url, context, requestId) {
     catch { throw new ApiError(503, 'Database is unavailable'); }
   }
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
-    enforceSameOrigin(req, context.publicOrigin);
+    enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
     const body = await readJsonBody(req);
     assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
@@ -39,7 +39,7 @@ async function handleApi(req, res, url, context, requestId) {
   const loggingOut = ['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST';
   const principal = await authService.session(token, {skipEmployeeLookup:loggingOut});
   if (['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST') {
-    enforceSameOrigin(req, context.publicOrigin);
+    enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
     if (principal) enforceCsrf(req, principal);
     await authService.logout(token);
     clearSessionCookie(res, cookieOptions);
@@ -61,7 +61,7 @@ async function handleApi(req, res, url, context, requestId) {
     throw new ApiError(403, 'This account has read-only PCN access');
   }
   if (!['GET','HEAD'].includes(method)) {
-    enforceSameOrigin(req, context.publicOrigin);
+    enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
     enforceCsrf(req, principal);
   }
   if (route === '/api/auth/change-password' && method === 'POST') {

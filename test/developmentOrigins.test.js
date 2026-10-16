@@ -54,6 +54,9 @@ test('development aliases are frozen, fixed by canonical scheme and port, and re
     ['https://localhost:8443', 'https://127.0.0.1:8443', 'https://[::1]:8443']);
   assert.deepEqual(developmentLoopbackOrigins('http://pcn.example', 'development'),
     ['http://localhost', 'http://127.0.0.1', 'http://[::1]']);
+  for (const invalid of ['http://pcn.example/path', 'http://user@pcn.example', 'file:///tmp/pcn']) {
+    assert.deepEqual(developmentLoopbackOrigins(invalid, 'development'), []);
+  }
   for (const environment of [undefined, '', 'test', 'production', 'Development']) {
     assert.deepEqual(developmentLoopbackOrigins(publicOrigin, environment), []);
   }
@@ -63,6 +66,10 @@ test('development aliases are frozen, fixed by canonical scheme and port, and re
       assert.throws(() => enforceSameOrigin({ headers: { origin, host } }, publicOrigin, allowed), { statusCode: 403 });
     }
   }
+  for (const origin of [undefined, null, ['http://localhost:3000'], 'http://localhost:3000, http://evil.example:3000']) {
+    assert.throws(() => enforceSameOrigin({ headers: { origin, host: 'localhost:3000' } }, publicOrigin, allowed), { statusCode: 403 });
+  }
+  assert.throws(() => enforceSameOrigin({ headers: { origin: aliases[0], host: ['localhost:3000'] } }, publicOrigin, allowed), { statusCode: 403 });
 });
 
 test('development login rejects cross-host, other ports and schemes, malformed and missing origins', async t => {
