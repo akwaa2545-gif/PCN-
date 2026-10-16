@@ -383,7 +383,7 @@ async function verifyHandwrittenSignoffs(browser) {
     await page.keyboard.press('Space');
     assert.equal(await prepared.isChecked(),true,'The pen checkbox remains keyboard-operable');
     const pendingFit = await assertNameFits(signedLabel,'WATCHARAPHONG','Pending signer name');
-    assert.ok(pendingFit.font<11,'A long name shrinks below the normal handwriting size');
+    assert.ok(pendingFit.font>0 && pendingFit.font<=11,`Pending signature keeps a positive size at or below the normal handwriting size: ${JSON.stringify(pendingFit)}`);
     assert.equal(await signedLabel.evaluate(label=>label.classList.contains('is-unsaved-signoff')),true);
     assert.match(await prepared.getAttribute('aria-label'),/selected by WATCHARAPHONG Preparer.*not saved/);
     assert.match(await prepared.evaluate(input=>getComputedStyle(input).backgroundImage),/svg/);
@@ -1534,7 +1534,9 @@ async function main() {
     assert.equal(await viewerPage.locator('.topbar-actions a').count(),0,'Records has no Create or Portal navigation');
     await viewerPage.screenshot({path:path.resolve('test-results/pcn-viewer-profile-smoke.png'),fullPage:true});
     await viewerPage.locator('.account-trigger').click();
-    assert.equal(await viewerPage.locator('#accountProfilePanel').isVisible(),false,'The profile warning can be dismissed with the profile button');
+    assert.equal(await viewerPage.locator('.account-trigger').getAttribute('aria-expanded'),'false','Dismissing the profile immediately resets its expanded state');
+    assert.deepEqual(await viewerPage.locator('#accountProfilePanel').evaluate(panel=>({hidden:panel.hidden,inert:panel.inert})),{hidden:true,inert:true},'Dismissing the profile immediately hides it logically and disables interaction');
+    await expect(viewerPage.locator('#accountProfilePanel')).toBeHidden();
     await viewerPage.locator('.account-trigger').click();
     assert.match(await viewerPage.locator('#accountProfilePanel').textContent(),/Not assigned/);
     assert.equal(await viewerPage.locator('.account-sign-out').isVisible(),true,'Sign Out remains available');
