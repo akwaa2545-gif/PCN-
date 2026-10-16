@@ -1,6 +1,6 @@
 # Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-16. Signed `pcn-test-18-1` is installed on the existing HTTP :8443 origin. CI, exact-release identity, public asset hashes, SQL readiness and five live browser groups passed. Host preflight confirmed migrations 001–007 already applied with matching checksums. Repeated protected-consumer and SYSTEM task runs returned `already_current` with Node PID 6008 unchanged; the task is enabled / Ready / last result 0. Previous runtime evidence is preserved below.
+Updated: 2026-10-16. Signed `pcn-test-21-1` is installed on the existing HTTP :8443 origin. All 28 CI steps, exact-release identity, 31 public asset checks and SQL readiness passed. Migrations 001–007 were already applied with matching checksums. Five live browser groups passed. A repeat consumer returned `already_current` with Node PID 8400 unchanged, and final independent checks confirmed the SYSTEM task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-18-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-21-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -63,7 +63,7 @@ The earlier employee-code rollout completed this sequence. PCNTest has Windows A
 
 ## Internal HTTP conversion
 
-Automatic browser updates were introduced in runtime 15 and are retained in runtime 18. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
+Automatic browser updates were introduced in runtime 15 and are retained in runtime 21. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
 
 The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
 
@@ -112,7 +112,21 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-### Current runtime — pcn-test-18-1; application and Mail Routing improvements
+### Current runtime — pcn-test-21-1; motion and compact laptop layouts
+
+[Actions 38845184965](https://github.com/akwaa2545-gif/PCN-/actions/runs/38845184965) completed all 28 steps successfully and published signed [pcn-test-21-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-21-1) from commit `1d6f77f9e27307033c09a3f3d5c96568cd06c1bc` at `2026-10-16T03:29:24Z`. The 15,877,833-byte ZIP has SHA-256 `abac6c298b9c259a6e352d1c6d687605da71222f8eee9aafdf4067c1ebffdb24`. CI passed its unit/API, high/critical audit and existing browser gates, plus the normal motion, native-select, compatibility, populated Users and compact Records suites. Local verification passed 989 tests with 88.23% line / 91.09% branch / 94.61% function coverage; detailed fixture/LAN evidence is in [the motion and layout record](ui-motion.md).
+
+The release adds 160 ms native-dialog motion, 240 ms Create/profile and supported native-select fades, immediate reduced-motion behavior and guarded presentation cleanup. Populated Users retains all nine columns and 14 px text with compact sticky actions and contained scrolling. Records at normal browser zoom retains a 280 px sidebar from 1200 px upward, a compact header, five filters per row and 13/14 px table/Supplier-Material text; narrow/mobile fallbacks and official print remain separate. The development-only localhost origin correction does not relax production's exact-origin contract.
+
+Validate-only completed at observed host time `2026-10-16T03:36:45.9208784Z`, retaining runtime 18, Node PID 6008 and the disabled task. Activation completed at `2026-10-16T03:38:59.9990547Z`. Independent checks at `2026-10-16T03:39:33.1709468Z` confirmed exact-release Node PID 8400, WinSW parent PID 18132, `NT AUTHORITY\NETWORK SERVICE` ownership, the sole `127.0.0.1:3000` listener, public SQL readiness and the unchanged `http://172.30.77.137:8443` origin. Unrelated Default Web Site HTTP :80 returned 200. All 31 checked public assets matched the source; three private paths returned 404. The ignored asset report is `test-results/deploy-ui-assets.json`.
+
+The private environment hash/ACL, proxy, protected consumer, verifier and pinned key were unchanged. Read-only SQL checks retained the seven matching migration checksums and verified the existing active Developer account. Deployment ran no DDL, account import, bootstrap or operational mail tests. Repeat-consumer/task resumption and final independent checks passed, as recorded below.
+
+Guarded live browser acceptance passed five groups and eight measured fade entries/exits, with 14 captures, at workstation UTC `2026-10-16T03:34:21.552Z`–`2026-10-16T03:35:12.964Z`. The host clock is approximately five minutes ahead and its timestamps above are recorded separately. At 1536, 1366 and 1280 px, computed zoom remained `1`, the header was 64 px, sidebar 280 px and five 34 px filters occupied one row; table scrolling stayed contained and the sticky sidebar cleared the header. Create/profile and native role/department picker fades, Escape/focus/value retention, the outer access dialog, 390 px popup/options fit and mobile Create choices passed. Only existing-account login/logout writes were allowed and the session was signed out. There were no business writes, external calls, directory lookups, page errors or unexpected failed responses. Notification-health/settings reads were deliberately fulfilled locally with 503 to avoid integrations; their expected guard toast is not a production outage. The ignored report is `test-results/live-motion-laptop-acceptance.json`.
+
+A repeat protected-consumer check returned `already_current` for runtime 21 / commit `1d6f77f9e27307033c09a3f3d5c96568cd06c1bc`, retaining Node PID 8400. Independent final checks at observed host UTC `2026-10-16T03:43:41.6397963Z` confirmed the exact release/source, Node PID 8400 / WinSW parent PID 18132, NetworkService ownership, the sole loopback listener, public SQL readiness, unchanged HTTP :8443 binding and unrelated Default Web Site HTTP :80 returning 200. Environment hash/ACL, proxy and deployment trust hashes were unchanged. The SYSTEM task is enabled / Ready / last result 0. Ignored evidence is in `test-results/deploy-ui-resumed.log` and `test-results/deploy-ui-identity-final.json`.
+
+### Historical runtime — pcn-test-18-1; application and Mail Routing improvements
 
 [Actions 38714287181](https://github.com/akwaa2545-gif/PCN-/actions/runs/38714287181) completed all 23 steps successfully and published signed [pcn-test-18-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-18-1) from commit `1edcec3bb13dce5df6e7d6cd4c079334a5f8aec9` at `2026-10-15T09:42:24Z`. ZIP SHA-256: `108bb30d4afbc217a4972d6c1a4c90539e1680678b525f65104704b8e508c1cc`. The final local suite passed 971/971 tests with 88.34% line / 91.04% branch / 94.69% function coverage; the audit found no high/critical advisories. CI includes the guided Create, Developer Tools, user-presence and Mail Routing browser gates alongside the existing workflow, automatic-update, timeline, signing-order, Records and Developer-access checks.
 
