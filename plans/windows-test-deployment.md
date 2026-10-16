@@ -1,6 +1,6 @@
 # Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-14. Signed `pcn-test-17-1` is installed with the Portal timeline on the existing HTTP :8443 origin. CI, exact-release identity, SQL readiness and live browser acceptance passed. A repeat consumer returned `already_current` without restarting Node; the SYSTEM task is enabled / Ready / result 0. Migrations 001–006 were already applied. Previous HTTP/HTTPS acceptance remains historical evidence below.
+Updated: 2026-10-16. Signed `pcn-test-18-1` is installed on the existing HTTP :8443 origin. CI, exact-release identity, public asset hashes, SQL readiness and five live browser groups passed. Host preflight confirmed migrations 001–007 already applied with matching checksums. Repeated protected-consumer and SYSTEM task runs returned `already_current` with Node PID 6008 unchanged; the task is enabled / Ready / last result 0. Previous runtime evidence is preserved below.
 
 ## Scope and retained components
 
@@ -24,7 +24,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-17-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-18-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -63,7 +63,7 @@ The earlier employee-code rollout completed this sequence. PCNTest has Windows A
 
 ## Internal HTTP conversion
 
-Automatic browser updates were introduced in runtime 15 and are retained in runtime 17. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
+Automatic browser updates were introduced in runtime 15 and are retained in runtime 18. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
 
 The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
 
@@ -112,11 +112,25 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-Actions **View** opens a read-only PCN timeline. Each horizontal point shows recorded time, person and a department/signing action such as **GSC/TET — Checked** or **GSC/TET — Approved**; other events show their recorded workflow status, creation or baseline. Cleared signatures and unavailable earlier history are explicit. Selection reveals before/after form and signing changes, omitting internal storage metadata. Popup scrolling is contained at mobile widths, and the existing Portal auto-refresh gate pauses while the dialog is open. The timeline uses the existing history API and adds no database migration or host configuration change.
+### Current runtime — pcn-test-18-1; application and Mail Routing improvements
 
-The source passed 645 unit/API tests with 91.68% line / 90.87% branch / 93.83% function coverage, and six isolated timeline browser journeys covering 13 genuine events. Viewing made no live business changes or external integration calls.
+[Actions 38714287181](https://github.com/akwaa2545-gif/PCN-/actions/runs/38714287181) completed all 23 steps successfully and published signed [pcn-test-18-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-18-1) from commit `1edcec3bb13dce5df6e7d6cd4c079334a5f8aec9` at `2026-10-15T09:42:24Z`. ZIP SHA-256: `108bb30d4afbc217a4972d6c1a4c90539e1680678b525f65104704b8e508c1cc`. The final local suite passed 971/971 tests with 88.34% line / 91.04% branch / 94.69% function coverage; the audit found no high/critical advisories. CI includes the guided Create, Developer Tools, user-presence and Mail Routing browser gates alongside the existing workflow, automatic-update, timeline, signing-order, Records and Developer-access checks.
 
-### Current runtime — pcn-test-17-1; Portal timeline
+The release includes the dedicated Create page and marked testing documents, Developer-only workflow/transaction tools and protected Developer assignments, Prepared → Checked → Approved signing and next-action routing, department-scoped Administrator update mail, the Records dashboard with gold Open PCN links and icon actions, department signing summaries, authenticated Online/Offline presence and the supplied Segoe UI Semibold table font. Mail Routing has one **Assign user** action per department header, an explicit signing-role/verified-directory popup and expandable department lists. These popup edits remain unsaved routing changes until **Save Mail**; they do not grant signing access or send mail.
+
+Before validation, the protected host consumer was independently updated only for its runtime-file allowlist, with a protected backup and ACLs retained. Consumer SHA-256: `36D8433E617345CE405788A9DB6722D7C5B4BA759FA4BA87E9BA66C8CF5A47B6`. The verifier and pinned public key were unchanged; public-key SHA-256 remains `04D893A9C5021114C816C9DA5BDD5D7A80EA6E061C6573CACB9196CC38EA3306`. A scoped private configuration change added the Developer assignment hash with backup and ACLs preserved; other configuration was retained. The Developer assignment credential remains private. Read-only checks of the host's configured SQL target confirmed migrations 001–007 were already applied and every checksum matched source. No DDL, bootstrap, account/role changes, PCN/recipient writes or test mail were performed by these checks.
+
+Validate-only succeeded at observed host time `2026-10-15T09:49:16Z`, preserving runtime 17 and Node PID 9280. Activation completed at observed host time `2026-10-15T09:50:39.4118586Z`. Independent checks at `2026-10-15T09:52:14.7555897Z` confirmed exact-release Node PID 6008 beneath WinSW parent PID 12092, `NT AUTHORITY\NETWORK SERVICE` ownership and the exclusive `127.0.0.1:3000` listener. Public readiness returned `ready`; unrelated HTTP :80 returned 200. All 21 checked public assets matched the release, including the exact font bytes and `font/ttf` MIME; `.env`, SQL configuration source and the deployment script returned 404. The existing public origin `http://172.30.77.137:8443` and loopback backend `127.0.0.1:3000` are retained.
+
+Fresh guarded live browser acceptance passed five groups and exited successfully at workstation UTC `2026-10-16T01:27:44.270Z`; the host clock is recorded separately. It covered the gold Open PCN link, department timeline, Users presence and Developer menu/badges, all five Mail Routing department-header assignment controls with role selection, cancel and collapse at desktop and 390-pixel widths, and the four Create choices. The real table font loaded at weight 600, with Supplier/Material at 16 px and Open PCN at 14 px. Only existing-account login/logout writes were allowed and the session was signed out. No business changes, directory calls, operational mail, external writes, page errors or failed responses occurred. The successful fresh run followed an interrupted run that performed no authenticated API reads or authentication writes; the interrupted run is not acceptance evidence. The ignored report is `test-results/live-professional-ui-acceptance.json`.
+
+Fresh host checks at `2026-10-16T01:31:55.4535925Z` retained release 18 / commit `1edcec3bb13dce5df6e7d6cd4c079334a5f8aec9`, exact-release Node PID 6008 and WinSW parent PID 12092. A repeat protected-consumer invocation returned `already_current` at `2026-10-16T01:33:48.0160928Z`; the SYSTEM task rerun also returned `already_current` at `2026-10-16T01:33:50.3911593Z`. Independent final checks at `2026-10-16T01:33:53.0160922Z` confirmed the task enabled / Ready / last result 0 and Node PID 6008 unchanged. No PCN save, signing, recipient change, live attachment scan or notification delivery was exercised by acceptance; scanner/quarantine restrictions remain as documented.
+
+### Historical runtime — pcn-test-17-1; Portal timeline
+
+Historical runtime 17: Actions **View** opens a read-only PCN timeline. Each horizontal point shows recorded time, person and a department/signing action such as **GSC/TET — Checked** or **GSC/TET — Approved**; other events show their recorded workflow status, creation or baseline. Cleared signatures and unavailable earlier history are explicit. Selection reveals before/after form and signing changes, omitting internal storage metadata. Popup scrolling is contained at mobile widths, and the existing Portal auto-refresh gate pauses while the dialog is open. The timeline uses the existing history API and adds no database migration or host configuration change.
+
+That runtime's source passed 645 unit/API tests with 91.68% line / 90.87% branch / 93.83% function coverage, and six isolated timeline browser journeys covering 13 genuine events. Viewing made no live business changes or external integration calls.
 
 [Actions 38526805589](https://github.com/akwaa2545-gif/PCN-/actions/runs/38526805589) passed 645 unit/API tests, the dependency audit, the existing isolated workflow browser suite, six automatic-update groups and six timeline groups. Signed [pcn-test-17-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-17-1), commit `6f3b7397139388b3d02a746fdd56cd2ae8349636`, was published at `2026-10-14T07:15:20Z` and installed at observed host time `2026-10-14T07:41:08.6651173Z`. ZIP SHA-256: `3322a8d92bbd480b915007e6cd00394d34bbd021c7ef8b65c93e58ef484a1cda` (15,562,084 bytes).
 
