@@ -1404,8 +1404,9 @@ async function main() {
     await employeeSearch.fill('Source Employee');
     await page.locator('#employeeResults button').click();
     await page.locator('#employeeCancelButton').click();
-    assert.equal(await employeeSearch.inputValue(),'');
-    assert.equal(await page.locator('#employeeCreateButton').isDisabled(),true);
+    assert.equal(await page.locator('#employeeUserDialog').evaluate(dialog=>dialog.open),false,'Cancel closes the dialog immediately');
+    await expect(employeeSearch).toHaveValue('');
+    await expect(page.locator('#employeeCreateButton')).toBeDisabled();
     assert.equal(provisioningWrites.length,4,'Cancelling the popup performs no provisioning write');
     await page.locator('#adminUsersRows [data-user-id="legacy-admin"][data-user-action="edit"]').click();
     await page.locator('#employeeRole').selectOption('checked');
