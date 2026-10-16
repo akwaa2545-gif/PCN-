@@ -420,8 +420,11 @@
       }
     }
     function resetPreview() {
+      if($('documentPreviewDialog').open)return;
       previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);
-      const frame=$('documentPreviewFrame');frame.hidden=true;frame.removeAttribute('src');
+      const frame=$('documentPreviewFrame'),generation=previewGeneration;
+      const cleanup=()=>{frame.hidden=true;frame.removeAttribute('src');};
+      if(!root.PCN_UI_MOTION?.afterExit($('documentPreviewDialog'),cleanup,{current:()=>!$('documentPreviewDialog').open&&previewGeneration===generation}))cleanup();
       setBusy(false);$('previewDocument').focus({preventScroll:true});
     }
     function closePreview() { if($('documentPreviewDialog').open)$('documentPreviewDialog').close(); }

@@ -203,11 +203,12 @@
       rowMenus.forEach(menu => {
         if (!menu.details.open || menu.details === except) return;
         menu.details.open = false;
+        menu.panel.inert = true;
         if (restoreFocus) menu.summary.focus({ preventScroll: true });
       });
     };
     const outsideRowMenu = event => {
-      rowMenus.forEach(menu => { if (menu.details.open && !menu.details.contains(event.target)) menu.details.open = false; });
+      rowMenus.forEach(menu => { if (menu.details.open && !menu.details.contains(event.target)) { menu.details.open = false; menu.panel.inert = true; } });
     };
     document.addEventListener('click', outsideRowMenu);
     const toolbar = node('section', undefined, 'rd-controls'); toolbar.setAttribute('aria-label', 'Record controls');
@@ -265,7 +266,10 @@
       }); wrapper.append(input); wrapper.append(node('span', title)); choices.append(wrapper);
     });
     tools.append(chooser);
-    [chooser, viewEditor].forEach(editor => editor.addEventListener('toggle', () => { if (editor.open) options.onOpen?.(); }));
+    [chooser, viewEditor].forEach(editor => editor.addEventListener('toggle', () => {
+      [...editor.children].filter(child => child.tagName !== 'SUMMARY').forEach(child => { child.inert = !editor.open; });
+      if (editor.open) options.onOpen?.();
+    }));
     tools.append(button('Export filtered CSV', () => {
       const csv = exportCsv(sortRecords(filterRecords(state.records, state.filters), state.preferences.sort, state.preferences.direction), state.preferences.columns);
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); const link = node('a'); link.href = url; link.download = 'pcn-records.csv'; link.click(); URL.revokeObjectURL(url);
@@ -375,20 +379,21 @@
       const summary = node('summary', 'More', 'rd-more-summary');
       summary.dataset.rdFocus = `more:${record.id}`; summary.setAttribute('aria-label', `More actions for ${record.id}`);
       icon(summary, '<circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle>', `More actions for ${record.id}`);
-      const panel = node('div', undefined, 'rd-more-panel'); items.forEach(item => panel.append(item)); details.append(summary, panel);
-      rowMenus.push({ details, summary });
+      const panel = node('div', undefined, 'rd-more-panel'); panel.inert = true; items.forEach(item => panel.append(item)); details.append(summary, panel);
+      rowMenus.push({ details, summary, panel });
       summary.addEventListener('click', () => {
+        panel.inert = details.open;
         if (!details.open) { closeRowMenus(false, details); options.onOpen?.(); }
       });
-      details.addEventListener('toggle', () => { if (details.open) { closeRowMenus(false, details); options.onOpen?.(); } });
+      details.addEventListener('toggle', () => { panel.inert = !details.open; if (details.open) { closeRowMenus(false, details); options.onOpen?.(); } });
       details.addEventListener('keydown', event => {
         if (event.key !== 'Escape' || !details.open) return;
-        event.preventDefault(); event.stopPropagation(); details.open = false; summary.focus({ preventScroll: true });
+        event.preventDefault(); event.stopPropagation(); details.open = false; panel.inert = true; summary.focus({ preventScroll: true });
       });
-      details.addEventListener('focusout', event => { if (!details.contains(event.relatedTarget)) details.open = false; });
+      details.addEventListener('focusout', event => { if (!details.contains(event.relatedTarget)) { details.open = false; panel.inert = true; } });
       // Close before the existing action opens its confirmation dialog; never cancel the action.
       details.addEventListener('click', event => {
-        if (event.target.closest('button')) { details.open = false; summary.focus({ preventScroll: true }); }
+        if (event.target.closest('button')) { details.open = false; panel.inert = true; summary.focus({ preventScroll: true }); }
       }, true);
       return details;
     }
@@ -516,13 +521,18 @@
     }
 
     function finishPreview() {
-      if (!preview.record) return;
-      const { opener } = preview; preview = { record: null, tab: 'overview', request: preview.request + 1, cache: {}, opener: null }; content.replaceChildren(); title.textContent = ''; testBadge.hidden = true; options.onClose?.();
+      if (dialog.open || !preview.record) return;
+      const { opener } = preview; preview = { record: null, tab: 'overview', request: preview.request + 1, cache: {}, opener: null };
+      const request = preview.request;
+      const cleanup = () => { content.replaceChildren(); title.textContent = ''; testBadge.hidden = true; };
+      if (!state.accessible || !window.PCN_UI_MOTION?.afterExit(dialog, cleanup, { current: () => !dialog.open && preview.request === request })) cleanup();
+      options.onClose?.();
       (opener?.isConnected ? opener : search).focus?.({ preventScroll: true });
     }
     function closePreview() { if (dialog.open) dialog.close(); finishPreview(); }
     function clear() {
       state = { ...state, records: [] }; closeRowMenus(); rowMenus = []; closePreview(); rows.replaceChildren(); count.textContent = '0'; cards.replaceChildren(); footer.replaceChildren();
+      content.replaceChildren(); title.textContent = ''; testBadge.hidden = true;
       ['status', 'risk', 'supplier', 'department'].forEach(key => updateOptions(refs[key], [], `All ${key === 'status' ? 'statuses' : `${key}s`}`, ''));
       chooser.open = false; viewEditor.open = false; toolbar.hidden = true;
     }

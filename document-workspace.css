@@ -15,3 +15,12 @@
 @media(max-width:640px){.dw-files li{display:block}.dw-file-actions{margin-top:8px}.dw-header,.dw-panel{padding:12px}.dw-dialog{padding:16px}.dw-dialog-actions{flex-wrap:wrap}.dw-revisions li{grid-template-columns:1fr}.dw-revisions .dw-muted{grid-column:1}.dw-checks li{flex-wrap:wrap}.dw-checks .dw-button{margin-left:34px}}
 @media print{.document-workspace,.dw-dialog{display:none!important}}
 .dw-button[href]{display:inline-block;text-decoration:none}
+
+
+@media screen {
+  .document-workspace, .dw-panel { min-width: 0; max-width: 100%; }
+  .dw-dialog { overflow-y: auto; overscroll-behavior: contain; }
+  .dw-dialog-actions { position: sticky; bottom: -20px; background: #fff; padding-bottom: 12px; }
+  .dw-header, .dw-panel-toolbar { flex-wrap: wrap; }
+  @media (max-height: 800px) { .dw-dialog { padding: 18px; } .dw-dialog-actions { bottom: -18px; } .dw-change-scroll, .dw-snapshot, .dw-text-preview { max-height: 42dvh; } }
+}

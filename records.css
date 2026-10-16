@@ -260,3 +260,27 @@ body.admin-page .rd-tab[aria-selected="true"], .rd-tab[aria-selected="true"] { b
 .rd-signatures th { background: #edf3f8; color: #004583; }
 .rd-signatures td { font-weight: 400; }
 .rd-signatures .is-current { background: #fff8df; }
+
+
+@media screen {
+  .rd-preview-content { min-height: 0; overscroll-behavior: contain; }
+  .rd-preview-header, .rd-preview-tabs { flex: none; }
+  .rd-row-more:not([open]) .rd-more-panel, .rd-editor:not([open]) > :not(summary) { pointer-events: none; interactivity: inert; }
+  @supports selector(details::details-content) {
+    :is(.rd-row-more, .rd-editor)::details-content {
+      opacity: 0; translate: 0 6px; content-visibility: hidden;
+      transition: opacity 160ms ease-out, translate 160ms ease-out, content-visibility 160ms allow-discrete;
+    }
+    :is(.rd-row-more, .rd-editor)[open]::details-content { opacity: 1; translate: 0 0; content-visibility: visible; }
+    @starting-style { :is(.rd-row-more, .rd-editor)[open]::details-content { opacity: 0; translate: 0 6px; } }
+  }
+  @media (max-width: 1366px) and (min-width: 721px) {
+    .rd-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .rd-summary { gap: 10px; }
+    .rd-summary-card { padding: 12px; }
+    .rd-preview-header, .rd-preview-content { padding: 16px 20px; }
+  }
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  :is(.rd-row-more, .rd-editor)::details-content { transition: none !important; translate: none !important; }
+}

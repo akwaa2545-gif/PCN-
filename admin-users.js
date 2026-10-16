@@ -138,12 +138,18 @@
       focusTarget.focus();
     }
     function finishClosingDialog() {
-      if (!dialogOpener) return;
+      if (els.employeeUserDialog.open || !dialogOpener) return;
       const opener = dialogOpener;
       const rowAction = dialogRowAction;
       dialogOpener = null;
       dialogRowAction = null;
-      clearSelection(false);
+      const generation = ++viewGeneration;
+      els.employeeDeveloperPassword.value = '';
+      cancelLookup(); cancelMailLookup(true); resetSelectionState();
+      const cleanup = () => clearSelection(false);
+      if (!state.authorized || !window.PCN_UI_MOTION?.afterExit(els.employeeUserDialog, cleanup, {
+        current: () => !els.employeeUserDialog.open && viewGeneration === generation
+      })) cleanup();
       document.body?.classList.remove('employee-dialog-open');
       if (window.location.hash !== '#users') return;
       const buttons = rowAction ? userActionButtons()
@@ -156,6 +162,7 @@
       if (state.busy) return;
       if (els.employeeUserDialog.open) els.employeeUserDialog.close();
       finishClosingDialog();
+      if (!state.authorized) clearSelection(false);
     }
     function beginAddRole() {
       if (!state.authorized || !canSearchEmployees() || state.busy) return;
@@ -190,10 +197,11 @@
       els.employeeMailLoadingText.textContent = loading ? query ? `Searching for ${query}` : 'Searching mail directory...' : '';
       els.employeeMailResults.setAttribute('aria-busy', String(loading));
     }
-    function cancelMailLookup() {
+    function cancelMailLookup(preservePresentation = false) {
       clearTimeout(mailTimer);
       if (mailController) mailController.abort();
       mailController = null;
+      if (preservePresentation) return;
       els.employeeMailResults.replaceChildren();
       els.employeeMailResults.hidden = true;
       setMailLoading(false);
@@ -256,11 +264,14 @@
       updateRoleHelp();
       previewRoute(validationError);
     }
+    function resetSelectionState() {
+      state = { ...state, manual: false, selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
+    }
     function clearSelection(focus = true) {
       els.employeeDeveloperPassword.value = '';
       cancelLookup();
       cancelMailLookup();
-      state = { ...state, manual: false, selected: null, linkUser: null, editUser: null, mail: null, retainMail: true, assignmentChanged: false };
+      resetSelectionState();
       els.employeeUserForm.reset();
       els.employeeManualFields.hidden = true;
       els.employeeDirectoryFields.hidden = false;

@@ -195,6 +195,7 @@
     const panel = element('div', 'account-panel');
     panel.id = 'accountProfilePanel';
     panel.hidden = true;
+    panel.inert = true;
     if (noPcnRole) panel.classList.add('account-panel-pending');
     panel.setAttribute('role', 'group');
     panel.setAttribute('aria-label', 'User profile');
@@ -282,12 +283,14 @@
 
     const close = (returnFocus = false) => {
       panel.hidden = true;
+      panel.inert = true;
       trigger.setAttribute('aria-expanded', 'false');
       if (returnFocus) trigger.focus();
     };
     trigger.addEventListener('click', () => {
       const opening = panel.hidden;
       panel.hidden = !opening;
+      panel.inert = !opening;
       trigger.setAttribute('aria-expanded', String(opening));
     });
     document.addEventListener('click', (event) => {
@@ -307,6 +310,32 @@
   }
 
   window.PCN_SESSION = Object.freeze({ fetch: apiFetch, load, require: requireSession, safeReturnTo, logout, mountProfile });
+  window.PCN_UI_MOTION = Object.freeze({ afterExit });
+
+  // Only presentation cleanup waits; callers close and invalidate their work first.
+  function afterExit(element, cleanup, { current = () => true } = {}) {
+    let timer = null; let finished = false;
+    const cancel = () => {
+      if (timer !== null) window.clearTimeout?.(timer);
+      element?.removeEventListener?.('transitionend', ended);
+      timer = null; finished = true;
+    };
+    const finish = () => { if (finished) return; cancel(); if (current()) cleanup(); };
+    const ended = event => { if (event.target === element && event.propertyName === 'opacity') finish(); };
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    const supported = window.CSS?.supports?.('transition-behavior', 'allow-discrete');
+    const style = supported && !reduced ? window.getComputedStyle?.(element) : null;
+    const seconds = value => value.trim().endsWith('ms') ? parseFloat(value) : parseFloat(value) * 1000;
+    const durations = style?.transitionDuration?.split(',').map(seconds) || [];
+    const delays = style?.transitionDelay?.split(',').map(seconds) || [0];
+    const duration = Math.max(0, ...durations.map((value, index) => value + (delays[index % delays.length] || 0)));
+    if (!duration || !window.setTimeout || !element?.addEventListener) finish();
+    else {
+      element.addEventListener('transitionend', ended);
+      timer = window.setTimeout(finish, Math.min(duration + 40, 240));
+    }
+    return { cancel };
+  }
 })();
 
 (function (root) {

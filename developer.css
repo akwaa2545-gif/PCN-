@@ -89,3 +89,12 @@
 }
 .developer-table,
 .developer-table * { font-family: var(--pcn-table-font) !important; font-weight: 600 !important; }
+
+
+@media screen and (max-width: 1366px) and (min-width: 701px) {
+  .developer-main, .developer-status { width: calc(100% - 36px); }
+  .developer-panel { padding: 22px 18px; }
+  .developer-picker { padding: 18px; }
+  .developer-table-scroll { min-width: 0; overscroll-behavior: contain; }
+  .developer-heading { flex-wrap: wrap; }
+}

@@ -63,6 +63,8 @@ jobs:
         run: npm run test:user-presence
       - name: Isolated department mail assignment browser tests
         run: npm run test:mail-routing-ui
+      - name: Isolated popup motion and laptop layout browser tests
+        run: npm run test:motion-ui
       - name: Retain production dependencies
         run: npm prune --omit=dev --no-fund --no-audit
       - name: Sign immutable Windows runtime archive

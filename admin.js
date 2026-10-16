@@ -33,6 +33,7 @@
   let portalAccessEpoch = 0;
   let recordsDashboard = null;
   let collapsedRoutingDepartments = new Set();
+  let recipientPresentation = 0;
   let timeline = { record: null, tab: 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: 0, session: 0, opener: null };
 
   document.addEventListener("DOMContentLoaded", init);
@@ -133,6 +134,7 @@
     let openedByHover = false;
     const setOpen = (open, returnFocus = false) => {
       panel.hidden = !open;
+      panel.inert = !open;
       trigger.setAttribute('aria-expanded', String(open));
       if (!open) openedByHover = false;
       if (returnFocus) trigger.focus();
@@ -251,6 +253,8 @@
     refreshGeneration++;
     recordsDashboard?.clear();
     if (timeline.record) closeTimeline();
+    clearTimelinePresentation();
+    if (els.notificationRecipientList) els.notificationRecipientList.innerHTML = '';
     state.pcns = []; state.selected = null; state.progress = null;
     state.notificationSettings = { schemaVersion: 2, groups: [], legacyGroups: [] };
     state.mailDraftRows = null; state.hasMailChanges = false;
@@ -724,16 +728,22 @@
   }
 
   function finishTimeline() {
-    if (!timeline.record) return;
+    if (els.pcnTimelineDialog.open || !timeline.record) return;
     const { opener, record } = timeline;
     timeline = { record: null, tab: 'summary', summary: null, selectedDepartment: null, revisions: [], selectedRevision: null, request: timeline.request + 1, session: timeline.session, opener: null };
-    els.pcnTimelineTrack.innerHTML = '';
-    els.pcnTimelineDetails.innerHTML = '';
-    els.pcnTimelineMessage.textContent = '';
+    const request = timeline.request;
+    const cleanup = () => clearTimelinePresentation();
+    if (autoRefreshBlocked || !window.PCN_UI_MOTION?.afterExit(els.pcnTimelineDialog, cleanup, { current: () => !els.pcnTimelineDialog.open && timeline.request === request })) cleanup();
     document.body.classList.remove('pcn-timeline-open');
     const row = [...els.adminPcnRows.querySelectorAll('[data-pcn-id]')].find(item => item.dataset.pcnId === record.id);
     const target = opener?.isConnected ? opener : row?.querySelector('.admin-view-button') || els.adminSearchInput;
     target?.focus({ preventScroll: true });
+  }
+
+  function clearTimelinePresentation() {
+    if (els.pcnTimelineTrack) els.pcnTimelineTrack.innerHTML = '';
+    if (els.pcnTimelineDetails) els.pcnTimelineDetails.innerHTML = '';
+    if (els.pcnTimelineMessage) els.pcnTimelineMessage.textContent = '';
   }
 
   function chronologicalTimeline(items) {
@@ -923,6 +933,7 @@
     els.adminRemoveConfirmButton.disabled = false;
     els.adminRemoveConfirmButton.textContent = "Remove PCN";
     els.adminRemoveDialog.hidden = false;
+    els.adminRemoveDialog.inert = false;
     document.body.classList.add("admin-dialog-open");
     els.adminRemoveCancelButton.focus();
   }
@@ -934,6 +945,7 @@
 
     state.pendingRemoveRecord = null;
     els.adminRemoveDialog.hidden = true;
+    els.adminRemoveDialog.inert = true;
     document.body.classList.remove("admin-dialog-open");
   }
 
@@ -1344,6 +1356,7 @@
 
   function openRecipientDialog(group, department = null) {
     if (isAnyBusy()) return;
+    recipientPresentation++;
     refreshGeneration++;
     state.recipientDepartment = department?.key || null;
     state.recipientDepartmentLabel = department?.label || null;
@@ -1446,6 +1459,7 @@
   }
 
   function finishRecipientDialog() {
+    if (els.notificationRecipientDialog.open) return;
     const input = els.notificationRecipientList.querySelector("input");
     if (input) {
       directorySelections.delete(input);
@@ -1455,7 +1469,9 @@
     const target = findRecipientTargetCard();
     const department = [...els.notificationGroups.querySelectorAll('[data-department]')].find(card => card.dataset.department === state.recipientDepartment);
     const focusTarget = department?.querySelector('.notification-department-add') || getRoutingAssignmentButton(target);
-    els.notificationRecipientList.innerHTML = "";
+    const presentation = ++recipientPresentation;
+    const cleanup = () => { els.notificationRecipientList.innerHTML = ''; };
+    if (autoRefreshBlocked || !window.PCN_UI_MOTION?.afterExit(els.notificationRecipientDialog, cleanup, { current: () => !els.notificationRecipientDialog.open && recipientPresentation === presentation })) cleanup();
     els.notificationRecipientEditor.removeAttribute("data-notification-group");
     state.recipientTargetKey = null;
     state.recipientDepartment = null; state.recipientDepartmentLabel = null;

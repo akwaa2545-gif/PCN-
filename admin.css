@@ -562,3 +562,26 @@ body.admin-page .notification-department-header .notification-department-add:hov
 .recipient-dialog-role select { min-height: 44px; width: 100%; padding: 8px 12px; border: 1px solid #bdcbd9; border-radius: 0; background: #fff; color: #173454; font: inherit; }
 @media (max-width: 600px) { body.admin-page .notification-department-header { gap: 10px; padding-inline: 14px; } body.admin-page .notification-department-toggle { font-size: 16px; } .recipient-dialog-role { margin-inline: 14px; } }
 @media (max-width: 600px) { .pcn-timeline-tabs { padding-inline: 12px; } body.admin-page .pcn-timeline-tabs button { padding-inline: 12px; } }
+
+
+@media screen {
+  @media (max-width: 720px) {
+    .create-start-dropdown { position: static; }
+    .create-start-options { left: 12px; right: 12px; width: auto; max-width: none; }
+  }
+  body.admin-page .recipient-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+  .recipient-dialog-heading, .recipient-dialog-actions { flex: none; }
+  .recipient-dialog-editor { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .pcn-timeline-tabs, .pcn-timeline-actions { flex: none; }
+  @media (min-width: 701px) {
+    body.admin-page :is(.admin-table-wrap, .users-table-wrap) { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+  }
+  @media (max-height: 800px) {
+    .employee-dialog-heading, .pcn-timeline-heading { padding: 14px 20px; }
+    .employee-dialog-body { padding: 16px 20px; }
+    #employeeResults, #employeeMailResults { max-height: min(180px, 24dvh); }
+    body.admin-page .employee-user-dialog .employee-user-actions, .pcn-timeline-actions { padding: 12px 20px; }
+    .recipient-dialog-heading { padding-top: 16px; }
+    .recipient-dialog-actions { padding-block: 12px; }
+  }
+}

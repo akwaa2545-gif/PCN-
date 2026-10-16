@@ -9614,3 +9614,49 @@ body.pcn-page.document-preview-only .document-print-header {
 body.pcn-page.document-preview-only #submissionView .supplier-sheet {
   min-width: 900px;
 }
+
+
+/* Popup motion follows logical open/hidden state; unsupported browsers stay immediate. */
+@media screen {
+  :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog) { opacity: 1; }
+  :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog):not([open]) { pointer-events: none; interactivity: inert; }
+  :is(.account-panel, .create-start-options, .admin-confirm-backdrop)[hidden] { pointer-events: none; interactivity: inert; }
+  @supports (transition-behavior: allow-discrete) {
+    :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog) {
+      opacity: 0; translate: 0 6px;
+      transition: opacity 160ms ease-out, translate 160ms ease-out, display 160ms allow-discrete, overlay 160ms allow-discrete;
+    }
+    :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open] { opacity: 1; translate: 0 0; }
+    :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)::backdrop {
+      opacity: 0; transition: opacity 160ms ease-out, display 160ms allow-discrete, overlay 160ms allow-discrete;
+    }
+    :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open]::backdrop { opacity: 1; }
+    :is(.account-panel, .create-start-options, .admin-confirm-backdrop) {
+      opacity: 1; translate: 0 0;
+      transition: opacity 160ms ease-out, translate 160ms ease-out, display 160ms allow-discrete;
+    }
+    :is(.account-panel, .create-start-options, .admin-confirm-backdrop)[hidden] { opacity: 0; translate: 0 6px; }
+    @starting-style {
+      :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open],
+      :is(.account-panel, .create-start-options, .admin-confirm-backdrop):not([hidden]) { opacity: 0; translate: 0 6px; }
+      :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)[open]::backdrop { opacity: 0; }
+    }
+  }
+  .account-panel { max-height: calc(100dvh - 180px); overflow-y: auto; overscroll-behavior: contain; }
+  :is(.app-shell, .admin-view, .admin-workspace, .admin-panel, .admin-table-wrap, .users-panel, .users-table-wrap, .mail-routing-layout, .form-panel, .summary-panel) { min-width: 0; }
+  @media (max-width: 1440px) {
+    body.admin-page .admin-workspace { grid-template-columns: minmax(0, 1fr); }
+    body.admin-page .admin-detail-panel { position: static; max-height: none; }
+    body.pcn-page .workspace-normal { display: flex; flex-direction: column; min-width: 0; }
+    body.pcn-page .workspace-normal > :is(.form-panel, .summary-panel) { width: 100%; min-width: 0; }
+    body.pcn-page .workspace-normal > .form-panel { overflow-x: auto; }
+  }
+  @media (max-height: 800px) and (min-width: 701px) {
+    body:is(.admin-page, .pcn-page) .topbar { padding-block: 12px; }
+    .admin-confirm-card { max-height: calc(100dvh - 32px); overflow-y: auto; }
+  }
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog, .account-panel, .create-start-options, .admin-confirm-backdrop),
+  :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)::backdrop { transition: none !important; translate: none !important; }
+}

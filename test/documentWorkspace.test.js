@@ -119,3 +119,63 @@ test('dirty document disables export and revision actions',async()=>{
   assert.equal(buttons.find(item=>item.textContent==='Print / PDF').disabled,true);
   assert.equal(buttons.find(item=>item.textContent==='Start new revision').disabled,true);
 });
+
+function previewLifecycleFixture() {
+  const vm = require('node:vm');
+  const fs = require('node:fs');
+  const pending = [], revoked = [];
+  class Element {
+    constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map(); this.attributes = {}; this.dataset = {}; this.textContent = ''; this.classList = { add() {} }; this.open = false; this.removals = 0; }
+    append(...children) { children.forEach(child => { child.parent = this; this.children.push(child); }); }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    get firstElementChild() { return this.children[0]; }
+    setAttribute(key, value) { this.attributes[key] = value; }
+    addEventListener(event, callback) { this.listeners.set(event, callback); }
+    querySelector() { return null; }
+    focus() {}
+    showModal() { this.open = true; }
+    close() { this.open = false; this.listeners.get('close')?.(); }
+    remove() { this.removals++; if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); }
+  }
+  const document = { createElement: tag => new Element(tag), body: new Element('body') };
+  const container = new Element('div'); container.ownerDocument = document;
+  const window = { URL: { createObjectURL: () => 'blob:fixture-image', revokeObjectURL: value => revoked.push(value) },
+    fetch: async () => ({ ok: true, headers: { get: () => 'image/png' }, blob: async () => ({}) }),
+    PCN_UI_MOTION: { afterExit(element, callback) { const item = { element, cancelled: false, finish() { if (!this.cancelled) callback(); }, cancel() { this.cancelled = true; } }; pending.push(item); return item; } } };
+  vm.runInNewContext(fs.readFileSync(require.resolve('../document-workspace.js'), 'utf8'), { window });
+  const file = { id: 'fixture-image', fileName: 'Fixture image.png', contentType: 'image/png', scanStatus: 'clean', sizeBytes: 4 };
+  const control = window.PCN_DOCUMENT_WORKSPACE.mount({ container,
+    getContext: () => ({ record: { id: 'PCN-2026-0001', version: 'v1', status: 'draft' }, ready: true }),
+    apiFetch: async url => url.endsWith('/documents') ? [file] : {} });
+  const buttons = element => [...(element.tagName === 'BUTTON' ? [element] : []), ...element.children.flatMap(buttons)];
+  return { control, container, document, pending, revoked, buttons,
+    async open() {
+      await control.refresh(); buttons(container).find(button => button.textContent === 'Attachments').listeners.get('click')();
+      await buttons(container).find(button => button.textContent === 'Preview').listeners.get('click')();
+      return document.body.children.find(element => element.tagName === 'DIALOG');
+    } };
+}
+
+test('a preview retains its image and blob URL during exit, then disposes them after motion completes', async () => {
+  const fixture = previewLifecycleFixture(), dialog = await fixture.open();
+  const image = dialog.children.find(element => element.tagName === 'IMG');
+  assert.equal(image.src, 'blob:fixture-image'); assert.equal(dialog.open, true);
+  dialog.close();
+  assert.equal(dialog.open, false, 'logical modal close is immediate');
+  assert.equal(fixture.document.body.children.includes(dialog), true, 'presentation remains for its exit');
+  assert.equal(dialog.children.includes(image), true); assert.deepEqual(fixture.revoked, []);
+  fixture.pending[0].finish();
+  assert.deepEqual(fixture.revoked, ['blob:fixture-image']); assert.equal(dialog.removals, 1);
+  assert.equal(fixture.document.body.children.includes(dialog), false); assert.equal(fixture.pending[0].cancelled, true);
+  fixture.control.destroy(); assert.deepEqual(fixture.revoked, ['blob:fixture-image']);
+});
+
+test('destroy immediately cancels a pending preview exit and disposes its resources once', async () => {
+  const fixture = previewLifecycleFixture(), dialog = await fixture.open();
+  dialog.close(); assert.equal(fixture.pending.length, 1);
+  fixture.control.destroy();
+  assert.equal(fixture.pending[0].cancelled, true); assert.equal(dialog.removals, 1);
+  assert.deepEqual(fixture.revoked, ['blob:fixture-image']); assert.equal(fixture.document.body.children.length, 0);
+  fixture.pending[0].finish();
+  assert.equal(dialog.removals, 1); assert.deepEqual(fixture.revoked, ['blob:fixture-image']);
+});

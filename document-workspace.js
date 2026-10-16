@@ -47,6 +47,8 @@
     let dataKey = '';
     let dialogSequence = 0;
     const dialogs = new Set();
+    const dialogResources = new Map();
+    const dialogDisposals = new Map();
     const urls = new Set();
     const identity = () => {
       const context = getContext();
@@ -82,6 +84,11 @@
       if (context.dirty) return 'Save your document changes before uploading files, starting a revision, or exporting.';
       return '';
     }
+    function disposeDialog(dialog) {
+      dialogDisposals.get(dialog)?.cancel(); dialogDisposals.delete(dialog);
+      dialogResources.get(dialog)?.(); dialogResources.delete(dialog);
+      dialogs.delete(dialog); dialog.remove();
+    }
     function createDialog(title) {
       const dialog = node('dialog',undefined,'dw-dialog');
       const heading = node('h2',title);
@@ -90,7 +97,12 @@
       dialog.append(heading);
       doc.body.append(dialog);
       dialogs.add(dialog);
-      dialog.addEventListener('close',() => { dialogs.delete(dialog); dialog.remove(); },{once:true});
+      dialog.addEventListener('close',() => {
+        if (destroyed) { disposeDialog(dialog); return; }
+        const handle = root.PCN_UI_MOTION?.afterExit(dialog, () => disposeDialog(dialog));
+        if (!handle) disposeDialog(dialog);
+        else if (dialogs.has(dialog)) dialogDisposals.set(dialog, handle);
+      },{once:true});
       dialog.addEventListener('click',event => event.stopPropagation());
       dialog.addEventListener('keydown',event => {
         if (event.key === 'Escape') { event.stopPropagation(); return; }
@@ -318,7 +330,7 @@
               content=node('img');content.src=url;content.alt=file.fileName;content.className='dw-image-preview';
             }
             const dialog=showPreview(file,content);
-            dialog.addEventListener('close',()=>{root.URL.revokeObjectURL(url);urls.delete(url);},{once:true});
+            dialogResources.set(dialog,()=>{root.URL.revokeObjectURL(url);urls.delete(url);});
           }else {
             const link=node('a');link.href=url;link.download=downloadName(file.fileName);doc.body.append(link);link.click();link.remove();
             root.setTimeout(()=>{root.URL.revokeObjectURL(url);urls.delete(url);},1000);
@@ -386,7 +398,7 @@
     }
     function destroy() {
       destroyed=true;generation++;
-      for(const dialog of dialogs){if(dialog.open)dialog.close('cancel');else dialog.remove();}
+      for(const dialog of [...dialogs]){if(dialog.open)dialog.close('cancel');disposeDialog(dialog);}
       for(const url of urls)root.URL.revokeObjectURL(url);urls.clear();container.replaceChildren();
     }
     render();return {refresh,render,destroy};
