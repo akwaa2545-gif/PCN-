@@ -151,6 +151,7 @@ async function main() {
         const firstRow = page.locator('#adminPcnRows tr').first();
         await firstRow.locator('[data-column="status"]').click();
         await expect(firstRow).toHaveAttribute('aria-selected', 'true');
+        await page.evaluate(() => window.scrollTo(0, 0));
         const metrics = await page.evaluate(() => {
           const workspace = document.querySelector('#pcnAdminView .admin-workspace');
           const pane = workspace.querySelector(':scope > .admin-panel'), side = workspace.querySelector('.admin-detail-panel');
@@ -161,7 +162,7 @@ async function main() {
           const cells = [...table.querySelectorAll('tbody tr:first-child td')];
           const nav = [...document.querySelectorAll('.topbar-actions > button:not([hidden]), .topbar-actions > a:not([hidden]), .create-start-dropdown, .account-trigger')];
           return { viewport: innerWidth, body: document.documentElement.scrollWidth, htmlZoom: getComputedStyle(document.documentElement).zoom, bodyZoom: getComputedStyle(document.body).zoom, scale: visualViewport.scale,
-            twoColumns: right.left >= left.right - 1 && Math.abs(right.top - left.top) <= 1, sidebar: right.width, sidebarOverflow: side.scrollWidth > side.clientWidth + 1,
+            twoColumns: right.left >= left.right - 1, sidebar: right.width, sidebarOverflow: side.scrollWidth > side.clientWidth + 1,
             topbar: document.querySelector('.topbar').getBoundingClientRect().height, navFits: nav.every(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; }),
             filterCount: filterControls.length, filterRows: new Set(filterControls.map(control => Math.round(control.getBoundingClientRect().bottom))).size,
             maxInputHeight: Math.max(...controls.map(control => control.getBoundingClientRect().height)),
@@ -184,11 +185,16 @@ async function main() {
         verify(metrics.header <= 44 && metrics.maxCellPadding <= 12, label + ' table headers and cell spacing retain compact density');
         verify(metrics.minFont >= 12 && metrics.supplierFont >= 14 && metrics.materialFont >= 14, label + ' preserves legible table and Supplier/Material type');
         verify(metrics.containedScroll && metrics.allColumnsVisible && metrics.tableColumns >= 10, label + ' preserves every column in a contained horizontal table');
+        await expect(page.locator('#adminToastStack .admin-toast')).toHaveCount(0);
+        await firstRow.evaluate(node => node.scrollIntoView({ block: 'center' }));
+        const clearance = await page.evaluate(() => { const aside = document.querySelector('#pcnAdminView .admin-detail-panel'), panel = aside.getBoundingClientRect(), parent = aside.parentElement.getBoundingClientRect(), header = document.querySelector('.topbar').getBoundingClientRect(); return { sidebarTop: panel.top, headerBottom: header.bottom, parentBottom: parent.bottom, sidebarHeight: panel.height }; });
+        report.recordsScroll ||= []; report.recordsScroll.push({ width: viewport.width, ...clearance });
+        if (clearance.parentBottom >= clearance.headerBottom + clearance.sidebarHeight + 14) verify(clearance.sidebarTop >= clearance.headerBottom, label + ' sticky sidebar clears the header while scrolling');
         const open = firstRow.locator('.rd-open-button'); await open.focus();
         verify(await open.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight && document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('a') === node; }), label + ' Open PCN remains reachable in the code column');
         await expect(open).toHaveAttribute('href', new RegExp(await firstRow.getAttribute('data-pcn-id')));
         await wrapper.evaluate(node => { node.scrollLeft = node.scrollWidth; });
-        for (const control of await firstRow.locator('.rd-secondary-actions button, .rd-secondary-actions summary').all()) verify(await control.evaluate(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('button, summary') === node; }), label + ' secondary action icons remain reachable');
+        for (const control of await firstRow.locator('.rd-secondary-actions > button, .rd-secondary-actions > details > summary').all()) { const geometry = await control.evaluate(node => { const box = node.getBoundingClientRect(), hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return { passed: box.left >= 0 && box.right <= innerWidth && hit?.closest('button, summary') === node, control: node.getAttribute('aria-label'), left: box.left, right: box.right, top: box.top, bottom: box.bottom, hit: hit?.className || hit?.tagName }; }); report.recordsActionBounds ||= []; report.recordsActionBounds.push({ width: viewport.width, ...geometry }); verify(geometry.passed, label + ' secondary action icons remain reachable'); }
         const quick = firstRow.locator('.rd-preview-button'); await quick.click(); await expect(page.locator('#rdPreviewDialog')).toHaveJSProperty('open', true);
         await page.locator('#rdPreviewDialog [aria-label="Close preview"]').click(); await expect(page.locator('#rdPreviewDialog')).toBeHidden();
         await wrapper.evaluate(node => { node.scrollLeft = 0; });

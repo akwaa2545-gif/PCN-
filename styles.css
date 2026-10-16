@@ -9706,3 +9706,15 @@ body.pcn-page.document-preview-only #submissionView .supplier-sheet {
   :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog, .account-panel, .create-start-options, .admin-confirm-backdrop),
   :is(dialog.employee-user-dialog, dialog.recipient-dialog, dialog.pcn-timeline-dialog, dialog.rd-preview, dialog.create-dialog, dialog.create-document-preview, dialog.pcn-unsaved-dialog, dialog.dw-dialog)::backdrop { transition: none !important; translate: none !important; }
 }
+
+@media screen and (min-width: 1200px) {
+  body.admin-page .topbar { min-height: 64px; padding: 8px 16px; gap: 16px; }
+  body.admin-page .admin-header-brand { gap: 12px; }
+  body.admin-page .admin-header-logo { width: 100px; }
+  body.admin-page .topbar h1 { font-size: 18px; }
+  body.admin-page .topbar .eyebrow { margin-bottom: 3px; font-size: 9px; }
+  body.admin-page .topbar-actions { gap: 6px; }
+  body.admin-page .topbar-actions :is(.ghost-button, .ghost-link) { min-height: 36px; padding-inline: 10px; font-size: 12px; }
+  body.admin-page .topbar-actions .account-trigger { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
+  body.admin-page .topbar-actions .account-avatar { width: 40px; height: 40px; }
+}

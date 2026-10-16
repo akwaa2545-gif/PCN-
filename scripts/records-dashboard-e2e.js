@@ -331,9 +331,11 @@ async function main() {
       open: { family: getComputedStyle(row.querySelector('.rd-open-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-open-button')).fontSize },
       icon: { family: getComputedStyle(row.querySelector('.rd-preview-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-preview-button')).fontSize }
     }));
-    for (const cell of typography.cells) { assert.match(cell.family, /PCN Table Semibold/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px'); }
-    assert.match(typography.open.family, /PCN Table Semibold/); assert.equal(typography.open.size, '14px');
-    assert.match(typography.icon.family, /PCN Table Semibold/); assert.equal(typography.icon.size, '14px');
+    const compactTypography = admin.page.viewportSize().width >= 1200;
+    const tableSize = compactTypography ? '13px' : '14px', supplierSize = compactTypography ? '14px' : '16px';
+    for (const cell of typography.cells) { assert.match(cell.family, /PCN Table Semibold/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? supplierSize : tableSize); }
+    assert.match(typography.open.family, /PCN Table Semibold/); assert.equal(typography.open.size, tableSize);
+    assert.match(typography.icon.family, /PCN Table Semibold/); assert.equal(typography.icon.size, tableSize);
     await expect(history).toHaveAttribute('title', 'History');
     await expect(history.locator('svg[aria-hidden="true"]')).toHaveCount(1);
     await expect(actionRow.getByRole('button', { name: `Remove ${records[2].id}`, exact: true })).toBeHidden();
@@ -377,6 +379,8 @@ async function main() {
     report.checks.push('Portal Open PCN, labelled History and More actions work; More pauses polling, Escape restores focus, removal still confirms and suppliers cannot remove');
 
     await dashboard.reset(); await page.setViewportSize({ width: 390, height: 844 }); await dashboard.fits();
+    const mobileTypography = await dashboard.rows().first().evaluate(row => [...row.cells].map(cell => ({ column: cell.dataset.column || 'actions', size: getComputedStyle(cell).fontSize })));
+    for (const cell of mobileTypography) assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px', 'Mobile table typography stays unchanged');
     await page.screenshot({ path: path.resolve('test-results/records-dashboard-mobile.png'), fullPage: true });
     await dashboard.preview(records[0].id).click(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
     await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click(); await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(6);

@@ -1,6 +1,6 @@
 # Popup motion and laptop layout
 
-Updated: 2026-10-16. Local implementation only; not included in deployed `pcn-test-18-1`. Motion/dropdown verification, the 989-test unit/API run and populated Users laptop acceptance passed. A further compact Records layout at 100% browser zoom is pending.
+Updated: 2026-10-16. Local implementation only; not included in deployed `pcn-test-18-1`. Motion/dropdown verification, the 989-test unit/API run, populated Users laptop acceptance, local LAN compact Records checks, the Records dashboard regression and final isolated density capture passed.
 
 ## Interaction
 
@@ -30,8 +30,8 @@ The dialog, disclosure and native-picker CSS progressively enhances existing `op
 
 The changes target common laptop viewports of **1366 × 768**, **1280 × 720** and **1024 × 768**, while retaining the existing mobile layout at **390 × 844**.
 
-- Portal/document workspaces stack below 1440 px; wide content scrolls inside its own region instead of widening the page.
-- Records filters use three columns at laptop widths, with compact spacing and contained preview scrolling.
+- Official document workspaces stack below 1440 px; wide content scrolls inside its own region instead of widening the page. Portal Records retains its sidebar from 1200 px upward and stacks below that breakpoint.
+- Records filters use five columns from 1200 px upward, three at intermediate laptop widths and the existing two-column mobile layout, with contained preview scrolling.
 - Create entry choices use two columns below 1200 px; the readiness panel moves below the editor below 1100 px. Short screens receive smaller vertical padding.
 - Mail assignment headings/actions remain outside the scrolling editor. Employee/mail search results have a bounded height; long result lists scroll inside the popup.
 - Developer tables and document-workspace dialogs retain contained scrolling. Headers/toolbars wrap when space is limited, and document dialog actions remain reachable.
@@ -52,9 +52,15 @@ Final populated-table visual and durable browser acceptance passed at all three 
 
 Ignored evidence is in `test-results/users-laptop-populated-final-visual.json` and `test-results/motion-ui-users-layout-acceptance.json`.
 
-### Compact Records follow-up — pending
+### Compact Records at 100% browser zoom
 
-The next change targets the user's preferred compact Records appearance at **100% browser zoom**, including a visible sidebar. The proposed screen-only layout uses a 280 px sidebar/main-content pair from 1200 px upward, a roughly 64–68 px header, five filters per row, reduced padding and 13 px table text with Supplier/Material at 14 px. It uses responsive CSS rather than CSS zoom. Implementation and final visual/browser acceptance are pending; the earlier Records checks below do not establish this new density or sidebar behavior.
+The screen-only layout matches the user's preferred compact Records appearance at **100% browser zoom**, with a visible 280 px sidebar/main-content pair from 1200 px upward. The header is compact, filters occupy five columns, spacing is reduced and the Records table uses 13 px text with Supplier/Material at 14 px. Wide tables scroll internally; the page does not use CSS zoom. The sidebar starts 78 px below the viewport top to clear the header, scrolls internally when needed and places its status controls in one column. Below 1200 px, the existing stacked layout remains.
+
+Guarded acceptance at the actual local LAN URL passed at **1536**, **1366** and **1280 px**: computed zoom was `1`, header height was **64 px**, sidebar width was **280 px**, all five filters occupied one row and no page overflow or errors occurred. Only existing-account login/logout writes were allowed. The ignored report is `test-results/lan-records-density.json`. This local result does not represent deployment to the Windows host.
+
+Static review approved the compact CSS, including header clearance and the narrow sidebar status controls. The motion suite passed seven groups/eleven fades and populated Users regression passed again. The existing Records dashboard regression passed all thirteen groups using seventeen isolated fixture PCNs: filters, saved views, CSV, pagination, sorting, previews, history, polling/focus and access restrictions passed without page errors, external calls or forbidden writes. Desktop table/Supplier-Material sizes were 13/14 px; mobile retained 14/16 px and the same font family.
+
+The final isolated density run passed and exited with code 0 after the sidebar owner-label alignment correction. It covered all three desktop widths and the 1024 px stacked fallback, reachable actions and sticky behavior. The final 1280 px capture confirmed **Supplier** and **Active** remain readable as whole words. Final review approved the change. The ignored report is `test-results/motion-ui-records-density-acceptance.json`.
 
 ## Verification
 
@@ -68,4 +74,4 @@ The native-select follow-up passed six measured picker entry/exit fades; the com
 
 Guarded acceptance against the actual local LAN URL `http://10.249.160.21:3000/admin#users` passed role/department entry and exit, focus/value retention and outer-dialog behavior. Only an existing account's login/logout writes were allowed; business changes and operational mail were excluded. This is local LAN evidence, not deployment to `172.30.77.137`. The ignored report is `test-results/lan-users-dropdown-acceptance.json`.
 
-The dropdown follow-up's combined unit/API suite passed 989/989 tests with 88.23% line, 91.09% branch and 94.61% function coverage. The dependency audit reported no high or critical advisories. JavaScript and general reviews approved the earlier motion changes; the accompanying development-only localhost origin fix also passed security review. Local SQL-backed readiness, an existing-account localhost login/session/logout and rejection of an unrelated origin were verified without business writes or test mail. The newer compact Records follow-up is awaiting final verification. Deployment requires a separate explicit user instruction.
+The dropdown follow-up's combined unit/API suite passed 989/989 tests with 88.23% line, 91.09% branch and 94.61% function coverage. The dependency audit reported no high or critical advisories. JavaScript and general reviews approved the earlier motion changes; the accompanying development-only localhost origin fix also passed security review. Local SQL-backed readiness, an existing-account localhost login/session/logout and rejection of an unrelated origin were verified without business writes or test mail. All scoped motion/layout gates described above passed. Deployment requires a separate explicit user instruction.

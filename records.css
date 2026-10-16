@@ -284,3 +284,50 @@ body.admin-page .rd-tab[aria-selected="true"], .rd-tab[aria-selected="true"] { b
 @media screen and (prefers-reduced-motion: reduce) {
   :is(.rd-row-more, .rd-editor)::details-content { transition: none !important; translate: none !important; }
 }
+
+/* Keep the desktop Records workspace compact at the browser's normal zoom. */
+@media screen and (min-width: 1200px) {
+  body.admin-page #pcnAdminView .admin-workspace { grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; padding: 14px; }
+  body.admin-page #pcnAdminView .admin-detail-panel { position: sticky; top: 78px; max-height: calc(100dvh - 92px); overflow: auto; min-width: 0; overflow-wrap: anywhere; }
+  #pcnAdminView .admin-detail-panel > * { min-width: 0; }
+  body.admin-page #pcnAdminView .admin-overview { gap: 12px; padding: 12px 14px 0; }
+  body.admin-page #pcnAdminView .admin-overview > div { min-height: 56px; padding: 9px 12px; box-sizing: border-box; }
+  body.admin-page #pcnAdminView .admin-overview strong { font-size: 16px; }
+  body.admin-page #pcnAdminView .panel-header { padding: 12px 14px; }
+  body.admin-page #pcnAdminView .panel-header h2 { font-size: 17px; }
+  #pcnAdminView .admin-message { font-size: 12px; }
+  #pcnAdminView .progress-summary { margin: 12px; padding: 12px; }
+  #pcnAdminView .progress-steps { gap: 7px; margin: 12px; }
+  #pcnAdminView .progress-step { gap: 8px; padding: 9px; }
+  #pcnAdminView .progress-step-owner { grid-column: 2; min-width: 0; }
+  #pcnAdminView .record-details { margin: 12px; }
+  #pcnAdminView .admin-status-control { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 12px; }
+  #pcnAdminView .admin-status-control :is(label, select, button) { width: 100%; min-width: 0; }
+  body.admin-page #pcnAdminView .admin-table-toolbar { grid-template-columns: minmax(0, 1fr) 150px 100px; gap: 10px; margin: 12px; padding: 10px; }
+  #pcnAdminView .admin-table-toolbar label { gap: 4px; font-size: 12px; }
+  body.admin-page #pcnAdminView .admin-table-toolbar :is(input, select),
+  .rd-controls :is(input:not([type="checkbox"]), select), .rd-pagination select { height: 34px; min-height: 34px; padding: 5px 8px; box-sizing: border-box; font-size: 12px; line-height: 1.3; }
+  .rd-controls { padding: 12px; }
+  .rd-summary { gap: 10px; margin-bottom: 12px; }
+  .rd-summary-card { min-height: 52px; padding: 10px 12px; gap: 10px; }
+  .rd-summary-card strong { font-size: 22px; }
+  .rd-summary-card span { font-size: 12px; }
+  .rd-filters { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .rd-filters label { min-width: 0; gap: 4px; font-size: 11px; }
+  .rd-tools { gap: 6px; margin-top: 10px; }
+  body.admin-page .rd-tools .rd-button, .rd-tools .rd-editor > summary { min-height: 32px; padding: 6px 9px; font-size: 12px; }
+  .rd-pagination { gap: 8px; padding: 10px 12px; }
+  .rd-controls ~ .admin-table-wrap table { min-width: 1280px; }
+  body.admin-page .rd-controls ~ .admin-table-wrap :is(th, td) { padding: 10px; }
+  body.admin-page .rd-controls ~ .admin-table-wrap th { padding-block: 8px; }
+  body.admin-page .rd-controls ~ .admin-table-wrap :is(th, td),
+  body.admin-page .rd-controls ~ .admin-table-wrap :is(th, td) * { font-size: 13px !important; }
+  body.admin-page .rd-controls ~ .admin-table-wrap td:is([data-column="supplierName"], [data-column="materialName"]) { font-size: 14px !important; }
+  .rd-controls ~ .admin-table-wrap td[data-column="progress"] { min-width: 140px; }
+  .rd-controls ~ .admin-table-wrap td[data-column="next"] { min-width: 160px; }
+  .rd-controls ~ .admin-table-wrap td[data-column="pending"] { min-width: 110px; }
+  .rd-controls ~ .admin-table-wrap progress { width: 120px; margin-top: 6px; }
+  .rd-code-cell { gap: 6px; }
+  body.admin-page .rd-code-cell .rd-open-button { min-height: 34px; padding: 6px 10px; gap: 10px; }
+  .rd-row-actions { min-width: 136px; width: 136px; box-sizing: border-box; }
+}
