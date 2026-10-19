@@ -53,6 +53,8 @@ The Developer assignment hash is configured privately for local development and 
 
 Production requires HTTPS by default. An explicitly configured internal HTTP installation can keep `NODE_ENV=production` and set `ALLOW_INTERNAL_HTTP=true`, with an exact RFC1918 IPv4 `PUBLIC_ORIGIN` such as `http://172.30.77.137:8443`, loopback `HOST`, and `TRUST_PROXY=loopback`. The reverse proxy must replace the client-IP header and restrict access to the employee networks. HTTP uses a separate `pcn_session_http` cookie to avoid collisions with existing Secure HTTPS cookies; HttpOnly, SameSite Strict, exact-origin and CSRF checks remain enabled. HTTP traffic is unencrypted.
 
+An internal DNS installation additionally requires `INTERNAL_HTTP_HOSTNAME` to exactly match the lowercase hostname in `PUBLIC_ORIGIN`, for example `INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com` with `PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443`. The hostname setting requires `ALLOW_INTERNAL_HTTP=true`; wildcards, IPs, localhost aliases, malformed names and mismatches fail startup. Verify private DNS resolution and retain the same loopback proxy and employee-network restrictions. Only the configured scheme, hostname and port are accepted for login and mutations. See the [DNS cutover procedure](plans/windows-test-deployment.md#internal-dns-origin-cutover).
+
 SQL connections use encryption. `SQL_TRUST_SERVER_CERTIFICATE=false` is the default; use a trusted server certificate for deployment. An approved self-signed installation can explicitly set it to `true`.
 
 On Windows, the runtime can read a DPAPI-protected credential for the same Windows account and computer:

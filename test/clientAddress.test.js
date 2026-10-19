@@ -84,6 +84,55 @@ test('production internal HTTP requires explicit opt-in, a private literal origi
   assert.throws(() => readServerConfig({ ...baseline, ALLOW_INTERNAL_HTTP: 'false', PUBLIC_ORIGIN: 'http://172.30.77.137:8080' }), /HTTPS/);
 });
 
+test('internal HTTP accepts only an explicitly configured canonical DNS hostname', () => {
+  const baseline = { HOST: '127.0.0.1', TRUST_PROXY: 'loopback', NODE_ENV: 'production', ALLOW_INTERNAL_HTTP: 'true' };
+  for (const hostname of ['tet-pcn.kemet.com', 'pcn.example.internal']) {
+    const result = readServerConfig({ ...baseline, INTERNAL_HTTP_HOSTNAME: hostname, PUBLIC_ORIGIN: `http://${hostname}:8443` });
+    assert.equal(result.publicOrigin, `http://${hostname}:8443`);
+    assert.equal(result.secureCookies, false);
+    assert.equal(result.sessionCookieName, 'pcn_session_http');
+  }
+  const approved = { ...baseline, INTERNAL_HTTP_HOSTNAME: 'tet-pcn.kemet.com', PUBLIC_ORIGIN: 'http://tet-pcn.kemet.com:8443' };
+  for (const value of [undefined, 'false']) assert.throws(() => readServerConfig({ ...approved, ALLOW_INTERNAL_HTTP: value }), /INTERNAL_HTTP_HOSTNAME/);
+  for (const value of [null, {}, true, '', 'TET-PCN.kemet.com', ' tet-pcn.kemet.com', 'tet-pcn.kemet.com ', '*.kemet.com', 'tet-pcn.kemet.com.', 'tet-pcn.kemet.com:8443', 'http://tet-pcn.kemet.com', 'other.kemet.com']) {
+    assert.throws(() => readServerConfig({ ...approved, INTERNAL_HTTP_HOSTNAME: value }), /INTERNAL_HTTP_HOSTNAME/);
+  }
+  for (const hostname of ['localhost', 'pcn.localhost', '127.0.0.1', '8.8.8.8', '172.30.77.137', 'single-label', '-pcn.internal', 'pcn-.internal', 'pcn_bad.internal', `${'a'.repeat(64)}.internal`, `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(63)}`]) {
+    assert.throws(() => readServerConfig({ ...approved, INTERNAL_HTTP_HOSTNAME: hostname, PUBLIC_ORIGIN: `http://${hostname}:8443` }), /INTERNAL_HTTP_HOSTNAME/);
+  }
+  for (const origin of ['http://172.30.77.137:8443', 'http://other.kemet.com:8443', 'https://tet-pcn.kemet.com:8443']) {
+    assert.throws(() => readServerConfig({ ...approved, PUBLIC_ORIGIN: origin }), /INTERNAL_HTTP_HOSTNAME/);
+  }
+  for (const host of ['0.0.0.0', '172.30.77.137', '::']) assert.throws(() => readServerConfig({ ...approved, HOST: host }), /loopback/);
+  for (const proxy of [undefined, 'off', 'false']) assert.throws(() => readServerConfig({ ...approved, TRUST_PROXY: proxy }), /loopback/);
+});
+
+test('internal DNS login retains exact scheme, hostname, port, session and CSRF boundaries', async t => {
+  const configuration = readServerConfig({ HOST: '127.0.0.1', TRUST_PROXY: 'loopback', NODE_ENV: 'production', ALLOW_INTERNAL_HTTP: 'true', INTERNAL_HTTP_HOSTNAME: 'tet-pcn.kemet.com', PUBLIC_ORIGIN: 'http://tet-pcn.kemet.com:8443' });
+  const s = await server(t, configuration);
+  const headers = { 'content-type': 'application/json', origin: configuration.publicOrigin, 'x-pcn-client-ip': '172.30.76.21' };
+  const body = JSON.stringify({ username: 'admin', password: TEST_PASSWORD });
+  const { origin: configuredOrigin, ...headersWithoutOrigin } = headers;
+  for (const origin of [null, 'null', 'http://172.30.77.137:8443', 'https://tet-pcn.kemet.com:8443', 'http://tet-pcn.kemet.com:8444', 'http://tet-pcn.kemet.com', 'http://tet-pcn.kemet.com.evil.test:8443', 'http://other.kemet.com:8443']) {
+    const rejectedHeaders = { ...headersWithoutOrigin, 'x-forwarded-host': 'tet-pcn.kemet.com:8443', 'x-forwarded-proto': 'http', ...(origin === null ? {} : { origin }) };
+    const response = await fetch(`${s.base}/api/auth/login`, { method: 'POST', headers: rejectedHeaders, body });
+    assert.equal(response.status, 403, String(origin));
+    assert.equal((await response.json()).error, 'Request origin is not allowed');
+  }
+  const login = await fetch(`${s.base}/api/auth/login`, { method: 'POST', headers, body });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie');
+  assert.match(cookie, /^pcn_session_http=.*; Path=\/; HttpOnly; SameSite=Strict; Max-Age=/);
+  assert.doesNotMatch(cookie, /; Secure|; Domain=/);
+  const identity = (await login.json()).data;
+  const sessionHeaders = { ...headers, cookie: cookie.split(';')[0] };
+  assert.equal((await (await fetch(`${s.base}/api/session`, { headers: sessionHeaders })).json()).data.authenticated, true);
+  assert.equal((await fetch(`${s.base}/api/auth/logout`, { method: 'POST', headers: sessionHeaders, body: '{}' })).status, 403);
+  const logout = await fetch(`${s.base}/api/auth/logout`, { method: 'POST', headers: { ...sessionHeaders, 'x-csrf-token': identity.csrfToken }, body: '{}' });
+  assert.equal(logout.status, 200);
+  assert.equal((await (await fetch(`${s.base}/api/session`, { headers: sessionHeaders })).json()).data.authenticated, false);
+});
+
 test('server origins reject credentials, noncanonical addresses and extra URL components', () => {
   const baseline = { HOST: '127.0.0.1', TRUST_PROXY: 'loopback', NODE_ENV: 'production', ALLOW_INTERNAL_HTTP: 'true' };
   for (const origin of [null, {}, 17, '', 'not a URL', ' http://172.30.77.137:8080', 'http://172.30.77.137:8080/', 'http://172.30.77.137:8080/path', 'http://172.30.77.137:8080?x=y', 'http://172.30.77.137:8080#x', 'http://user:password@172.30.77.137:8080', 'http://0xac1e4d89:8080', 'http://2887667081:8080', 'http://172.030.77.137:8080', 'ftp://172.30.77.137:8080', 'http://172.30.77.137:70000']) {

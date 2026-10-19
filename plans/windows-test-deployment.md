@@ -49,6 +49,23 @@ ALLOW_INTERNAL_HTTP=true
 
 `employee-code` is the normal runtime default. Explicit `AUTH_MODE=password` is maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings and proxy secrets are removed from the replacement environment; their presence must not activate Windows mode. Normal employee-code sign-in requires neither a PCN password nor a Windows-authenticated browser.
 
+## Internal DNS origin cutover
+
+Prepared locally on 2026-10-19; this procedure has not been deployed. DNS for `tet-pcn.kemet.com` was verified from the workstation to resolve to `172.30.77.137`, and the login page returned 200. Empty login requests with the DNS Origin returned 403 `Request origin is not allowed`; the old IP Origin passed the origin check and reached authentication (401). No successful live sign-in was performed. Runtime 21 permits only private literal IPs for internal HTTP, so changing DNS or only changing its environment cannot enable this hostname.
+
+Local validation passed 20 targeted tests and all 991 suite tests (88.25% line, 91.10% branch, 94.62% function coverage). An isolated Chromium journey with a synthetic DNS name mapped to loopback passed employee-code login with `returnTo=/`, host-only HTTP cookie isolation, authenticated session, CSRF rejection and logout, without SQL or integration calls. Code and JavaScript reviews reported no findings. The high/critical dependency audit gate passed with two moderate advisories in the existing `sprintf-js` / `tedious` dependency chain.
+
+After approval, publish and install a signed runtime containing the explicit internal hostname configuration support, initially retaining the existing IP configuration. Coordinate the configuration switch under the existing deployment mutex/task procedure. Preserve a protected backup and ACLs of `C:\ProgramData\SupplierPCN\config\pcn.env`; change only these nonsecret settings:
+
+```text
+PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443
+INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com
+```
+
+Retain `ALLOW_INTERNAL_HTTP=true`, `NODE_ENV=production`, `HOST=127.0.0.1`, `TRUST_PROXY=loopback`, port 3000, all SQL/integration values and employee-network restrictions. Verify hostname resolution from the host and an employee workstation. Validate configuration using the new runtime before restarting `SupplierPCNTest`. The existing IIS binding already serves this DNS URL; inspect it and retain it if suitable.
+
+Verify DNS login/session/logout, host-only `pcn_session_http` cookies, CSRF rejection, readiness and rejection of old IP, unrelated, wrong-scheme and wrong-port Origins. Sign in again at the DNS URL because existing IP cookies do not transfer. Notification links use the new canonical `PUBLIC_ORIGIN`. The old IP is no longer a supported mutation/login origin; distribute the DNS URL and update bookmarks. Restore the protected environment backup and restart the service to roll back; do not leave `INTERNAL_HTTP_HOSTNAME` configured with an IP `PUBLIC_ORIGIN`. Record the actual release and live checks after cutover.
+
 ## Historical employee-code cutover sequence
 
 1. Pause the `SupplierPCNTestDeployment` SYSTEM polling task for reviewed cutover; preserve its trust anchors, version records and current service/IIS configuration. Keep the live application running during preparation where possible.

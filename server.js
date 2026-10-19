@@ -32,6 +32,17 @@ function isPrivateIpv4(hostname) {
   return first === 10 || (first === 172 && second >= 16 && second <= 31) || (first === 192 && second === 168);
 }
 
+function isApprovedInternalHostname(value, origin, allowInternalHttp) {
+  if (value === undefined) return false;
+  const valid = typeof value === 'string' && value.length <= 253 && value.includes('.') &&
+    !net.isIP(value) && !value.endsWith('.localhost') &&
+    value.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+  if (!valid || !allowInternalHttp || origin.protocol !== 'http:' || origin.hostname !== value) {
+    throw new Error('INTERNAL_HTTP_HOSTNAME requires internal HTTP and must exactly match the canonical PUBLIC_ORIGIN DNS hostname');
+  }
+  return true;
+}
+
 function readServerConfig(env = process.env) {
   const port = Number(env.PORT || 3000);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
@@ -42,8 +53,9 @@ function readServerConfig(env = process.env) {
   const allowInternalHttp = env.ALLOW_INTERNAL_HTTP === 'true';
   const publicOrigin = env.PUBLIC_ORIGIN === undefined ? `http://localhost:${port}` : env.PUBLIC_ORIGIN;
   const origin = parsePublicOrigin(publicOrigin);
+  const approvedInternalHostname = isApprovedInternalHostname(env.INTERNAL_HTTP_HOSTNAME, origin, allowInternalHttp);
   if (allowInternalHttp) {
-    if (origin.protocol !== 'http:' || !isPrivateIpv4(origin.hostname)) throw new Error('PUBLIC_ORIGIN for internal HTTP must use an RFC1918 literal IPv4 address');
+    if (origin.protocol !== 'http:' || (!isPrivateIpv4(origin.hostname) && !approvedInternalHostname)) throw new Error('PUBLIC_ORIGIN for internal HTTP requires an RFC1918 IPv4 address or explicit INTERNAL_HTTP_HOSTNAME');
     const loopbackHost = host === 'localhost' || host === '::1' || (net.isIP(host) === 4 && host.startsWith('127.'));
     if (!loopbackHost || trustProxy !== 'loopback') throw new Error('Internal HTTP requires loopback HOST and TRUST_PROXY=loopback');
   } else if (env.NODE_ENV === 'production' && origin.protocol !== 'https:') throw new Error('Production requires HTTPS PUBLIC_ORIGIN');
