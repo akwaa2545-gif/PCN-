@@ -1,8 +1,8 @@
 # PCN Records dashboard
 
-Updated: 2026-10-15.
+Updated: 2026-10-20.
 
-Status: implemented locally on `feature/records-dashboard`; deployment is on hold until the user explicitly says **deploy**. This task does not push source, publish releases, run remote CI or change the host. The last deployed runtime remains `pcn-test-17-1`; its existing evidence in [README](../README.md) and [the deployment runbook](github-deployment.md) is unchanged.
+The dashboard is included in deployed runtime `pcn-test-22-2`. The Prod.Eng/TET and QA/TET deadline and email additions described below are implemented locally and have not been published or deployed. Deployment remains a separate explicit user action; this feature work makes no remote or live database changes. See [the current deployment record](windows-test-deployment.md).
 
 ## User experience
 
@@ -10,16 +10,25 @@ Portal and read-only Records use the same dashboard controller and existing `rec
 
 | Feature | Implemented behaviour |
 | --- | --- |
-| Summary cards | All records, In review, Approved and Needs attention select the corresponding list view. Counts use the accessible record set. |
+| Document tabs | Open shows active documents. Closed groups Approved, Rejected and Closed documents while retaining their original status labels. Both tabs show counts from the authorized record set. |
+| Summary cards | Open offers All open documents, In review, Drafts and Needs attention. Closed offers All closed documents, Approved, Rejected and Closed. Counts and results follow the selected tab. |
 | Next responsible | Displays the effective workflow department and signing step, plus eligible assigned names for internal users. Suppliers and roleless employees receive no privileged account list. |
 | Workflow progress | Shows the current stage and actual recorded signing steps. A rejected record is labelled as rejected rather than presenting all signing steps as completed. |
 | Filters and saved views | Combines text, status, risk, supplier, responsible department and inclusive updated-date filters. Date bounds use UTC calendar days. Up to ten named filter views can be saved or removed. |
 | Open and preview | A gold **Open PCN** link beneath the PCN code opens the document in the current tab. Quick view and History use icon buttons with tooltips and accessible labels. Quick view offers read-only Overview, Timeline and Documents; Portal retains the existing history dialog. Authorized Remove is an icon under More and still requires confirmation. |
 | Document readiness | Shows Documents ready, a required-document missing count, or Not available when verified metadata cannot be established. |
 | Table controls | Sortable columns, configurable visible columns, 10/25/50/100 rows per page and export of the entire filtered, sorted result set as CSV. PCN code remains visible. |
-| Pending time | Shows Waiting only when the current status start is recorded. Otherwise Updated identifies the saved-record timestamp fallback. Overdue requires an explicit valid review deadline. |
+| Pending time | Shows only the duration: **1 day**, **9 days**, or **Overdue 3 days**. Time below one full day shows **<1 day**. Unknown status timing shows **—**. |
 
 The preview loads data only when opened or its tab selected. Overview reads the record and progress, Timeline reads the department workflow summary, Change history reads revisions, and Documents reads attachment metadata and checks. Clean files expose existing authorized download links; quarantined, pending-scan or unknown files cannot become downloadable through the preview. No editing, signing, upload, deletion or mail action is introduced by the preview.
+
+### Automatic closure and document tabs (local, 2026-10-22)
+
+An authorized successful save automatically closes an active PCN once every eligible department and Final Judgment signature and all three top-right signatures are complete. A separate Final Judgment decision is not required for automatic closure; its existing value is preserved. Closure, any last signature, signer identity and audit revision persist together. Existing document checks, required clean files and optimistic version checks still apply. Draft saves remain drafts; normally submitting a fully completed draft may close it. Already signed active records close on their next authorized save. Opening or listing records never rewrites them, and existing Approved/Rejected/Closed records remain read-only.
+
+The saved response opens a named **PCN closed** modal with **Continue viewing** and **View closed records**. Checkbox changes, failed saves, ordinary updates and reloads do not show that modal. Closed documents are view-only. A failed follow-up list refresh does not hide a successful saved closure.
+
+The shared Portal/Records dashboard defaults to Open. Closed includes existing Approved and Rejected PCNs as confirmed by the user. Search, status options, summaries, pagination, CSV and printing operate within the selected tab, which remains selected during polling. Reset filters keeps the current tab. Saved views remember their tab; older terminal-status views infer Closed. `/admin?documents=closed#records` and `/records?documents=closed` open that tab directly. Keyboard navigation supports Left/Right, Home and End. Polling moves newly completed documents into Closed without rewriting their existing status labels.
 
 ### Department signing timeline (local)
 
@@ -58,11 +67,31 @@ This is bulk metadata collection, not server-side pagination. Existing PCN hydra
 
 ## Pending-time and attention rules
 
-Pending time prefers a version-matched current status transition recorded in revisions. A legacy baseline does not establish when review began. If transition timing is absent, invalid or mismatched, the dashboard uses a valid saved `updatedAt` or `createdAt` and labels it as record age. Unknown timestamps remain unavailable; future timestamps do not manufacture negative waiting time.
+Pending time uses a version-matched current status transition recorded in revisions. Ordinary edits do not reset this duration; a status transition starts a new count. Status age and overdue days use server-computed whole elapsed days. When overdue, only **Overdue N days** appears; if both an explicit and a department deadline are overdue, the longest overdue duration appears once. Dates and department names remain in the review timeline. A legacy baseline or saved-record update does not establish when the current status began; unavailable status timing shows **—**. The shared table, Quick view and CSV use the same compact label.
 
 Needs attention covers active records with missing required fields/documents, unavailable document status or a known overdue deadline. Approved, rejected and closed records are terminal and are excluded from this attention view.
 
-The helper accepts an explicit valid `reviewDueAt` if present in a record. **The current SQL model has no persisted ReviewDueAt field or review-deadline editor.** This work introduces no deadline migration or default SLA, and does not treat `desiredStart` as a review deadline. Normal current records therefore show no inferred overdue state. Adding persisted review deadlines requires a separate product and schema change.
+The helper still accepts an explicit valid `reviewDueAt` if present in a record. The SQL model has no dedicated ReviewDueAt column or manual deadline editor; `desiredStart` never supplies a review deadline.
+
+### Review deadlines: three calendar days after handoff
+
+The default review window is three calendar days (72 hours, including weekends) for Prod.Eng/TET and QA/TET review, from each department's actual handoff. Prod.Eng/TET starts when all GSC/TET signatures are complete. QA/TET review starts when all GSC/TET and Prod.Eng/TET signatures are complete. The record is not overdue at the exact due instant; it becomes overdue immediately afterward.
+
+The 2026-10-21 **System Settings** extension makes all six department-stage allowances configurable from 1–365 days or disabled, including a separate QA/TET Final Judgment rule. Prod.Eng/TET and initial QA/TET default to three days; GSC/TET, both TaPBU stages and Final Judgment default to disabled. Changes apply to ongoing reviews from their original start. Required route order determines handoffs; skipped TaPBU stages do not get clocks. See [the approved settings design](system-logic-settings.md).
+
+The server stores each stage's start in the existing `reviewTiming` extras JSON, retaining the original Prod.Eng/TET and QA/TET keys. Stage timing itself needs no schema change; the separate configurable policy requires migration **008_workflow_settings.sql**. Starts are recorded even when a rule is disabled, so enabling it later uses the actual handoff. The normal write allowlist rejects client timing overrides. Comments, ordinary saves, and Prepared or Checked signatures preserve the original start. Completion of all three department signatures, return to an earlier stage, a revision reset, or a terminal status removes its active alert. A subsequent actual handoff starts a fresh window.
+
+Active legacy records without a reliable saved handoff timestamp show **Due date unavailable**. Saved-record age, submission time, and old signature dates do not establish the current activation, so none is substituted. Reading an overview never starts a clock or writes data.
+
+Portal and Records share the red overdue row, **Prod.Eng/TET overdue** or **QA/TET overdue** badge beneath the PCN code, and an accessible alert counting overdue PCNs by department in the authorized record set. The badge remains visible when the Pending time column is hidden. Department timelines show the due date and time. Pending time, its Quick view entry and CSV export show one compact duration, using the longest applicable overdue duration when both explicit and department deadlines have passed. Existing five-second refresh updates the overdue state and clears alerts after completion. Deadline bookkeeping does not create a business-update email.
+
+### Review email notifications
+
+The confirmed schedule retains existing handoff emails and adds one **Review Due Soon** reminder within the final 24 hours before the deadline, then one **Review Overdue** notice strictly after the deadline. There is no daily repeat. Due-soon messages use amber; overdue messages use red. Both identify the current department, pending signing step and UTC due date, and link to the PCN. Test documents retain their subject and message marker.
+
+The configured mail worker checks for elapsed deadlines once per minute while mail is configured. It uses bounded keyset scans and the existing transactional outbox. Events deduplicate by PCN, department, trusted handoff timestamp and notification kind; edits or partial signatures cannot duplicate an event. Legacy records without reliable timing generate no deadline mail. If the server first checks after the deadline, it queues only the overdue notice.
+
+Before sending, the worker rereads the active review and current mail configuration, resolves the pending signing step, and rebuilds recipients from its configured manual addresses and currently verified eligible account assignments. Completion, reset, deleted records, changed handoffs, missing recipients or obsolete due-soon phases cancel pending mail. Recipient changes after a committed send claim cannot recall a message already in flight. Existing uncertain delivery handling prevents automatic resend after an ambiguous transport failure. Reading the dashboard itself never queues or sends email.
 
 ## Preferences, refresh and export
 
@@ -80,12 +109,28 @@ CSV export includes all currently filtered records in the selected sort order an
 | [admin.js](../admin.js), [admin.html](../admin.html) | Portal integration, selected-detail workflow and existing authorized actions |
 | [records.html](../records.html) | Read-only Records host |
 | [src/recordOverview.js](../src/recordOverview.js) | Workflow, document, pending and scope-safe overview metadata |
+| [src/reviewTiming.js](../src/reviewTiming.js), [src/pcnService.js](../src/pcnService.js) | Server-owned Prod.Eng/TET and QA/TET activation timing and deadline evaluation |
+| [src/reviewDeadlineNotifications.js](../src/reviewDeadlineNotifications.js), [src/notificationWorker.js](../src/notificationWorker.js), [src/notificationTemplate.js](../src/notificationTemplate.js) | Deadline outbox scheduling, current recipient checks and distinct email messages |
 | [src/apiRoutes.js](../src/apiRoutes.js) | Authenticated overview route and employee-viewer read whitelist |
 | [src/sqlDocuments.js](../src/sqlDocuments.js) | Batched live document metadata with parent versions |
 | [src/sqlPcnRepository.js](../src/sqlPcnRepository.js), [src/sqlRevisions.js](../src/sqlRevisions.js) | Batched recorded current-status timing |
 | [scripts/records-dashboard-e2e.js](../scripts/records-dashboard-e2e.js) | Isolated browser acceptance |
 
 ## Verification
+
+The 2026-10-22 automatic-closure and lifecycle-tab addition passed **1,137/1,137 unit/API tests**, with **89.05% line, 91.62% branch and 94.54% function coverage**. Tests cover route and header prerequisites, valid Final Judgment decisions, explicit draft saves, authorization, forged status changes, optimistic conflicts, required documents, transaction rollback, saved-response popup behavior, refresh failures, lifecycle filters and legacy saved views. Code, JavaScript and security reviews reported no blocking findings. Browser acceptance uses isolated memory records, with no live PCN writes or operational mail.
+
+The final shared dashboard browser suite passed **19 groups**, including Open/Closed grouping in Portal and read-only Records, retained status labels, keyboard navigation, preserved filters and saved views, scoped CSV/print output, direct Closed links, automatic movement after polling, and desktop/390-pixel containment. Browser errors, external calls and forbidden writes were zero. Desktop and mobile Closed screenshots were inspected. Reports, traces and screenshots are under `test-results/`.
+
+The signing-order browser suite passed **11 groups**. Its closure journey verifies that a failed save leaves the record unchanged and shows no popup; a successful final signature saves Closed and that signature in one history revision, shows the focused confirmation, hides draft saving, locks editing after dismissal/reload, and opens the Closed tab through its direct link. The run also retains the Final Judgment and header prerequisite checks. Local SQL readiness returned HTTP 200 `ready`; no migration or deployment was needed for closure.
+
+The same-day closure correction addresses a saved Submitted record with all 12 eligible signatures and all three header checks but neither Final Judgment decision selected. Read-only inspection confirmed the additional decision requirement caused the mismatch. Automatic closure now follows signature completion alone and also handles already signed active records on their next authorized save. It preserves blank decision/date values, existing manual-status validation, required files, authorization and optimistic concurrency. Reads perform no repair writes. Regression tests first reproduced four failures, then all **66 focused tests** passed; code and security reviews approved the correction.
+
+Final correction verification passed **1,138/1,138 tests** with **89.05% line, 91.67% branch and 94.54% function coverage**, plus **12 signing-order browser groups** with zero browser errors or external calls. The added browser case uses an already signed Submitted record, blank header dates and both decision flags false, then verifies ordinary Save closes it and shows the correct confirmation. Local SQL readiness remained HTTP 200 `ready`; the reported saved PCN was inspected read-only and was not modified by these tests.
+
+The 2026-10-20 deadline and email addition passed all **1,050 unit/API tests** with **88.50% line, 91.40% branch and 94.66% function coverage**. The timing helper and deadline scheduler each have 100% line coverage. Tests cover both department handoffs, weekend and exact-boundary timing, HTTP authorization, SQL JSON persistence, forged timing rejection, reminder deduplication, current recipients and signing steps, stale-job cancellation and ambiguous delivery handling. Code, JavaScript and security reviews reported no blocking findings. Tests use isolated adapters; actual SQL concurrency was reviewed by inspection.
+
+The expanded dashboard browser suite passed **17 checks** with zero browser errors, external requests or forbidden writes. It covers actual service handoffs for both departments on Portal and read-only Records, the exact 72-hour boundary, overdue onset through five-second polling, red computed colours in both department popups, mobile containment, clearing after completion, and QA review ending before final judgment. The earlier signing-order browser suite also passed on a sequential rerun after a concurrent run timed out during fixture login. The first expanded dashboard run stopped at an incorrect test expectation that final judgment would use that phrase in the department-based table label; the corrected run verifies the authoritative stage key and final-judgment timeline. Screenshots `test-results/qa-deadline-portal.png` and `test-results/qa-deadline-records-mobile.png` are isolated fixtures, not live deployment evidence.
 
 Run the unit/API coverage and isolated browser suites from the repository root:
 

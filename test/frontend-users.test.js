@@ -97,7 +97,7 @@ test('selecting an unassigned employee opens role assignment instead of creating
 
 test('PCN roles derive department authority and require a verified recipient for signing', () => {
   const api = users();
-  for (const [department, expectedRole] of Object.entries({gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu'})) {
+  for (const [department, expectedRole] of Object.entries({gscTet: 'gsc', prodEngTet: 'productionengineering', prodEngTa: 'productionengineering', prodEngSc: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu'})) {
     for (const role of ['approved', 'checked', 'prepared']) {
       const body = JSON.parse(JSON.stringify(api.provisioningBody(employee, role, department, verifiedMail)));
       assert.deepEqual(body, {employeeCode: '001234', roles: [expectedRole], department, signingStep: role, mailSelection: {id: verifiedMail.id, email: verifiedMail.email}});

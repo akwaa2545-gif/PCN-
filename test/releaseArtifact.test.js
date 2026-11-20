@@ -16,6 +16,10 @@ test('guided creation assets are included in runtime releases', () => {
   const files = ['create.html','create.js','create.css','create-model.js','create-autosave.js','create-documents.js','pcn-readiness.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
 });
+
+test('shared PCN type and code rules ship with runtime releases', () => {
+  assert.deepEqual(selectRuntimeFiles(['pcn-types.js']), ['pcn-types.js']);
+});
 test('Developer Tools assets are included in runtime releases', () => {
   const files = ['developer.html','developer.js','developer.css','src/developerTools.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
@@ -23,6 +27,11 @@ test('Developer Tools assets are included in runtime releases', () => {
 test('authenticated user presence ships with its shared client assets', () => {
   const files = ['src/userPresence.js','session-client.js','admin-users.js'];
   assert.deepEqual(selectRuntimeFiles(files), [...files].sort());
+});
+
+test('employee password authentication ships runtime metadata without migration SQL',()=>{
+  const files=['src/authModes.js','src/employeePasswordReadiness.js'];
+  assert.deepEqual(selectRuntimeFiles([...files,'sql/migrations/010_employee_password_auth.sql']),[...files].sort());
 });
 test('department workflow summaries are included in runtime releases', () => {
   assert.deepEqual(selectRuntimeFiles(['src/workflowSummary.js']), ['src/workflowSummary.js']);
@@ -123,7 +132,10 @@ test('Windows packaging and deployment extraction accept every producer runtime 
   await fs.mkdir(path.join(root, 'scripts'), { recursive: true });
   await fs.mkdir(path.join(root, 'node_modules', 'fixture'), { recursive: true });
   const tracked = await run('git', ['ls-files', '-z'], { cwd: path.resolve(__dirname, '..'), windowsHide: true });
-  const runtimeFiles = selectRuntimeFiles(tracked.stdout.split('\0').filter(Boolean));
+  // Include new assets before they enter the Git index, so this acceptance test
+  // also verifies a development workspace's producer/extractor compatibility.
+  const runtimeFiles = selectRuntimeFiles([...new Set([...tracked.stdout.split('\0').filter(Boolean),
+    'pcn-types.js', 'notification-settings.js', 'system-settings.html', 'system-settings.js', 'system-settings.css'])]);
   for (const file of runtimeFiles) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), `isolated runtime asset: ${file}`);

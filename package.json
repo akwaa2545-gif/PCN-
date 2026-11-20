@@ -11,6 +11,7 @@
     "test:coverage": "node --test --experimental-test-coverage",
     "test:e2e": "node scripts/e2e-smoke.js",
     "test:documents": "node scripts/document-e2e.js",
+    "test:print-layout": "node scripts/print-layout-e2e.js",
     "test:profile": "node scripts/profile-e2e.js",
     "test:login": "node scripts/login-e2e.js",
     "test:auto-refresh": "node scripts/auto-refresh-e2e.js",
@@ -26,7 +27,12 @@
     "start:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-pcn.ps1",
     "test:signing-order": "node scripts/signing-order-e2e.js",
     "test:create": "node scripts/create-pcn-e2e.js",
-    "test:motion-ui": "node scripts/motion-ui-e2e.js"
+    "test:motion-ui": "node scripts/motion-ui-e2e.js",
+    "test:system-settings": "node scripts/system-settings-e2e.js",
+    "test:ta-sc": "node scripts/ta-sc-e2e.js",
+    "test:ta-sc-records": "node scripts/ta-sc-records-e2e.js",
+    "test:employee-password": "node scripts/employee-password-e2e.js",
+    "test:notification-preferences": "node scripts/notification-preferences-e2e.js"
   },
   "engines": {
     "node": ">=22"

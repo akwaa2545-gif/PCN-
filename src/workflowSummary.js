@@ -1,5 +1,8 @@
 const { routeGroups } = require('./workflowAccess');
-const { actions, departments, stageDepartments } = require('./signingPermissions');
+const { actions } = require('./signingPermissions');
+const { departmentForStage, departmentLabel } = require('../pcn-types');
+const { stageDeadline } = require('./reviewTiming');
+const { defaultWorkflowSettings } = require('./workflowSettings');
 
 const at = (value,path) => path.split('.').reduce((item,key) => item?.[key],value);
 const text = value => typeof value === 'string' && value.trim() ? value : null;
@@ -21,11 +24,11 @@ function nextAction(record,stages) {
   return {stage:stage.key,signingStep:step.action,label:`${stage.label} — ${step.label}`,terminal:false};
 }
 
-function buildWorkflowSummary(record) {
+function buildWorkflowSummary(record, now = new Date(), settings = defaultWorkflowSettings()) {
   const review = record.internalReview || {};
   const stages = routeGroups(record.riskLevel,review).map(key => {
-    const department = stageDepartments[key];
-    const label = departments.find(item => item.key === department).label+(key === 'qateFinal.signoff' ? ' Final judgment' : '');
+    const department = departmentForStage(record, key);
+    const label = departmentLabel(department)+(key === 'qateFinal.signoff' ? ' Final judgment' : '');
     const steps = actions.map(action => {
       const completed = at(review,`${key}.${action}`) === true;
       const binding = record.documentControl?.signatureBindings?.[`${key}.${action}`];
@@ -38,7 +41,8 @@ function buildWorkflowSummary(record) {
   const next = nextAction(record,stages);
   return {id:record.id,version:record.version,status:record.status,stages:stages.map(stage => {
     const current = !next.terminal && next.stage === stage.key;
-    return {...stage,state:stage.completed === stage.total ? 'completed' : next.terminal ? 'stopped' : current ? 'current' : 'waiting',
+    return {...stage,deadline:stageDeadline(record,stage.key,now,settings),
+      state:stage.completed === stage.total ? 'completed' : next.terminal ? 'stopped' : current ? 'current' : 'waiting',
       currentStep:current ? next.signingStep ? title(next.signingStep) : next.label : null};
   }),nextAction:next};
 }

@@ -20,6 +20,18 @@ test('inspection reports actual Prepared Checked Approved signatures and safe tr
  const text=JSON.stringify(result);for(const secret of ['private-owner','private-hash','private-path','private-bytes','private-password','private-mail'])assert.equal(text.includes(secret),false,secret);
 });
 test('listing has only safe selected record fields',async()=>{const result=await loadDeveloperPcns(fixture(),developer);assert.equal(result.items.length,1);assert.equal('ownerUserId'in result.items[0],false);assert.equal('internalReview'in result.items[0],false);});
+
+test('typed PCNs keep their type and record-aware PE team in inspection and history', async () => {
+ const context=fixture({revisions:[{revision:1,changes:[{path:'internalReview.signoff.prodEngTet.prepared',before:false,after:true}]}]});
+ const typed={...structuredClone(record),id:'S-19112601',documentType:'sc'};
+ context.service.getById=async()=>structuredClone(typed);
+ context.service.list=async()=>[structuredClone(typed)];
+ const result=await inspectDeveloperPcn(context,developer,typed.id);
+ assert.equal(result.record.documentType,'sc');
+ assert.equal(result.workflow.stages.find(stage=>stage.key==='signoff.prodEngTet').label,'Prod.Eng/SC');
+ assert.equal(result.transactions.items[0].changes[0].label,'Prod.Eng/SC / Prepared');
+ assert.equal((await loadDeveloperPcns(context,developer)).items[0].documentType,'sc');
+});
 test('only active exclusive Developer assignment may use direct tools',async()=>{
  for(const user of [undefined,{...developer,roles:['admin']},{...developer,roles:['developer','admin']},{...developer,roles:['deve-loper']},{...developer,department:'it'},{...developer,isActive:false},{...developer,isActive:undefined}])await assert.rejects(()=>inspectDeveloperPcn(fixture(),user,record.id),e=>e.statusCode===403);
 });

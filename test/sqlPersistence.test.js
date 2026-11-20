@@ -99,8 +99,27 @@ test('year counter refuses code overflow rather than creating an inaccessible co
 test('readiness rejects unapplied migration and missing seeded master data', async () => {
   const pool = mockPool([{ recordsets: [[], [], []] }]);
   await assert.rejects(new SqlPcnRepository(pool).readiness(), { statusCode: 503 });
-  const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 22 }]] }]);
+  const ready = mockPool([{ recordsets: [migrationManifest.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: 24 }]] }]);
   assert.deepEqual(await new SqlPcnRepository(ready).readiness(), { ready: true, migrations: migrationManifest.length });
+});
+
+test('TA/SC activation requires migration 009 and the daily counter table at startup', async () => {
+  assert.equal(migrationManifest[8], '009_pcn_document_types.sql');
+  for (const [migrations, count] of [
+    [migrationManifest.filter(name => name !== '009_pcn_document_types.sql'), 24],
+    [migrationManifest, 23]
+  ]) {
+    const pool = mockPool([{ recordsets: [migrations.map(MigrationId => ({ MigrationId })), [{ Id: 1 }], [{ Id: 'admin' }], [{ TableCount: count }]] }]);
+    await assert.rejects(new SqlPcnRepository(pool).readiness(), { statusCode: 503 });
+    assert.match(pool.calls[0].sql, /N'PcnDailyCounters'/);
+  }
+});
+
+test('employee password activation appends migration 010 and rejects missing metadata at startup',async()=>{
+  assert.equal(migrationManifest[9],'010_employee_password_auth.sql');
+  const pool=mockPool([{recordsets:[migrationManifest.filter(name=>name!=='010_employee_password_auth.sql').map(MigrationId=>({MigrationId})),
+    [{Id:1}],[{Id:'admin'}],[{TableCount:24}]]}]);
+  await assert.rejects(new SqlPcnRepository(pool).readiness(),{statusCode:503});
 });
 
 test('migration manifest contains repeatable normalized SQL and no embedded credentials', () => {

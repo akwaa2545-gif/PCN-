@@ -1,10 +1,13 @@
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  const types = typeof module === 'object' && module.exports ? require('./pcn-types') : root.PCN_TYPES;
+  const api = factory(types);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else { root.PCN_CREATE_UI = api; root.document.addEventListener('DOMContentLoaded', () => api.mount(root)); }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (types) {
   'use strict';
+  const normalizeType = value => types?.normalizeType(value) || (['ta','sc'].includes(value) ? value : null);
+  const isCode = value => types ? types.isCode(String(value || '').toUpperCase()) : /^PCN-\d{4}-\d{4}$/i.test(value || '');
   const stages = ['details','changes','documents','review'];
   function entryIntent(search) {
     const query=new URLSearchParams(search),choices=query.getAll('start');
@@ -19,7 +22,7 @@
   function stageForIssue(issue) {
     const field = issue?.field || issue?.key || '';
     if (issue?.attachment || field.startsWith('internalReview.docs.') || field.includes('materialCodeDescription')) return 'documents';
-    if (['supplierName','manufacturerName','materialName','changeForm','riskLevel'].includes(field)) return 'details';
+    if (['documentType','supplierName','manufacturerName','materialName','changeForm','riskLevel'].includes(field)) return 'details';
     return field === 'version' ? 'review' : 'changes';
   }
   function testFillMode({savedRecord,hasContent}) { return savedRecord?.id ? 'confirm-new' : hasContent ? 'confirm-replace' : 'fill'; }
@@ -55,7 +58,8 @@
     const record=update.record || update;
     const matches=update.unsavedChanges!==true && Boolean(update.snapshot) && JSON.stringify(serialize(current))===JSON.stringify(update.snapshot);
     const content=matches?model.toPayload(record):current;
-    return {document:{...content,id:record.id,version:record.version,status:record.status,isTestDocument:record.isTestDocument===true},matches};
+    const canonicalType=normalizeType(record.documentType);
+    return {document:{...content,documentType:canonicalType || undefined,id:record.id,version:record.version,status:record.status,isTestDocument:record.isTestDocument===true},matches};
   }
   function notificationLabel(notification = {}) {
     const state = notification.state || notification.status;
@@ -156,6 +160,7 @@
       $('fillTestDocument').disabled=value;
       for (const id of ['saveDraftButton','nextStage','submitButton','previewDocument','refreshReview']) $(id).disabled=value||!state.editable;
       $('createEditor').setAttribute('aria-busy',String(value));
+      renderTypeChoices();
     }
     function saved(update) {
       const record=update.record || update;
@@ -170,6 +175,7 @@
       root.history.replaceState(null,'',`/create?draft=${encodeURIComponent(record.id)}`);
       if(matches)recovery?.clear();else recovery?.schedule();renderProgress();renderErrors();
       if (matches) renderFields();
+      if ($('documentType')) { $('documentType').value=state.document.documentType || ''; $('documentType').disabled=true; }
       if(firstSave&&record.status==='draft') void api(`/api/pcn-drafts/${encodeURIComponent(record.id)}`).then(result=>{
         if(state.savedRecord?.id!==record.id)return;
         state.scannerConfigured=result.scannerConfigured===true;documents?.render();
@@ -181,6 +187,8 @@
       }
     }
     function saveStatus(update) {
+      if ($('documentType')) $('documentType').disabled=!state.editable || typeLocked() || update.state==='saving';
+      renderTypeHelp(update.state==='saving');
       const text=({idle:'Unsaved draft',waiting:'Unsaved changes',saving:'Saving…',saved:`Saved at ${new Date(update.savedAt || Date.now()).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`,
         error:root.navigator.onLine===false?'Offline · edits kept':'Save needs attention',conflict:'Document changed · edits kept',stopped:'Draft saving stopped'})[update.state] || 'Unsaved';
       $('draftSaveStatus').textContent=text;$('actionSaveStatus').textContent=text;
@@ -191,7 +199,13 @@
     }
     function createSaver(initialRecord=null) {
       autosave?.stop();
-      autosave=root.PCN_CREATE_AUTOSAVE.create({read:()=>state.document,serialize,initialRecord,clientDraftKey:state.clientDraftKey,
+      autosave=root.PCN_CREATE_AUTOSAVE.create({read:()=>state.document,serialize,initialRecord,clientDraftKey:state.clientDraftKey,manualCreate:true,
+        canCreate:record=>Boolean(normalizeType(record.documentType)),
+        onIdentity:record=>{
+          state.document={...state.document,documentType:normalizeType(record.documentType) || undefined};
+          if ($('documentType')) { $('documentType').value=state.document.documentType || ''; $('documentType').disabled=true; }
+          renderTypeChoices();
+        },
         write:(document,meta)=>meta.id?api(`/api/pcn-drafts/${encodeURIComponent(meta.id)}`,{method:'PATCH',body:JSON.stringify({version:meta.version,document})}):
           api('/api/pcn-drafts',{method:'POST',body:JSON.stringify({clientDraftKey:meta.clientDraftKey,document,...(meta.testDocument?{testDocument:true}:{})})}),
         onSaved:saved,onStatus:saveStatus});
@@ -212,7 +226,7 @@
           const test=state.savedRecord?state.savedRecord.isTestDocument===true:snapshot.isTestDocument===true;
           const restored=model.fromTemplate(snapshot.document,{canSetRequirements:state.canSetRequirements});
           if(!state.canSetRequirements&&state.savedRecord)restored.internalReview=model.toPayload(state.savedRecord).internalReview;
-          state.document={...restored,...(test?{isTestDocument:true}:{})};
+          state.document={...restored,...(typeLocked()?{documentType:normalizeType(state.savedRecord?.documentType || state.document.documentType) || undefined}:{}),...(test?{isTestDocument:true}:{})};
           changed(state.document);renderFields();$('createRecovery').hidden=true;
         },
         onOffer:offer=>{recoveryOffer=offer;$('createRecovery').hidden=false;$('restoreRecovery').hidden=offer.stale;
@@ -242,7 +256,18 @@
       doc.querySelectorAll('[data-error]').forEach(element=>{
         const field=element.dataset.error,issue=state.errors.find(item=>item.field===field || item.key===field);
         element.id=`${field}Error`;element.textContent=issue?`${issue.label || field} is required.`:'';
-        const control=$(field);if(control){control.setAttribute('aria-invalid',String(Boolean(issue)));if(issue)control.setAttribute('aria-describedby',element.id);else control.removeAttribute('aria-describedby');}
+        const control=$(field);if(control){
+          control.setAttribute('aria-invalid',String(Boolean(issue)));
+          const descriptions=[field==='documentType'?'documentTypeHelp':null,issue?element.id:null].filter(Boolean);
+          if(descriptions.length)control.setAttribute('aria-describedby',descriptions.join(' '));else control.removeAttribute('aria-describedby');
+          if(field==='documentType') {
+            $('documentTypeGroup')?.setAttribute('aria-invalid',String(Boolean(issue)));
+            doc.querySelectorAll('[name="documentTypeChoice"]').forEach(choice=>{
+              choice.setAttribute('aria-invalid',String(Boolean(issue)));
+              choice.setAttribute('aria-describedby',descriptions.join(' '));
+            });
+          }
+        }
       });
     }
     function selectedOption() {
@@ -250,8 +275,23 @@
       const row=rows.find(item=>item.text===state.document.selectedChange && item.risk===state.document.riskLevel);
       return state.master.formDefinitions[state.document.changeForm]?.riskOptions.find(option=>option.text===(row?.optionText || state.document.selectedChange));
     }
+    function typeLocked() { return Boolean(state.savedRecord?.id || autosave?.getState().creationAttempted); }
+    function renderTypeChoices(saving=false) {
+      doc.querySelectorAll('[name="documentTypeChoice"]').forEach(choice=>{
+        choice.checked=choice.value===state.document?.documentType;
+        choice.disabled=state.busy || !state.editable || typeLocked() || saving;
+      });
+    }
+    function renderTypeHelp(saving=false) {
+      if ($('documentTypeHelp')) $('documentTypeHelp').textContent=state.savedRecord?.id
+        ? `Type fixed for ${state.savedRecord.id}.`
+        : saving ? 'Saving draft and issuing the PCN code…' : typeLocked()
+          ? 'Type selected for the first save. Retry save to confirm its code.' : 'You can change TA or SC until you click Save draft.';
+      renderTypeChoices(saving);
+    }
     function renderFields() {
-      doc.querySelectorAll('[data-field]').forEach(control=>{control.value=state.document[control.dataset.field] ?? '';control.disabled=!state.editable;});
+      doc.querySelectorAll('[data-field]').forEach(control=>{control.value=state.document[control.dataset.field] ?? '';control.disabled=!state.editable || control.dataset.field==='documentType'&&typeLocked();});
+      renderTypeHelp();
       renderCategories();renderAdditionalRows();$('sampleDateField').hidden=state.document.sampleSubmitted!=='yes';
       $('testDocumentBadge').hidden=state.document.isTestDocument!==true;renderErrors();
     }
@@ -281,8 +321,10 @@
       const stage=stageForIssue(issue);showStage(stage,false);
       if(stage==='documents'){documents?.focusRequirement(issue.field || issue.key);return;}
       const field=issue.field || issue.key;
-      const control=$(field) || (field.startsWith('changeRows')?$('currentCondition'):null) || $(`${stage}Title`);
-      control?.focus();control?.scrollIntoView({block:'start',behavior:'auto'});
+      const control=(field==='documentType'
+        ? doc.querySelector('[name="documentTypeChoice"]:checked:not(:disabled)') || doc.querySelector('[name="documentTypeChoice"]:not(:disabled)')
+        : $(field)) || (field.startsWith('changeRows')?$('currentCondition'):null) || $(`${stage}Title`);
+      control?.focus();(control?.closest('.create-type-option') || control)?.scrollIntoView({block:'center',behavior:'auto'});
     }
     function showStage(stage,focus=true) {
       if(!stages.includes(stage))return;
@@ -309,6 +351,12 @@
     }
     async function preflight(showErrors=true) {
       if(state.busy)return;
+      if(!state.savedRecord?.id) {
+        $('nextActionLabel').textContent='Save draft to check the next signing action.';
+        $('nextActionPeople').textContent='';$('reviewMailStatus').textContent='';
+        if(showErrors)notify('info','Save draft first','Click Save draft to issue the PCN code before checking readiness.');
+        return;
+      }
       setBusy(true);
       try {
         const record=await autosave.flush({force:true});
@@ -398,9 +446,9 @@
       const generation=entryGuard.next();
       const container=$('entryChoices');container.hidden=false;container.replaceChildren();
       if(kind==='copy'){
-        const label=node('label','PCN number to copy'),input=node('input');input.id='templatePcnId';input.placeholder='PCN-2026-0001';input.maxLength=20;label.append(input);
+        const label=node('label','PCN number to copy'),input=node('input');input.id='templatePcnId';input.placeholder='T-19112601 or PCN-2026-0001';input.maxLength=32;label.append(input);
         const action=button('Copy document content',async()=>{
-          const id=input.value.trim().toUpperCase();if(!/^PCN-\d{4}-\d{4}$/.test(id)){notify('error','Enter a PCN number','Use a PCN number such as PCN-2026-0001.');input.focus();return;}
+          const id=input.value.trim().toUpperCase();if(!isCode(id)){notify('error','Enter a PCN number','Use a valid TA, SC, or legacy PCN number.');input.focus();return;}
           const request=entryGuard.next();action.disabled=true;
           try{const projection=await api(`/api/pcns/${id}/template`);if(!entryGuard.current(request))return;await begin(model.fromTemplate(projection,{canSetRequirements:state.canSetRequirements}),null,{freshIdentity:true});changed(state.document);}
           catch(error){if(entryGuard.current(request))report(error);}finally{action.disabled=false;}
@@ -437,6 +485,7 @@
     }
     async function preview() {
       if(!state.savedRecord&&!model.hasMeaningfulContent(state.document,state.master)){notify('info','Add document details first','Enter some details before saving a draft for preview.');return;}
+      if(!state.savedRecord?.id){notify('info','Save draft first','Click Save draft to issue the PCN code before previewing. You can change TA or SC until then.');return;}
       if($('documentPreviewDialog').open)return;
       const request=++previewGeneration,dialog=$('documentPreviewDialog'),frame=$('documentPreviewFrame'),status=$('documentPreviewStatus');
       previewExpected=null;frame.hidden=true;status.hidden=false;status.dataset.state='loading';status.textContent='Saving your draft for preview…';
@@ -445,7 +494,7 @@
       try{
         const record=await autosave.flush({force:true});
         if(request!==previewGeneration || !dialog.open)return;
-        if(!/^PCN-\d{4}-\d{4}$/.test(record?.id || '') || !/^[a-f0-9]{16}$/i.test(record?.version || ''))throw new Error('Save a draft before previewing the document.');
+        if(!isCode(record?.id) || !/^[a-f0-9]{16}$/i.test(record?.version || ''))throw new Error('Save a draft before previewing the document.');
         const version=record.version.toLowerCase();
         previewExpected={source:frame.contentWindow,origin:root.location.origin,id:record.id,version,request:String(request)};
         status.textContent='Loading PCN document…';
@@ -476,7 +525,7 @@
         const data=JSON.stringify({document:model.toPayload(state.document),isTestDocument:state.document.isTestDocument===true},null,2);
         const url=root.URL.createObjectURL(new root.Blob([data],{type:'application/json'})),link=node('a');link.href=url;link.download='pcn-unsaved-content.json';doc.body.append(link);link.click();link.remove();root.setTimeout(()=>root.URL.revokeObjectURL(url),1000);
       });
-      $('saveDraftButton').addEventListener('click',async()=>{setBusy(true);try{await autosave.flush({force:true});notify('success','Draft saved','You can resume this document from your account on another computer.');}catch(error){report(error);}finally{setBusy(false);}});
+      $('saveDraftButton').addEventListener('click',async()=>{setBusy(true);try{await autosave.flush({force:true,allowCreate:true});notify('success','Draft saved','You can resume this document from your account on another computer.');}catch(error){report(error);}finally{setBusy(false);}});
       $('retrySave').addEventListener('click',async()=>{try{
         if(retryMode(autosave.getState().state,state.savedRecord)==='reload'){if(await confirm('Reload the latest draft?','Your current browser recovery copy stays separate. Loading the latest version will replace the fields on this page.','Reload draft')){const result=await api(`/api/pcn-drafts/${state.savedRecord.id}`);await begin(result.record,result.record,result);}}
         else await autosave.retry();
@@ -486,11 +535,18 @@
       $('previousStage').addEventListener('click',()=>showStage(stages[stages.indexOf(state.stage)-1]));
       $('nextStage').addEventListener('click',()=>{const missing=completion(checks()).missing.filter(issue=>stageForIssue(issue)===state.stage);if(missing.length){state.errors=missing;renderErrors();notify('error',`Complete ${missing.length} required items`,'Your edits are kept. Complete these items to continue.',missing);focusIssue(missing[0]);return;}showStage(stages[stages.indexOf(state.stage)+1]);});
       doc.querySelectorAll('[data-stage]').forEach(control=>control.addEventListener('click',()=>showStage(control.dataset.stage)));
+      doc.querySelectorAll('[name="documentTypeChoice"]').forEach(choice=>choice.addEventListener('change',()=>{
+        if(!choice.checked)return;
+        if(state.busy || !state.editable || typeLocked()){renderTypeChoices();return;}
+        $('documentType').value=choice.value;
+        changed({...state.document,documentType:choice.value});renderTypeChoices();
+      }));
       doc.querySelectorAll('[data-field]').forEach(control=>{
         const field=control.dataset.field;
-        if(['supplierName','materialName','changeForm','riskLevel','selectedChange','currentCondition','newCondition','reason','desiredStart','sampleSubmitted'].includes(field))control.setAttribute('aria-required','true');
+        if(['documentType','supplierName','materialName','changeForm','riskLevel','selectedChange','currentCondition','newCondition','reason','desiredStart','sampleSubmitted'].includes(field))control.setAttribute('aria-required','true');
         control.addEventListener(['SELECT'].includes(control.tagName)?'change':'input',()=>{
           if(!state.editable)return;
+          if(field==='documentType'&&typeLocked()){control.value=state.document.documentType || '';return;}
           if(field==='changeForm'){if(state.document.changeRows?.length&&!root.confirm('Changing the form clears its change categories. Continue?')){control.value=state.document.changeForm;return;}changed(model.changeForm(state.document,control.value,state.master));renderFields();}
           else if(field==='riskLevel'){changed({...state.document,riskLevel:control.value,selectedChange:'',currentCondition:'',newCondition:''});renderFields();}
           else if(['selectedChange','currentCondition','newCondition'].includes(field)&&selectedOption())changed(model.selectChange(state.document,selectedOption(),{[field==='selectedChange'?'text':field]:control.value}));

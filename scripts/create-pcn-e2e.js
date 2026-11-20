@@ -13,6 +13,7 @@ const previewOnly = process.argv.includes('--preview-only');
 const entryMenuOnly = process.argv.includes('--entry-menu-only');
 const artifactSuffix = entryMenuOnly ? '-entry-menu' : layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
 function checked(description) { report.checks.push(description); console.log(JSON.stringify({ creationCheck: description })); }
+const typeChoice = (page, type) => page.getByRole('radio', { name: type.toUpperCase(), exact: true });
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], writes: [], outbox: [], submissions: [] };
 
 function isolatedSystem(origin) {
@@ -134,7 +135,7 @@ async function main() {
       if (url.pathname === '/api/profile') return route.fulfill({ json: { success: true, data: { status: 'unavailable' } } });
       if (url.pathname === '/api/admin/notifications/health') return route.fulfill({ json: { success: true, data: { configuration: { status: 'configured' }, worker: { status: 'disabled' }, queue: {} } } });
       if (!['GET','HEAD'].includes(request.method())) report.writes.push({ method: request.method(), path: url.pathname });
-      if (request.method() === 'PATCH' && /^\/api\/pcns\/PCN-\d{4}-\d{4}$/.test(url.pathname)) {
+      if (request.method() === 'PATCH' && url.pathname.startsWith('/api/pcns/') && require('../pcn-types').isCode(url.pathname.slice('/api/pcns/'.length))) {
         const body = request.postDataJSON(); if (body.status === 'submitted') report.submissions.push({ path: url.pathname, body });
       }
       return route.continue();
@@ -310,7 +311,7 @@ async function main() {
     if (previewOnly) {
       const model = require('../create-model'), master = require('../src/masterData');
       const created = await system.creationService.create({ clientDraftKey: crypto.randomUUID(),
-        document: model.toPayload(model.sample(master)), testDocument: true }, 'preview-fixture',
+        document: {...model.toPayload(model.sample(master)),documentType:'ta'}, testDocument: true }, 'preview-fixture',
         { id: 'create-admin-id', roles: ['admin'], isActive: true });
       await page.goto(`${origin}/create?draft=${created.record.id}`);
       await expect(page.locator('#createEditor')).toBeVisible();
@@ -326,9 +327,9 @@ async function main() {
       const user = { id: 'create-admin-id', roles: ['admin'], isActive: true };
       const oldKey = crypto.randomUUID();
       const original = (await system.creationService.create({ clientDraftKey: oldKey,
-        document: { ...model.toPayload(model.blank(master)), supplierName: 'Original normal draft', materialName: 'Original normal material' } }, 'identity-fixture', user)).record;
+        document: { ...model.toPayload(model.blank(master)), documentType:'ta', supplierName: 'Original normal draft', materialName: 'Original normal material' } }, 'identity-fixture', user)).record;
       let source = (await system.creationService.create({ clientDraftKey: crypto.randomUUID(),
-        document: model.toPayload(model.sample(master)), testDocument: true }, 'identity-fixture', user)).record;
+        document: {...model.toPayload(model.sample(master)),documentType:'ta'}, testDocument: true }, 'identity-fixture', user)).record;
       source = await system.repository.seedHistoricalReview(source.id, { signoff: { gscTet: {
         prepared: true, preparedName: 'Historical Testing Preparer', preparedDate: '2026-10-01'
       } } });
@@ -349,6 +350,7 @@ async function main() {
       checked('Copy from a committed normal client URL creates a fresh testing identity, strips source signatures and preserves both source records');
       await page.goto(`${origin}/create?client=${oldKey}`);
       await page.locator('#startCommon').click(); await page.locator('#useStarter').click();
+      await typeChoice(page, 'sc').check();
       await page.locator('#saveDraftButton').click();
       await expect(page.locator('#draftSaveStatus')).toContainText('Saved at');
       const starter = await system.repository.findById((await page.locator('#draftIdentity').textContent()).trim());
@@ -372,8 +374,13 @@ async function main() {
       });
       await page.locator('#fillTestDocument').click();
       await expect(page.locator('#testDocumentBadge')).toBeVisible();
+      await typeChoice(page, 'ta').check();
+      await page.locator('#saveDraftButton').click();
       await expect(page.locator('#draftSaveStatus')).toContainText(/changed|attention/i);
       await expect(page.locator('#retrySave')).toHaveText('Retry save');
+      await expect(typeChoice(page, 'ta')).toBeChecked();
+      await expect(typeChoice(page, 'ta')).toBeDisabled();
+      await expect(typeChoice(page, 'sc')).toBeDisabled();
       assert.equal((await system.repository.list()).length, 0);
       await page.locator('#retrySave').click();
       await expect(page.locator('#createConfirm')).toBeHidden();
@@ -391,7 +398,7 @@ async function main() {
     }
     if (layoutOnly) {
       const model = require('../create-model'), master = require('../src/masterData');
-      const created = await system.creationService.create({ clientDraftKey: crypto.randomUUID(), document: model.toPayload(model.sample(master)), testDocument: true },
+      const created = await system.creationService.create({ clientDraftKey: crypto.randomUUID(), document: {...model.toPayload(model.sample(master)),documentType:'ta'}, testDocument: true },
         'layout-fixture', { id: 'create-admin-id', roles: ['admin'], isActive: true });
       await page.goto(`${origin}/create?draft=${created.record.id}`);
       await expect(page.locator('#createEditor')).toBeVisible();
@@ -414,6 +421,11 @@ async function main() {
       report.status = 'passed'; return;
     }
     await page.locator('#nextStage').click();
+    await expect(typeChoice(page, 'ta')).toBeFocused();
+    await expect(typeChoice(page, 'ta')).toHaveAttribute('aria-invalid', 'true');
+    await expect(typeChoice(page, 'ta')).toHaveAttribute('aria-describedby', /documentTypeHelp.*documentTypeError/);
+    await typeChoice(page, 'ta').check();
+    await page.locator('#nextStage').click();
     await expect(page.locator('#supplierName')).toHaveAttribute('aria-invalid', 'true');
     await expect(page.locator('#supplierName')).toBeFocused();
     await expect(page.locator('[data-error="supplierName"]')).toContainText(/required/i);
@@ -423,10 +435,11 @@ async function main() {
     await page.locator('#materialName').fill('Creation material draft');
     await expect(page.locator('#supplierName')).toHaveAttribute('aria-invalid', 'false');
     const saveDraft = async target => {
+      if (!await target.locator('#documentType').inputValue() && await typeChoice(target, 'ta').isEnabled()) await typeChoice(target, 'ta').check();
       await target.locator('#saveDraftButton').click();
       await expect(target.locator('#draftSaveStatus')).toContainText('Saved at');
       const id = (await target.locator('#draftIdentity').textContent()).trim();
-      assert.match(id, /^PCN-\d{4}-\d{4}$/);
+      assert.equal(require('../pcn-types').isCode(id),true);
       return system.repository.findById(id);
     };
     const normal = await saveDraft(page);
@@ -618,27 +631,46 @@ async function main() {
     checked('A delayed earlier resume response cannot replace a newer blank document and its edits');
 
     const delayed = await openContext(), delayedPage = await delayed.newPage();
-    let enterCreate, releaseCreate, heldKey;
-    const createEntered = new Promise(resolve => { enterCreate = resolve; });
-    const createGate = new Promise(resolve => { releaseCreate = resolve; }); releases.push(releaseCreate);
-    let holdCreate = true;
-    await delayed.route(`${origin}/api/pcn-drafts`, async route => {
-      if (route.request().method() === 'POST' && holdCreate) { holdCreate = false; heldKey = route.request().postDataJSON().clientDraftKey; enterCreate(); await createGate; }
+    await delayedPage.goto(`${origin}/create`); await delayedPage.locator('#startBlank').click();
+    await typeChoice(delayedPage, 'ta').check();
+    await delayedPage.locator('#supplierName').fill('Delayed normal draft');
+    const priorDraft = await saveDraft(delayedPage);
+    await delayedPage.locator('#dismissNotice').click();
+    let enterUpdate, releaseUpdate;
+    const updateEntered = new Promise(resolve => { enterUpdate = resolve; });
+    const updateGate = new Promise(resolve => { releaseUpdate = resolve; }); releases.push(releaseUpdate);
+    let holdUpdate = true;
+    const updateUrl = `${origin}/api/pcn-drafts/${priorDraft.id}`;
+    await delayed.route(updateUrl, async route => {
+      if (route.request().method() === 'PATCH' && holdUpdate) { holdUpdate = false; enterUpdate(); await updateGate; }
       return route.continue();
     });
-    await delayedPage.goto(`${origin}/create`); await delayedPage.locator('#startBlank').click();
-    await delayedPage.locator('#supplierName').fill('Delayed normal draft'); await createEntered;
-    await delayedPage.locator('#fillTestDocument').click(); await delayedPage.locator('#confirmAccept').click();
+    await delayedPage.locator('#manufacturerName').fill('Background update on the prior TA draft');
+    await updateEntered;
+    await expect(typeChoice(delayedPage, 'ta')).toBeDisabled();
+    await expect(typeChoice(delayedPage, 'sc')).toBeDisabled();
+    await expect(delayedPage.locator('#newDocument')).toBeEnabled();
+    await delayedPage.locator('#newDocument').focus(); await delayedPage.locator('#newDocument').press('Enter');
+    await delayedPage.locator('#confirmAccept').click();
+    await delayedPage.locator('#testDocument').click();
+    await typeChoice(delayedPage, 'sc').check();
+    const oldReply = delayedPage.waitForResponse(response => response.url() === updateUrl && response.request().method() === 'PATCH');
+    releaseUpdate(); const priorNormal = (await (await oldReply).json()).data.record;
+    assert.equal(priorNormal.id, priorDraft.id);
+    await expect(delayedPage.locator('#draftIdentity')).toHaveText('New document');
+    await expect(delayedPage.locator('#documentType')).toHaveValue('sc');
+    await expect(typeChoice(delayedPage, 'sc')).toBeEnabled();
+    await expect(typeChoice(delayedPage, 'sc')).toBeChecked();
     const freshTest = await saveDraft(delayedPage);
-    assert.equal(freshTest.isTestDocument, true); assert.notEqual(freshTest.creationDraftKey, heldKey);
-    const oldReply = delayedPage.waitForResponse(response => response.url() === `${origin}/api/pcn-drafts` && response.request().postDataJSON()?.clientDraftKey === heldKey);
-    releaseCreate(); const priorNormal = (await (await oldReply).json()).data.record;
+    assert.equal(freshTest.isTestDocument, true); assert.notEqual(freshTest.creationDraftKey, priorDraft.creationDraftKey);
+    assert.equal(freshTest.documentType, 'sc');
     assert.notEqual(priorNormal.id, freshTest.id); assert.notEqual(priorNormal.isTestDocument, true);
     await expect(delayedPage.locator('#draftIdentity')).toHaveText(freshTest.id);
     await expect(delayedPage.locator('#testDocumentBadge')).toBeVisible();
     await expect(delayedPage.locator('#supplierName')).toHaveValue(/TEST/i);
+    await expect(delayedPage.locator('#documentType')).toHaveValue('sc');
     await delayed.close();
-    checked('Replacing a held initial normal save with Test document uses a fresh UUID and ignores the late normal reply');
+    checked('Starting another PCN during a held background save uses a fresh UUID and ignores the prior draft reply, including its issued type');
     assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []);
     report.status = 'passed';
   } catch (error) {

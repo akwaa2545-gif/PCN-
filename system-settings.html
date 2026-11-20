@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>System Settings | PCN Portal System</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/system-settings.css" />
+</head>
+<body class="admin-page settings-page">
+  <div class="app-shell">
+  <a class="settings-skip" href="#settingsMain">Skip to settings</a>
+  <header class="topbar settings-topbar">
+    <a class="admin-header-brand settings-brand" href="/admin"><img class="admin-header-logo" src="/tokin-header-logo.png" alt="TOKIN a YAGEO company" /><div><p class="eyebrow">NSN-000244</p><h1>PCN Portal System</h1></div></a>
+    <nav class="topbar-actions" aria-label="Account navigation"><a class="ghost-link" href="/admin">Portal</a><div class="account-menu" id="accountMenu"></div></nav>
+  </header>
+  <main class="settings-main" id="settingsMain">
+    <div class="admin-panel settings-workspace">
+    <header class="panel-header settings-heading"><div><h2>System Settings</h2><p id="settingsIntro">Choose a feature to configure.</p></div></header>
+    <p class="settings-status" id="settingsStatus" role="status" aria-live="polite" aria-atomic="true">Checking Administrator access…</p>
+    <div class="settings-toolbar"><button class="settings-back" type="button" id="settingsBack" hidden><span aria-hidden="true">←</span> All settings</button><button class="settings-button" type="button" id="settingsReload" disabled>Reload</button></div>
+    <section class="settings-home" id="settingsHome" aria-label="Settings features" hidden>
+      <div class="settings-feature-grid">
+        <button class="settings-feature" id="settingsReviewLimits" type="button">
+          <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></span>
+          <span class="settings-feature-title">Review limits</span>
+          <span class="settings-feature-description">Set how many days each department has to complete a review.</span>
+          <span class="settings-feature-action">Configure limits <span aria-hidden="true">→</span></span>
+        </button>
+        <button class="settings-feature" id="settingsNotifications" type="button">
+          <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
+          <span class="settings-feature-title">Notifications</span>
+          <span class="settings-feature-description">Choose who receives each type of PCN notification email.</span>
+          <span class="settings-feature-action">Configure notifications <span aria-hidden="true">&rarr;</span></span>
+        </button>
+        <a class="settings-feature" href="/admin#mail-routing">
+          <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
+          <span class="settings-feature-title">Mail routing</span>
+          <span class="settings-feature-description">Manage the recipients for department notifications.</span>
+          <span class="settings-feature-action">Manage routing <span aria-hidden="true">→</span></span>
+        </a>
+        <a class="settings-feature" href="/admin#users">
+          <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/></svg></span>
+          <span class="settings-feature-title">User access</span>
+          <span class="settings-feature-description">Manage user accounts, roles, and department access.</span>
+          <span class="settings-feature-action">Manage users <span aria-hidden="true">→</span></span>
+        </a>
+      </div>
+      <p class="settings-home-note">Mail routing and user access open in the Admin Portal.</p>
+    </section>
+    <section class="admin-panel settings-editor" id="settingsEditor" aria-labelledby="pendingDaysTitle" hidden>
+      <div class="panel-header settings-section-heading"><div><h2 id="pendingDaysTitle" tabindex="-1">Department review limits</h2><p id="settingsExplanation">Applies to new and ongoing reviews from the original handoff.</p></div></div>
+      <form id="settingsForm" novalidate>
+        <fieldset id="settingsFields" disabled aria-describedby="settingsDayHelp">
+          <legend class="settings-sr-only">Department review limits</legend>
+          <p class="settings-help" id="settingsDayHelp">Calendar days (1–365). Turn off a limit for no deadline.</p>
+          <div class="settings-column-headings" aria-hidden="true"><span>Department</span><span>Review limit</span><span>Status</span></div>
+          <div class="settings-review-group" role="group" aria-labelledby="tetReviewsTitle">
+          <h3 id="tetReviewsTitle">TET reviews</h3>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="gscTetEnabled" type="checkbox" /><label for="gscTetEnabled">GSC/TET<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="gscTetDays">GSC/TET days</label><input id="gscTetDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp gscTetError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="gscTetError"></p>
+          </div>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="prodEngTetEnabled" type="checkbox" /><label for="prodEngTetEnabled">Prod.Eng/TET<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="prodEngTetDays">Prod.Eng/TET days</label><input id="prodEngTetDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp prodEngTetError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="prodEngTetError"></p>
+          </div>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="prodEngTaEnabled" type="checkbox" /><label for="prodEngTaEnabled">Prod.Eng/TA<span class="settings-sr-only"> &mdash; enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="prodEngTaDays">Prod.Eng/TA days</label><input id="prodEngTaDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp prodEngTaError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="prodEngTaError"></p>
+          </div>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="prodEngScEnabled" type="checkbox" /><label for="prodEngScEnabled">Prod.Eng/SC<span class="settings-sr-only"> &mdash; enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="prodEngScDays">Prod.Eng/SC days</label><input id="prodEngScDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp prodEngScError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="prodEngScError"></p>
+          </div>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="qaTetEnabled" type="checkbox" /><label for="qaTetEnabled">QA/TET<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="qaTetDays">QA/TET days</label><input id="qaTetDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp qaTetError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="qaTetError"></p>
+          </div>
+          </div>
+          <div class="settings-review-group" role="group" aria-labelledby="tapbuReviewsTitle">
+          <h3 id="tapbuReviewsTitle">TaPBU reviews</h3>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="gscTapbuEnabled" type="checkbox" /><label for="gscTapbuEnabled">GSC/TaPBU<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="gscTapbuDays">GSC/TaPBU days</label><input id="gscTapbuDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp gscTapbuError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="gscTapbuError"></p>
+          </div>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="qaTapbuEnabled" type="checkbox" /><label for="qaTapbuEnabled">QA/TaPBU<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="qaTapbuDays">QA/TaPBU days</label><input id="qaTapbuDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp qaTapbuError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="qaTapbuError"></p>
+          </div>
+          </div>
+          <div class="settings-review-group" role="group" aria-labelledby="finalReviewTitle">
+          <h3 id="finalReviewTitle">Final judgment</h3>
+          <div class="settings-row">
+            <div class="settings-toggle"><input id="qaFinalEnabled" type="checkbox" /><label for="qaFinalEnabled">QA/TET Final Judgment<span class="settings-sr-only"> — enable review limit</span></label></div>
+            <div class="settings-days"><label class="settings-sr-only" for="qaFinalDays">QA/TET Final Judgment days</label><input id="qaFinalDays" type="number" min="1" max="365" step="1" inputmode="numeric" aria-describedby="settingsDayHelp qaFinalError" disabled /><span class="settings-days-unit" aria-hidden="true">days</span></div>
+            <span class="settings-limit-state" aria-hidden="true"><span class="settings-limit-on">Enabled</span><span class="settings-limit-off">No deadline</span></span>
+            <p class="settings-error" id="qaFinalError"></p>
+          </div>
+          </div>
+        </fieldset>
+        <footer class="settings-footer"><p id="settingsSaved"></p><button class="settings-button settings-primary" type="submit" id="settingsSave" disabled>Save settings</button></footer>
+      </form>
+    </section>
+    <section class="admin-panel settings-editor notification-editor" id="notificationEditor" aria-labelledby="notificationTitle" hidden>
+      <div class="panel-header settings-section-heading"><div><h2 id="notificationTitle" tabindex="-1">Notifications</h2><p>Choose a role or group to see and edit its notification types.</p></div><span id="notificationTotalEnabled" class="notification-total"></span></div>
+      <form id="notificationForm">
+        <fieldset id="notificationFields" disabled>
+          <legend class="settings-sr-only">Notification delivery and recipients</legend>
+          <div class="notification-view-bar"><label for="notificationView">Configure by</label><select id="notificationView"><option value="group">By role / group</option><option value="type">By notification type</option></select></div>
+          <section id="notificationGroupView" aria-labelledby="notificationOverviewTitle">
+            <div class="notification-type-bar"><label for="notificationOverviewGroup">Role or group</label><select id="notificationOverviewGroup" aria-describedby="notificationGroupHelp"></select></div>
+            <h3 id="notificationOverviewTitle">Select a role or group</h3>
+            <p id="notificationGroupSummary" class="notification-audience" role="status" aria-live="polite" aria-atomic="true"></p>
+            <p class="settings-help" id="notificationGroupHelp">Current setting shows the delivery rule below. Changes apply after Save notification settings. Include group adds an additional subscription; leaving it unchecked keeps current recipients unchanged. Overlapping groups and individual choices can still apply. Individual Exclude choices take priority. Details opens the complete rule.</p>
+            <p class="settings-help">General updates go to eligible internal users. Administrator notices follow the PCN event's department; supplier notices only cover their own PCNs. Workflow messages depend on the active assignment.</p>
+            <div id="notificationGroupRules" class="notification-group-rules" role="group" aria-labelledby="notificationOverviewTitle" hidden>
+              <div class="notification-group-headings" aria-hidden="true"><span>Notification type</span><span>Current setting</span><span>Additional group subscription</span><span></span></div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-submitted"></h4><p id="notificationGroupDescription-submitted"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-submitted"></strong><p class="notification-group-status" id="notificationGroupStatus-submitted"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-submitted"><input id="notificationGroupSelected-submitted" type="checkbox" aria-describedby="notificationGroupCurrent-submitted notificationGroupStatus-submitted notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-submitted" type="button">Details</button>
+              </div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-actionRequired"></h4><p id="notificationGroupDescription-actionRequired"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-actionRequired"></strong><p class="notification-group-status" id="notificationGroupStatus-actionRequired"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-actionRequired"><input id="notificationGroupSelected-actionRequired" type="checkbox" aria-describedby="notificationGroupCurrent-actionRequired notificationGroupStatus-actionRequired notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-actionRequired" type="button">Details</button>
+              </div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-updated"></h4><p id="notificationGroupDescription-updated"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-updated"></strong><p class="notification-group-status" id="notificationGroupStatus-updated"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-updated"><input id="notificationGroupSelected-updated" type="checkbox" aria-describedby="notificationGroupCurrent-updated notificationGroupStatus-updated notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-updated" type="button">Details</button>
+              </div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-completed"></h4><p id="notificationGroupDescription-completed"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-completed"></strong><p class="notification-group-status" id="notificationGroupStatus-completed"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-completed"><input id="notificationGroupSelected-completed" type="checkbox" aria-describedby="notificationGroupCurrent-completed notificationGroupStatus-completed notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-completed" type="button">Details</button>
+              </div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-dueSoon"></h4><p id="notificationGroupDescription-dueSoon"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-dueSoon"></strong><p class="notification-group-status" id="notificationGroupStatus-dueSoon"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-dueSoon"><input id="notificationGroupSelected-dueSoon" type="checkbox" aria-describedby="notificationGroupCurrent-dueSoon notificationGroupStatus-dueSoon notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-dueSoon" type="button">Details</button>
+              </div>
+              <div class="notification-group-rule">
+                <div class="notification-group-mail"><h4 id="notificationGroupType-overdue"></h4><p id="notificationGroupDescription-overdue"></p></div>
+                <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-overdue"></strong><p class="notification-group-status" id="notificationGroupStatus-overdue"></p></div>
+                <label class="notification-group-toggle" for="notificationGroupSelected-overdue"><input id="notificationGroupSelected-overdue" type="checkbox" aria-describedby="notificationGroupCurrent-overdue notificationGroupStatus-overdue notificationGroupHelp" /><span>Include group</span></label>
+                <button class="settings-button notification-group-details" id="notificationGroupConfigure-overdue" type="button">Details</button>
+              </div>
+            </div>
+          </section>
+          <section id="notificationTypeView" aria-label="Configure by notification type" hidden>
+          <div class="notification-type-bar"><label for="notificationType">Notification type</label><select id="notificationType" aria-describedby="notificationTypeDescription"></select></div>
+          <div class="notification-rule-heading"><h3 id="notificationTypeTitle"></h3><p id="notificationTypeDescription"></p></div>
+          <div class="notification-switches">
+            <label class="notification-check" for="notificationEnabled"><input id="notificationEnabled" type="checkbox" /><span>Send this type of email</span></label>
+            <label class="notification-check" for="notificationUseDefaults"><input id="notificationUseDefaults" type="checkbox" aria-describedby="notificationDefaultsHelp" /><span>Keep current recipients</span></label>
+          </div>
+          <p class="settings-help" id="notificationDefaultsHelp">Keep the existing workflow recipients or update audience, then add your choices below. Turn this off to use only your selected groups and users. <a href="/admin#mail-routing">Manage workflow mail routing</a>.</p>
+          <p id="notificationAudienceSummary" class="notification-audience" role="status" aria-live="polite" aria-atomic="true"></p>
+          <div class="notification-recipient-grid">
+            <section class="notification-recipient-panel" aria-labelledby="notificationGroupsTitle">
+              <h4 id="notificationGroupsTitle">Departments and roles</h4>
+              <p>Choose a PCN role, department or signing role.</p>
+              <label for="notificationGroupPicker">Department / role group</label>
+              <div class="notification-picker-row"><select id="notificationGroupPicker"></select><button class="settings-button" id="notificationAddGroup" type="button">Add group</button></div>
+              <ul id="notificationSelectedGroups" class="notification-recipients" aria-label="Selected recipient groups"></ul>
+            </section>
+            <section class="notification-recipient-panel" aria-labelledby="notificationUsersTitle">
+              <h4 id="notificationUsersTitle">Individual users</h4>
+              <p>Receive adds a user; Exclude takes priority over groups and current recipients.</p>
+              <label for="notificationUserSearch">Find a verified user</label>
+              <input id="notificationUserSearch" type="search" placeholder="Name, employee ID, email or department" autocomplete="off" maxlength="100" />
+              <span id="notificationSearchCount" class="notification-search-count" role="status" aria-live="polite" aria-atomic="true"></span>
+              <label for="notificationUserPicker">Verified user</label><select id="notificationUserPicker"></select>
+              <div class="notification-user-actions"><button class="settings-button" id="notificationIncludeUser" type="button">Receive</button><button class="settings-button" id="notificationExcludeUser" type="button">Exclude</button></div>
+              <ul id="notificationSelectedUsers" class="notification-recipients" aria-label="Individual recipient choices"></ul>
+            </section>
+          </div>
+          </section>
+          <p class="settings-help notification-delivery-note">Selected groups and users must have verified email and access to a PCN. Receiving an email does not grant signing access. Due-soon and overdue emails follow <button class="notification-text-button" id="notificationReviewLink" type="button">review limits</button>. Saved removals and disabled types apply to unsent mail; messages already sending or sent cannot be recalled. New recipient choices apply to future notifications.</p>
+        </fieldset>
+        <footer class="settings-footer"><p id="notificationSaved"></p><button class="settings-button settings-primary" type="submit" id="notificationSave" disabled>Save notification settings</button></footer>
+      </form>
+    </section>
+    </div>
+  </main>
+  </div>
+  <script src="/session-client.js"></script>
+  <script src="/notification-settings.js"></script>
+  <script src="/system-settings.js"></script>
+</body>
+</html>

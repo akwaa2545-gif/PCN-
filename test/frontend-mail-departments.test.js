@@ -54,7 +54,7 @@ function routingPage() {
   page.els.notificationRecipientEditor.append(page.els.notificationRecipientList);
   page.state.isLoading = false;
   page.state.notificationSettings = { schemaVersion: 2, version: 'a'.repeat(64), directoryConfigured: true,
-    groups: ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu'].flatMap(department => ['prepared', 'checked', 'approved'].map(action => ({
+    groups: ['gscTet', 'prodEngTet', 'prodEngTa', 'prodEngSc', 'qaTet', 'gscTapbu', 'qaTapbu'].flatMap(department => ['prepared', 'checked', 'approved'].map(action => ({
       key: `department.${department}.${action}`, label: `${department} ${action}`, action, recipients: [{ email: `${department}-${action}@example.test` }],
     }))).concat({ key: 'supplierNotification', label: 'Supplier Notification', action: null, recipients: [] }) };
   return { ...page, document, window };
@@ -63,7 +63,7 @@ function routingPage() {
 test('each department has one header assignment control and collapsing preserves all saved mail groups', () => {
   const page = routingPage(); page.renderNotificationSettings();
   const departments = page.els.notificationGroups.querySelectorAll('[data-department]');
-  assert.equal(departments.length, 5);
+  assert.equal(departments.length, 7);
   for (const department of departments) {
     assert.equal(department.querySelectorAll('.notification-department-add').length, 1);
     assert.match(department.querySelector('.notification-department-add').getAttribute('aria-label'), /^Assign user to .* mail list$/);
@@ -74,10 +74,21 @@ test('each department has one header assignment control and collapsing preserves
     assert.equal(department.querySelectorAll('[data-notification-group]').length, 3);
   }
   const payload = JSON.stringify(page.getMailRoutingPayload());
-  assert.equal(JSON.parse(payload).groups.length, 16); assert.equal(page.state.hasMailChanges, false);
+  assert.equal(JSON.parse(payload).groups.length, 22); assert.equal(page.state.hasMailChanges, false);
   page.renderNotificationSettings();
   assert.equal(JSON.stringify(page.getMailRoutingPayload()), payload);
   assert.ok(page.els.notificationGroups.querySelectorAll('.notification-department-body').every(body => body.hidden));
+});
+
+test('TA and SC engineering mail groups remain separate from legacy engineering recipients', () => {
+  const page = routingPage(); page.renderNotificationSettings();
+  for (const department of ['prodEngTet', 'prodEngTa', 'prodEngSc']) {
+    const card = page.els.notificationGroups.querySelectorAll('[data-department]').find(node => node.dataset.department === department);
+    assert.ok(card);
+    const groups = card.querySelectorAll('[data-notification-group]');
+    assert.deepEqual(groups.map(node => node.dataset.notificationGroup), ['prepared', 'checked', 'approved'].map(action => `department.${department}.${action}`));
+    for (const group of groups) assert.match(group.querySelector('input').value, new RegExp(`^${department}-`));
+  }
 });
 
 test('department recipient popup requires a role and clears verified selection and old lookup on role change', () => {

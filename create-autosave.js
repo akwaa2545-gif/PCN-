@@ -28,7 +28,7 @@
     let record=options.initialRecord || null;
     let baseline=record?JSON.stringify(serialize(record)):null;
     let state='idle',dirty=false,stopped=false,paused=false,lastError=null,lastSavedAt=null;
-    let timer=null,pending=0,tail=Promise.resolve();
+    let timer=null,pending=0,tail=Promise.resolve(),creationAttempted=false;
 
     function report(next, extra={}) {
       state=next;
@@ -48,6 +48,8 @@
     function schedule() {
       clearTimer();
       if (!dirty || stopped || paused || !editable(record)) return;
+      if (!record && options.manualCreate) { report('idle'); return; }
+      if (!record && options.canCreate && !options.canCreate(options.read())) { report('idle'); return; }
       const throttle=lastSavedAt===null?0:Math.max(0,minIntervalMs-(now()-lastSavedAt));
       report('waiting');
       timer=scheduleTimer(()=>{
@@ -57,11 +59,13 @@
       },Math.max(debounceMs,throttle));
     }
 
-    async function save(force, replayed=false) {
+    async function save(force, replayed=false, allowCreate=false) {
       if (stopped || !editable(record)) return record;
       if (paused) throw lastError;
       if (!dirty && !(force && !record)) return record;
       const raw=options.read();
+      if (!record && options.canCreate && !options.canCreate(raw)) throw new Error('Choose TA or SC before saving a new PCN.');
+      if (!record && options.manualCreate && !allowCreate) throw new Error('Save draft first to issue the PCN code. You can change TA or SC until then.');
       const snapshot=serialize(raw);
       if (record && baseline===JSON.stringify(snapshot)) {
         dirty=false;
@@ -69,10 +73,12 @@
       }
       report('saving');
       try {
+        if (!record) creationAttempted=true;
         const result=await options.write(snapshot,{clientDraftKey,id:record?.id,version:record?.version,
           ...(raw.isTestDocument===true?{testDocument:true}:{})});
         if (!result?.record?.id) throw new Error('Draft save did not return the saved record.');
         record=result.record;
+        if (!stopped) options.onIdentity?.(record);
         baseline=JSON.stringify(serialize(record));
         lastSavedAt=now();
         dirty=differs();
@@ -114,15 +120,15 @@
       dirty=differs();
       schedule();
     }
-    function flush({force=false}={}) {
+    function flush({force=false,allowCreate=false}={}) {
       clearTimer();
-      return enqueue(()=>save(force));
+      return enqueue(()=>save(force,false,allowCreate));
     }
     function retry() {
       if (stopped || !editable(record)) return Promise.resolve(record);
       paused=false;
       lastError=null;
-      return flush({force:true});
+      return flush({force:true,allowCreate:creationAttempted});
     }
     function adopt(next) {
       if (!next?.id) throw new TypeError('A saved record is required.');
@@ -166,7 +172,7 @@
       });
     }
     function stop() { stopped=true;clearTimer();report('stopped'); }
-    function getState() { return {state,record,dirty,pending:pending>0,clientDraftKey,savedAt:lastSavedAt}; }
+    function getState() { return {state,record,dirty,pending:pending>0,clientDraftKey,savedAt:lastSavedAt,creationAttempted}; }
     return Object.freeze({markDirty,flush,retry,exclusive,adopt,stop,getState});
   }
   return Object.freeze({create});

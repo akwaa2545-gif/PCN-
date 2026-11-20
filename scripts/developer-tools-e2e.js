@@ -51,6 +51,46 @@ async function main() {
     await page.goto(`${origin}/admin`);
     await expect(page.locator('#adminDeveloperLink')).toBeVisible();await page.locator('#adminDeveloperLink').click();
     await expect(page).toHaveURL(`${origin}/developer`);await expect(page.locator('#developerMain')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Admin tools', exact: true })).toBeVisible();
+    await expect(page.locator('#pcnSelect')).toHaveValue('');
+    const workflowTab = page.getByRole('tab', { name: 'Workflow', exact: true });
+    const transactionsTab = page.getByRole('tab', { name: 'Document Transactions', exact: true });
+    const adminToolsTab = page.getByRole('tab', { name: 'Admin tools', exact: true });
+    await workflowTab.focus();await workflowTab.press('End');
+    await expect(adminToolsTab).toBeFocused();await expect(adminToolsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#adminToolsPanel')).toBeVisible();await expect(page.locator('#workflowPanel')).toBeHidden();
+    await adminToolsTab.press('ArrowRight');await expect(workflowTab).toBeFocused();
+    await workflowTab.press('ArrowLeft');await expect(adminToolsTab).toBeFocused();
+    await adminToolsTab.press('Home');await expect(workflowTab).toBeFocused();
+    await workflowTab.press('ArrowRight');await expect(transactionsTab).toBeFocused();
+    await transactionsTab.press('ArrowRight');await expect(adminToolsTab).toBeFocused();
+    await adminToolsTab.press('ArrowLeft');await expect(transactionsTab).toBeFocused();
+    await transactionsTab.press('End');await expect(adminToolsTab).toBeFocused();
+    const toolPanel = page.locator('#adminToolsPanel');
+    for (const [name, href] of [['System settings', '/system-settings'], ['Mail Routing', '/admin#mail-routing'], ['User access', '/admin#users']]) {
+      await expect(toolPanel.getByRole('link', { name: new RegExp(name, 'i') })).toHaveAttribute('href', href);
+    }
+    check('Developer opens Admin tools without selecting a PCN; all three tabs support Home, End and arrow-key wrapping');
+    await page.screenshot({ path: path.resolve('test-results/developer-admin-tools-desktop.png'), fullPage: true });
+    const returnToTools = async () => {
+      await page.goto(`${origin}/developer`);await expect(page.locator('#developerMain')).toBeVisible();
+      await page.getByRole('tab', { name: 'Admin tools', exact: true }).click();
+    };
+    await toolPanel.getByRole('link', { name: /System settings/i }).click();
+    await expect(page).toHaveURL(`${origin}/system-settings`);await expect(page.locator('#settingsHome')).toBeVisible();
+    const settingsRead = page.waitForResponse(response => response.url().endsWith('/api/admin/workflow-settings') && response.request().method() === 'GET');
+    await page.locator('#settingsReviewLimits').click();assert.equal((await settingsRead).status(), 200);
+    await expect(page.locator('#settingsEditor')).toBeVisible();
+    await returnToTools();
+    await page.locator('#adminToolsPanel').getByRole('link', { name: /Mail Routing/i }).click();
+    await expect(page).toHaveURL(`${origin}/admin#mail-routing`);await expect(page.locator('#mailRoutingView')).toBeVisible();
+    const routingRead = await context.request.get(`${origin}/api/notification-settings`);assert.equal(routingRead.status(), 200);
+    await returnToTools();
+    await page.locator('#adminToolsPanel').getByRole('link', { name: /User access/i }).click();
+    await expect(page).toHaveURL(`${origin}/admin#users`);await expect(page.locator('#adminUsersView')).toBeVisible();
+    const usersRead = await context.request.get(`${origin}/api/admin/users`);assert.equal(usersRead.status(), 200);
+    check('Admin tools links open the existing review limits, Mail Routing and Users pages with authorized read-only API access');
+    await returnToTools();await page.getByRole('tab', { name: 'Workflow', exact: true }).click();
     await page.locator('#pcnSelect').selectOption(record.id);
     await expect(page.locator('#workflowStages')).toContainText('Developer fixture');
     await expect(page.locator('#workflowSummary')).toContainText(/Checked/i);
@@ -104,6 +144,13 @@ async function main() {
     await page.locator('#pcnSelect').selectOption(record.id);await expect(page.locator('#transactionRows')).toContainText(/Developer fixture/);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile page contains table scrolling');
     await page.screenshot({ path: path.resolve('test-results/developer-tools-mobile.png'), fullPage: true });
+    await page.getByRole('tab', { name: 'Admin tools', exact: true }).click();
+    await expect(page.locator('#adminToolsPanel')).toBeVisible();
+    await expect(page.locator('#pcnSelect')).toHaveValue(record.id);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'Mobile Admin tools stays within the page');
+    await page.screenshot({ path: path.resolve('test-results/developer-admin-tools-mobile.png'), fullPage: true });
+    check('Mobile Admin tools stays contained and tab changes preserve the selected PCN');
+    await page.getByRole('tab', { name: 'Workflow', exact: true }).click();
     await context.route(`${origin}/api/developer/pcns/${record.id}/inspect`, route => route.fulfill({ status: 403, json: { success: false, error: 'Developer access required' } }));
     await page.locator('#refreshDeveloper').click();await expect(page.locator('#developerMain')).toBeHidden();
     await expect(page.locator('#pcnSelect option')).toHaveCount(1);
@@ -111,6 +158,7 @@ async function main() {
     check('Losing Developer access clears cached document choices and details and hides the tools');
     await login('admin');await page.goto(`${origin}/admin`);await expect(page.locator('#adminDeveloperLink')).toBeHidden();
     await page.goto(`${origin}/developer`);await expect(page.locator('#developerMain')).toBeHidden();await expect(page.locator('#developerStatus')).toContainText(/access|Developer/i);
+    await expect(page.locator('#adminToolsPanel')).toBeHidden();
     const denied = await context.request.get(`${origin}/api/developer/pcns`);assert.equal(denied.status(), 403);
     check('Mobile layout stays contained; Administrator sees no menu and cannot use the page or API');
     assert.deepEqual(report.writes, []);assert.deepEqual(report.external, []);assert.deepEqual(report.errors, []);

@@ -1,8 +1,8 @@
 (function () {
-  const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
+  const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', prodEngTa: 'productionengineering', prodEngSc: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
   const accessLabels = { admin: 'Administrator', developer: 'Developer', reviewer: 'Reviewer', supplier: 'Requester', gsc: 'GSC', productionengineering: 'Production engineering', qa: 'QA', tapbu: 'TaPBU' };
-  const departments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu', 'it', 'other', 'developer'];
-  const signingDepartments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu'];
+  const departments = ['gscTet', 'prodEngTet', 'prodEngTa', 'prodEngSc', 'qaTet', 'gscTapbu', 'qaTapbu', 'it', 'other', 'developer'];
+  const signingDepartments = ['gscTet', 'prodEngTet', 'prodEngTa', 'prodEngSc', 'qaTet', 'gscTapbu', 'qaTapbu'];
   const signingSteps = ['approved', 'checked', 'prepared'];
   document.addEventListener('DOMContentLoaded', init);
 

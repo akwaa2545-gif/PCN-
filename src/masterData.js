@@ -1,3 +1,5 @@
+const { peLabel } = require('../pcn-types');
+
 const commonDocuments = [
   "Supplier hazardous substance tested report",
   "Green Procurement declaration",
@@ -261,18 +263,18 @@ const adminItems = [
   }
 ];
 
-function buildWorkflow(riskLevel) {
-  if (riskLevel === "RL0") {
-    return workflowBase.filter((step) => step.title !== "TaPBU approval gate");
-  }
-
-  return [...workflowBase];
+function buildWorkflow(riskLevel, record = {}) {
+  const steps = riskLevel === "RL0"
+    ? workflowBase.filter((step) => step.title !== "TaPBU approval gate") : [...workflowBase];
+  const owner = peLabel(record);
+  return owner === 'Prod.Eng/TET' ? steps : steps.map(step =>
+    step.key === 'technical_review' ? { ...step, owner } : step);
 }
 
 function buildWorkflowProgress(record) {
   const status = record.status || "draft";
   const definition = getStatusDefinition(status);
-  const steps = buildWorkflow(record.riskLevel);
+  const steps = buildWorkflow(record.riskLevel, record);
   const activeKey = resolveActiveStepKey(definition.activeStep, steps);
   const activeIndex = Math.max(
     steps.findIndex((step) => step.key === activeKey),

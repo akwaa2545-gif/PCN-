@@ -1,10 +1,14 @@
 # Windows internal deployment and employee-code cutover
 
-Updated: 2026-10-16. Signed `pcn-test-21-1` is installed on the existing HTTP :8443 origin. All 28 CI steps, exact-release identity, 31 public asset checks and SQL readiness passed. Migrations 001–007 were already applied with matching checksums. Five live browser groups passed. A repeat consumer returned `already_current` with Node PID 8400 unchanged, and final independent checks confirmed the SYSTEM task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
+Updated: 2026-10-19. Signed `pcn-test-22-2` is installed with canonical origin `http://tet-pcn.kemet.com:8443`. Release CI, exact-release identity, SQL readiness and guarded real DNS browser login/session/CSRF/logout acceptance passed. Only the two approved nonsecret origin settings changed; private file ACLs, proxy, IIS binding, firewall scope and deployment trust anchors were retained. Repeat consumer and SYSTEM task checks returned `already_current`; final independent checks confirmed Node PID 10044 unchanged and the task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
+
+## Pending System Settings release — not deployed
+
+The 2026-10-21 settings feature requires explicit migration **008_workflow_settings.sql** before its updated runtime starts. The user approved this migration after the development server failed readiness; it is now applied to configured `SVR120A / Scn_DB`. It created/seeded only `pcn.WorkflowSettings` and migration metadata; before/after business counts and PCN versions were unchanged. The local server now returns HTTP 200 `ready` with eight migrations. Ordinary startup and the deployment consumer never apply migrations. The new `system-settings.html/js/css` assets must still be allowed by the separately installed protected deployment consumer before a signed release is selected. No signed runtime cutover or consumer replacement was performed.
 
 ## Scope and retained components
 
-The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `http://172.30.77.137:8443`, with the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` WinSW service. Node serves application routes/static files only through `127.0.0.1:3000`. Default Web Site's `*:80` binding was verified unchanged and responds HTTP 200.
+The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `http://tet-pcn.kemet.com:8443` (resolving to `172.30.77.137`), with the separate IIS `PCNTest` site/application pool and `SupplierPCNTest` WinSW service. Node serves application routes/static files only through `127.0.0.1:3000`. Default Web Site's `*:80` binding was verified unchanged and responds HTTP 200.
 
 The replacement data flow is:
 
@@ -24,12 +28,12 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-21-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-22-2` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
 | Backend binding | `127.0.0.1:3000` only |
-| Browser origin | Exactly `http://172.30.77.137:8443` |
+| Browser origin | Exactly `http://tet-pcn.kemet.com:8443` |
 | Runtime identity | `SupplierPCNTest` as NetworkService with service-SID-specific ACLs |
 | IIS identity | Separate PCNTest application pool, no SQL/environment-secret access |
 
@@ -43,7 +47,8 @@ HOST=127.0.0.1
 PORT=3000
 TRUST_PROXY=loopback
 NODE_ENV=production
-PUBLIC_ORIGIN=http://172.30.77.137:8443
+PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443
+INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com
 ALLOW_INTERNAL_HTTP=true
 ```
 
@@ -51,20 +56,20 @@ ALLOW_INTERNAL_HTTP=true
 
 ## Internal DNS origin cutover
 
-Prepared locally on 2026-10-19; this procedure has not been deployed. DNS for `tet-pcn.kemet.com` was verified from the workstation to resolve to `172.30.77.137`, and the login page returned 200. Empty login requests with the DNS Origin returned 403 `Request origin is not allowed`; the old IP Origin passed the origin check and reached authentication (401). No successful live sign-in was performed. Runtime 21 permits only private literal IPs for internal HTTP, so changing DNS or only changing its environment cannot enable this hostname.
+Completed with user approval on 2026-10-19 using signed `pcn-test-22-2`. DNS for `tet-pcn.kemet.com` resolves to `172.30.77.137`. Before the fix, the login page returned 200 but DNS-Origin login returned 403 `Request origin is not allowed`; the old IP Origin reached authentication (401). Runtime 21 supported only private literal IPs for internal HTTP. Runtime 22 adds explicit hostname configuration while retaining exact scheme/hostname/port checks; DNS alone does not configure an accepted application origin.
 
 Local validation passed 20 targeted tests and all 991 suite tests (88.25% line, 91.10% branch, 94.62% function coverage). An isolated Chromium journey with a synthetic DNS name mapped to loopback passed employee-code login with `returnTo=/`, host-only HTTP cookie isolation, authenticated session, CSRF rejection and logout, without SQL or integration calls. Code and JavaScript reviews reported no findings. The high/critical dependency audit gate passed with two moderate advisories in the existing `sprintf-js` / `tedious` dependency chain.
 
-After approval, publish and install a signed runtime containing the explicit internal hostname configuration support, initially retaining the existing IP configuration. Coordinate the configuration switch under the existing deployment mutex/task procedure. Preserve a protected backup and ACLs of `C:\ProgramData\SupplierPCN\config\pcn.env`; change only these nonsecret settings:
+The signed runtime was installed first with the existing IP configuration; the subsequent switch used the existing deployment mutex/task procedure and preserved a protected backup and ACLs of `C:\ProgramData\SupplierPCN\config\pcn.env`. Only these nonsecret settings changed:
 
 ```text
 PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443
 INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com
 ```
 
-Retain `ALLOW_INTERNAL_HTTP=true`, `NODE_ENV=production`, `HOST=127.0.0.1`, `TRUST_PROXY=loopback`, port 3000, all SQL/integration values and employee-network restrictions. Verify hostname resolution from the host and an employee workstation. Validate configuration using the new runtime before restarting `SupplierPCNTest`. The existing IIS binding already serves this DNS URL; inspect it and retain it if suitable.
+`ALLOW_INTERNAL_HTTP=true`, `NODE_ENV=production`, `HOST=127.0.0.1`, `TRUST_PROXY=loopback`, port 3000, all SQL/integration values and employee-network restrictions were retained. Host and workstation DNS resolution and the new runtime configuration were checked before the service restart. The existing IIS binding already served the DNS URL and was retained.
 
-Verify DNS login/session/logout, host-only `pcn_session_http` cookies, CSRF rejection, readiness and rejection of old IP, unrelated, wrong-scheme and wrong-port Origins. Sign in again at the DNS URL because existing IP cookies do not transfer. Notification links use the new canonical `PUBLIC_ORIGIN`. The old IP is no longer a supported mutation/login origin; distribute the DNS URL and update bookmarks. Restore the protected environment backup and restart the service to roll back; do not leave `INTERNAL_HTTP_HOSTNAME` configured with an IP `PUBLIC_ORIGIN`. Record the actual release and live checks after cutover.
+DNS browser login/session/logout, host-only `pcn_session_http` cookie isolation, CSRF rejection, readiness and rejection of old-IP, lookalike, wrong-scheme and wrong-port Origins passed. Completed release, identity and task checks are recorded below. Sign in again at the DNS URL because existing IP cookies do not transfer. Notification links use the new canonical `PUBLIC_ORIGIN`. The old IP is no longer a supported mutation/login origin; distribute the DNS URL and update bookmarks. To roll back configuration, restore the protected environment backup and restart the service; do not leave `INTERNAL_HTTP_HOSTNAME` configured with an IP `PUBLIC_ORIGIN`.
 
 ## Historical employee-code cutover sequence
 
@@ -80,7 +85,7 @@ The earlier employee-code rollout completed this sequence. PCNTest has Windows A
 
 ## Internal HTTP conversion
 
-Automatic browser updates were introduced in runtime 15 and are retained in runtime 21. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
+Automatic browser updates were introduced in runtime 15 and are retained in runtime 22. They reuse existing authorized GET APIs every five seconds on visible pages and redraw only changed data, preserving filters, focus and scroll. Busy actions, dialogs and Mail Routing drafts defer updates; hidden pages pause and failures back off to thirty seconds. Saved PCNs refresh automatically when clean; unsaved edits retain their original saved version and receive a **Reload latest** notice with discard confirmation. The helper is contained in the existing `session-client.js` asset, so deployment needs no new public asset, protected-consumer update or IIS change. Refresh performs no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
 
 The user selected HTTP on the existing port **8443**, at `http://172.30.77.137:8443`. Runtime `pcn-test-14-1` permits this only with an exact RFC1918 literal IPv4 origin, loopback backend and `TRUST_PROXY=loopback`. `NODE_ENV=production` remains enabled. The private configuration changes were exactly:
 
@@ -129,7 +134,17 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-### Current runtime — pcn-test-21-1; motion and compact laptop layouts
+### Current runtime — pcn-test-22-2; internal DNS login origin
+
+[Actions 39224662731, attempt 2](https://github.com/akwaa2545-gif/PCN-/actions/runs/39224662731/attempts/2) passed all configured gates in 6m 55s and published signed [pcn-test-22-2](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-22-2) from commit `db43208503ff611adebcc24fb42d226f22750bf9`. The 15,878,057-byte ZIP has SHA-256 `7046a203bb6a3ff61533b5078b0d55c96b910d6b1985133422437d762f1d97aa`. Attempt 1 stopped on an unrelated motion/Create browser-fixture undefined-model failure; two local passes of the seven-group suite supported retrying the same source without an application change. Local validation passed all 991 tests, including 20 targeted origin/configuration checks, with 88.25% line / 91.10% branch / 94.62% function coverage. An isolated DNS browser journey also passed login, host-only HTTP cookie isolation, session, CSRF rejection and logout.
+
+The signed runtime was installed at observed host UTC `2026-10-19T09:07:08.2076185Z`, initially retaining the IP origin. The approved configuration switch completed at `2026-10-19T09:07:55.0357595Z`, changing only `PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443` and `INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com`. The protected backup is `C:\SupplierPCN\deployment\dns-origin-transition\20261019T090745Z-0ea1e8e96c5a4f00a8cf413aff409a7d`. Environment ACLs were unchanged; the resulting environment SHA-256 is `302CCF97309F662E5A8B55D5742B1A10F16D478599549CF24E0F32F8E70042F8`. SQL/integration values, production mode, loopback backend, proxy, IIS HTTP :8443 binding, employee-network firewall restrictions and deployment trust anchors were retained. Deployment ran no DDL, account import, business-data mutation or test mail.
+
+DNS SQL readiness and `/login` returned 200. An empty login with the exact DNS Origin reached authentication (401), while old-IP, wrong-scheme, wrong-port and lookalike Origins returned 403. Private `.env` and `server.js` requests returned 404. Guarded real browser acceptance passed at workstation UTC `2026-10-19T09:03:54.117Z`–`2026-10-19T09:04:20.226Z`: employee-code login returned 200 with `returnTo=/`, Portal loaded, the host-only HttpOnly / SameSite Strict `pcn_session_http` cookie remained isolated from the IP URL, authenticated reload succeeded, missing-CSRF logout returned 403 and valid logout returned 200 with the session revoked. Only existing-account login/logout requests were allowed as writes; profile/notification integration reads were guarded locally. There were no page errors, blocked requests, business writes or operational mail calls. An earlier fixture run logged in but failed while reading a login response body after immediate navigation; cleanup revoked that session, and the corrected repeat is the acceptance evidence. The host clock runs ahead of the workstation, so these timestamps are recorded separately. Ignored evidence is in `test-results/dns-origin-live.json`.
+
+Repeat protected-consumer and SYSTEM task checks returned `already_current`; at observed host UTC `2026-10-19T09:11:25.3952518Z`, the task was enabled / Ready / last result 0 with Node PID 10044 unchanged. Final independent checks at `2026-10-19T09:12:16.6141552Z` confirmed runtime 22 / commit `db43208503ff611adebcc24fb42d226f22750bf9`, exact-release Node PID 10044 beneath WinSW parent PID 1800 as NetworkService, the sole `127.0.0.1:3000` listener, the exact DNS configuration, SQL readiness, preserved environment ACL/proxy/control hashes and IIS HTTP :8443 binding, and unrelated Default Web Site HTTP :80 returning 200. The task remained enabled / Ready / last result 0. Ignored evidence is in `test-results/dns-origin-resumed.json` and `test-results/dns-origin-identity-final.json`.
+
+### Historical runtime — pcn-test-21-1; motion and compact laptop layouts
 
 [Actions 38845184965](https://github.com/akwaa2545-gif/PCN-/actions/runs/38845184965) completed all 28 steps successfully and published signed [pcn-test-21-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-21-1) from commit `1d6f77f9e27307033c09a3f3d5c96568cd06c1bc` at `2026-10-16T03:29:24Z`. The 15,877,833-byte ZIP has SHA-256 `abac6c298b9c259a6e352d1c6d687605da71222f8eee9aafdf4067c1ebffdb24`. CI passed its unit/API, high/critical audit and existing browser gates, plus the normal motion, native-select, compatibility, populated Users and compact Records suites. Local verification passed 989 tests with 88.23% line / 91.09% branch / 94.61% function coverage; detailed fixture/LAN evidence is in [the motion and layout record](ui-motion.md).
 

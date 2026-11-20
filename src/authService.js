@@ -1,6 +1,7 @@
 const crypto = require('node:crypto');
 const { ApiError } = require('./apiError');
-const { hashPassword, verifyPassword, validatePassword } = require('./passwords');
+const { hashPassword, verifyPassword, validatePassword, validateEmployeePassword } = require('./passwords');
+const { AUTH_MODES, isEmployeeMode } = require('./authModes');
 const { employeeRoles, employeeDepartments, validateEmployeeIdentity, normalizeEmployeeCode, normalizeUserId, validateUserAssignment, validateVerifiedMail, validateLocalEmployeeAccount } = require('./employeeAccounts');
 const { isDeveloperAssignment } = require('./signingPermissions');
 const { hasRole } = require('./workflowAccess');
@@ -14,8 +15,19 @@ const safeUser = user => ({ id: user.id, username: user.username, email: user.em
   mustChangePassword: isEmployeeProvider(user) ? false : Boolean(user.mustChangePassword), identityProvider: providerOf(user),
   ...(isDeveloperAssignment(user) ? { department:user.department } : {}),
   ...(user.employeeCode ? { employeeCode: user.employeeCode, displayName: user.displayName || user.employeeCode, department: user.department || null } : {}) });
-function sessionPrincipal(user, session, tokenHash) {
-  const principal = { user: safeUser(user), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
+function sessionUser(user, session, mode) {
+  const value = safeUser(user);
+  if (mode !== 'employee-password') return value;
+  const setup = session.authenticationMethod === 'password-setup';
+  return { ...value, mustChangePassword: setup, passwordSetupRequired: setup, canChangePassword: !setup };
+}
+function credentialState(user) {
+  if (user?.passwordHash == null && user?.passwordSetAt == null) return 'unset';
+  return typeof user?.passwordHash === 'string' && user.passwordHash.length > 0
+    && Number.isFinite(Date.parse(user.passwordSetAt)) ? 'enrolled' : 'invalid';
+}
+function sessionPrincipal(user, session, tokenHash, mode) {
+  const principal = { user: sessionUser(user, session, mode), csrfToken: session.csrfToken, expiresAt: new Date(session.expiresAt).toISOString() };
   Object.defineProperty(principal.user,'sessionSecurityStamp',{value:session.securityStamp});
   Object.defineProperties(principal, { sessionSecurityStamp: { value: session.securityStamp }, sessionTokenHash: { value: tokenHash } });
   return principal;
@@ -33,13 +45,14 @@ class AuthService {
     this.dummyHash = null;
     this.attempts = new Map();
     this.authMode = options.authMode || 'employee-code';
-    if (!['employee-code', 'password'].includes(this.authMode)) throw new Error('Invalid authentication mode');
+    if (!AUTH_MODES.includes(this.authMode)) throw new Error('Invalid authentication mode');
     this.employeeDirectory = options.employeeDirectory;
     this.integrationService = options.integrationService;
     this.developerPasswordHash = options.developerPasswordHash;
     const limiterClock = () => this.now().getTime();
     this.developerActorLimiter = new ApiRateLimiter({clock:limiterClock,requests:5,writes:5,windowMs:900000});
     this.developerGlobalLimiter = new ApiRateLimiter({clock:limiterClock,requests:30,writes:30,windowMs:900000,maxClients:1});
+    this.passwordChangeLimiter = new ApiRateLimiter({clock:limiterClock,requests:5,writes:5,windowMs:900000});
   }
   now() { return new Date(this.clock()); }
   throttle(address) {
@@ -66,6 +79,7 @@ class AuthService {
   }
   async login(body = {}, requestInfo = {}) {
     this.throttle(requestInfo.ip);
+    if (this.authMode === 'employee-password') return this.loginEmployeePassword(body);
     if (this.authMode === 'employee-code') return this.loginEmployee(body);
     assertFields(body, ['username','password','remember']);
     const {username,password,remember=false}=body;
@@ -96,12 +110,15 @@ class AuthService {
     if (body.remember !== undefined && typeof body.remember !== 'boolean') throw new ApiError(400, 'Invalid remember option');
     let code;
     try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Employee access could not be verified'); }
+    return this.issueSession(await this.employeeForLogin(code), body.remember === true);
+  }
+  async employeeForLogin(code) {
     let user = await this.repository.getUserByEmployeeCode(code.toLowerCase());
     if (user && providerOf(user) === 'pcn-local') {
       if (!this.matchesLocalEmployee(user, code)) throw new ApiError(401, 'Employee access could not be verified');
       const latest = await this.repository.getUserById(user.id);
       if (!this.matchesLocalEmployee(latest, code) || latest.securityStamp !== user.securityStamp) throw new ApiError(401, 'Employee access could not be verified');
-      return this.issueSession(latest, body.remember === true);
+      return latest;
     }
     if (user && providerOf(user) !== 'employee-code') throw new ApiError(401, 'Employee access could not be verified');
     const profile = await this.lookupEmployee(code);
@@ -117,7 +134,44 @@ class AuthService {
       }
     }
     if (!this.matchesEmployee(user, profile)) throw new ApiError(401, 'Employee access could not be verified');
-    return this.issueSession(user, body.remember === true);
+    return user;
+  }
+  async loginEmployeePassword(body) {
+    assertFields(body, ['employeeCode','password','remember','identifyOnly']);
+    if (Object.hasOwn(body, 'identifyOnly') && body.identifyOnly !== true) throw new ApiError(400, 'Invalid identification option');
+    if (body.identifyOnly === true && (Object.hasOwn(body, 'password') || Object.hasOwn(body, 'remember'))) {
+      throw new ApiError(400, 'Identification cannot include password or remember options');
+    }
+    if (body.remember !== undefined && typeof body.remember !== 'boolean') throw new ApiError(400, 'Invalid remember option');
+    if (body.password !== undefined && (typeof body.password !== 'string' || body.password.length > 128)) throw new ApiError(401, 'Invalid employee code or password');
+    let code;
+    try { code = normalizeEmployeeCode(body.employeeCode); } catch { throw new ApiError(401, 'Invalid employee code or password'); }
+    const user = await this.employeeForLogin(code);
+    if (user.lockoutUntil && new Date(user.lockoutUntil) > this.now()) throw new ApiError(401, 'Invalid employee code or password');
+    const enrollment = credentialState(user);
+    if (enrollment === 'unset') return this.issueSession(user, false, { authenticationMethod: 'password-setup' });
+    if (body.identifyOnly === true) {
+      if (enrollment !== 'enrolled') throw new ApiError(401, 'Invalid employee code or password');
+      return { authenticated:false, passwordRequired:true };
+    }
+    const verified = enrollment === 'enrolled' && typeof body.password === 'string' && await this.verifyCredential(user.passwordHash, body.password);
+    if (!verified) {
+      await this.repository.recordLoginFailure(user.id, this.now());
+      throw new ApiError(401, 'Invalid employee code or password');
+    }
+    await this.repository.resetLoginFailures(user.id);
+    return this.issueSession(user, body.remember === true, { authenticationMethod: 'employee-password' });
+  }
+  async verifyCredential(hash, password) {
+    try { return await this.verifyPassword(hash, password); }
+    catch { return false; }
+  }
+  validPasswordSession(user, session) {
+    if (this.authMode !== 'employee-password') return true;
+    if (!isEmployeeProvider(user)) return false;
+    const state = credentialState(user);
+    return (session.authenticationMethod === 'password-setup' && state === 'unset')
+      || (session.authenticationMethod === 'employee-password' && state === 'enrolled');
   }
   matchesEmployee(user, profile) {
     if (!user?.isActive || providerOf(user) !== 'employee-code') return false;
@@ -163,21 +217,24 @@ class AuthService {
     const error = new ApiError(503,'Developer assignment is unavailable');
     error.code = 'DEVELOPER_ASSIGNMENT_UNAVAILABLE'; return error;
   }
-  async issueSession(user, remember = false) {
+  async issueSession(user, remember = false, { authenticationMethod } = {}) {
     const latest = await this.repository.getUserById(user.id);
     if (!latest?.isActive || latest.securityStamp !== user.securityStamp || providerOf(latest) !== providerOf(user)
       || latest.employeeCode !== user.employeeCode || latest.normalizedEmployeeCode !== user.normalizedEmployeeCode
       || (latest.lockoutUntil && new Date(latest.lockoutUntil) > this.now())) throw new ApiError(401,'Employee access could not be verified');
     user = latest;
     if (this.isDeveloper(user) && !isDeveloperAssignment(user)) throw new ApiError(401,'Employee access could not be verified');
+    if (!this.validPasswordSession(user, { authenticationMethod })) throw new ApiError(401, 'Employee access could not be verified');
     const token = crypto.randomBytes(32).toString('hex');
     const csrfToken = crypto.randomBytes(32).toString('hex');
-    const ttl = remember === true ? 30 * 86400000 : 8 * 3600000;
+    const setup = this.authMode === 'employee-password' && authenticationMethod === 'password-setup';
+    const ttl = setup ? 600000 : remember === true ? 30 * 86400000 : 8 * 3600000;
     const expiresAt = new Date(this.now().getTime() + ttl).toISOString();
-    const session = { id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt };
+    const session = { id: crypto.randomUUID(), userId: user.id, tokenHash: hashToken(token), csrfToken, securityStamp: user.securityStamp, createdAt: this.now().toISOString(), expiresAt,
+      ...(this.authMode === 'employee-password' ? { authenticationMethod } : {}) };
     await this.repository.saveSession(session);
-    this.presence.touch(session.tokenHash,session);
-    return { user: safeUser(user), token, csrfToken, expiresAt };
+    if (!setup) this.presence.touch(session.tokenHash,session);
+    return { user: sessionUser(user, session, this.authMode), token, csrfToken, expiresAt };
   }
   async resolveEmployee(employeeCode, directory = this.employeeDirectory) {
     const code=normalizeEmployeeCode(employeeCode);
@@ -290,7 +347,7 @@ class AuthService {
     const tokenHash = hashToken(token);
     try {
       const principal = await this.resolveSession(tokenHash,{skipEmployeeLookup});
-      if (principal) this.presence.touch(tokenHash,{userId:principal.user.id,securityStamp:principal.sessionSecurityStamp,expiresAt:principal.expiresAt});
+      if (principal && !principal.user.passwordSetupRequired) this.presence.touch(tokenHash,{userId:principal.user.id,securityStamp:principal.sessionSecurityStamp,expiresAt:principal.expiresAt});
       else this.presence.forget(tokenHash);
       return principal;
     } catch (error) {
@@ -303,7 +360,8 @@ class AuthService {
     if (!session || session.revokedAt || !Number.isFinite(new Date(session.expiresAt).getTime()) || new Date(session.expiresAt) <= this.now()) return null;
     const user = await this.repository.getUserById(session.userId);
     if (!user?.isActive || session.securityStamp !== user.securityStamp
-      || (this.authMode === 'employee-code' ? !isEmployeeProvider(user) : providerOf(user) !== 'password')) return null;
+      || (isEmployeeMode(this.authMode) ? !isEmployeeProvider(user) : providerOf(user) !== 'password')
+      || !this.validPasswordSession(user, session)) return null;
     if (this.isDeveloper(user) && !isDeveloperAssignment(user)) return null;
     if (providerOf(user) === 'pcn-local') {
       if (!this.matchesLocalEmployee(user)) return null;
@@ -312,10 +370,10 @@ class AuthService {
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
       if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesLocalEmployee(latestUser, user.employeeCode)
-        || (this.isDeveloper(latestUser) && !isDeveloperAssignment(latestUser))) return null;
-      return sessionPrincipal(latestUser, latestSession, tokenHash);
+        || (this.isDeveloper(latestUser) && !isDeveloperAssignment(latestUser)) || !this.validPasswordSession(latestUser, latestSession)) return null;
+      return sessionPrincipal(latestUser, latestSession, tokenHash, this.authMode);
     }
-    if (this.authMode === 'employee-code' && !skipEmployeeLookup) {
+    if (isEmployeeMode(this.authMode) && !skipEmployeeLookup) {
       let code;
       try {code=normalizeEmployeeCode(user.employeeCode);}catch{return null;}
       const profile=await this.lookupEmployee(code);
@@ -327,10 +385,10 @@ class AuthService {
         || latestSession.userId !== session.userId || latestSession.securityStamp !== session.securityStamp) return null;
       const latestUser = await this.repository.getUserById(latestSession.userId);
       if (latestUser?.securityStamp !== latestSession.securityStamp || !this.matchesEmployee(latestUser, profile)
-        || (this.isDeveloper(latestUser) && !isDeveloperAssignment(latestUser))) return null;
-      return sessionPrincipal(latestUser, latestSession, tokenHash);
+        || (this.isDeveloper(latestUser) && !isDeveloperAssignment(latestUser)) || !this.validPasswordSession(latestUser, latestSession)) return null;
+      return sessionPrincipal(latestUser, latestSession, tokenHash, this.authMode);
     }
-    return sessionPrincipal(user, session, tokenHash);
+    return sessionPrincipal(user, session, tokenHash, this.authMode);
   }
   async logout(token) {
     if (typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)) {
@@ -359,7 +417,36 @@ class AuthService {
     }
     return this.presence.project(users,candidates,valid);
   }
-  async changePassword(token, { currentPassword, newPassword } = {}) {
+  async setupPassword(token, body = {}) {
+    if (this.authMode !== 'employee-password') throw new ApiError(403, 'Employee password setup is unavailable');
+    assertFields(body, ['newPassword','confirmPassword']);
+    validateEmployeePassword(body.newPassword);
+    if (body.newPassword !== body.confirmPassword) throw new ApiError(400, 'The new passwords do not match');
+    const principal = await this.session(token);
+    if (!principal) throw new ApiError(401, 'Sign in required');
+    if (!principal.user.passwordSetupRequired) throw new ApiError(403, 'Password setup requires a first-use session');
+    const user = await this.repository.getUserById(principal.user.id);
+    if (!user?.isActive || user.securityStamp !== principal.sessionSecurityStamp) throw new ApiError(401, 'Sign in again before setting your password');
+    await this.repository.updateEmployeePassword(user.id, await this.hashPassword(body.newPassword), crypto.randomUUID(), principal.sessionSecurityStamp, { firstSetup: true });
+  }
+  async changeEmployeePassword(token, body) {
+    assertFields(body, ['currentPassword','newPassword','confirmPassword']);
+    validateEmployeePassword(body.newPassword);
+    if (body.newPassword !== body.confirmPassword) throw new ApiError(400, 'The new passwords do not match');
+    if (typeof body.currentPassword !== 'string' || body.currentPassword.length > 128) throw new ApiError(400, 'Invalid current password');
+    if (body.currentPassword === body.newPassword) throw new ApiError(400, 'Choose a different password');
+    const principal = await this.session(token);
+    if (!principal) throw new ApiError(401, 'Sign in required');
+    if (!principal.user.canChangePassword || principal.user.passwordSetupRequired) throw new ApiError(403, 'Sign in with your password before changing it');
+    const user = await this.repository.getUserById(principal.user.id);
+    if (!user?.isActive || user.securityStamp !== principal.sessionSecurityStamp) throw new ApiError(401, 'Sign in again before changing your password');
+    this.passwordChangeLimiter.check({method:'POST'}, {clientAddress:user.id});
+    if (!await this.verifyCredential(user.passwordHash, body.currentPassword)) throw new ApiError(400, 'Invalid current password');
+    await this.repository.updateEmployeePassword(user.id, await this.hashPassword(body.newPassword), crypto.randomUUID(), principal.sessionSecurityStamp, { firstSetup: false });
+  }
+  async changePassword(token, body = {}) {
+    if (this.authMode === 'employee-password') return this.changeEmployeePassword(token, body);
+    const { currentPassword, newPassword } = body;
     if (this.authMode !== 'password') throw new ApiError(403, 'Employee-code sign-in does not use a password');
     const principal = await this.session(token);
     if (!principal) throw new ApiError(401, 'Sign in required');

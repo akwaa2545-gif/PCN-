@@ -118,6 +118,19 @@ test('every assigned PCN role opens the Portal and loads records without adminis
   }
 });
 
+test('System Settings link requires an active Administrator or valid Developer assignment', async () => {
+  const assigned = { roles: ['developer'], department: 'developer', signingStep: null, isActive: true };
+  for (const [user, allowed] of [
+    [{ roles: ['admin'], isActive: true }, true], [assigned, true],
+    [{ ...assigned, roles: ['developer', 'qa'] }, false], [{ ...assigned, department: 'it' }, false],
+    [{ ...assigned, signingStep: 'prepared' }, false], [{ ...assigned, isActive: false }, false],
+    [{ roles: ['admin'], isActive: false }, false], [{ roles: ['qa'], isActive: true }, false]
+  ]) {
+    const page = portal({ roles: user.roles, user }); await page.checkPortalSession();
+    assert.equal(page.element('adminSystemSettingsLink').hidden, !allowed);
+  }
+});
+
 test('roleless users return to records before Portal data or profile loads', async () => {
   for (const roles of [[], undefined, null]) {
     const page = portal({ roles });

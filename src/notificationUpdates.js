@@ -2,6 +2,7 @@ const { isDeepStrictEqual } = require('node:util');
 const { isInternal } = require('./workflowAccess');
 const { emailList } = require('./integrationService');
 const { departments, resolveNextMailTarget } = require('./mailRouting');
+const { departmentForStage } = require('../pcn-types');
 
 const departmentKeys = new Set(departments.map(department => department.key));
 const isAdministrator = user => Array.isArray(user?.roles)
@@ -14,7 +15,7 @@ const scopedReviewPaths = [
 ];
 
 const metadata = new Set(['id', 'version', 'createdAt', 'updatedAt', 'submittedAt', 'ownerUserId', 'masterDataVersionId',
-  'mailRoutingState', 'mailRoutingPolicyVersion', 'notification', 'workflow', 'workflowProgress', 'documentControl']);
+  'mailRoutingState', 'mailRoutingPolicyVersion', 'notification', 'workflow', 'workflowProgress', 'documentControl', 'reviewTiming']);
 const labels = { status: 'Status', riskLevel: 'Risk level', changeForm: 'Change form', internalReview: 'Internal review',
   comments: 'Comments', approvals: 'Approvals', supplierName: 'Supplier', manufacturerName: 'Manufacturer',
   materialName: 'Material', changeRows: 'Change details', documents: 'Documents', route: 'Workflow route' };
@@ -41,7 +42,9 @@ function notificationDepartmentKeys(before, after) {
   if ((!before || before.status === 'draft') && after?.status === 'submitted') return ['gscTet'];
   const reviewValue = (record, path) => comparableDomainValue(path.split('.').reduce((value, key) => value?.[key], record?.internalReview));
   const explicit = scopedReviewPaths.filter(([path]) => !isDeepStrictEqual(reviewValue(before, path), reviewValue(after, path)))
-    .map(([, department]) => department);
+    .flatMap(([, department]) => department === 'prodEngTet'
+      ? [departmentForStage(before, 'signoff.prodEngTet'), departmentForStage(after, 'signoff.prodEngTet')]
+      : [department]);
   const active = record => {
     const target = resolveNextMailTarget(record);
     return target?.groupKey === 'supplierNotification' ? 'gscTet' : target?.departmentKey;

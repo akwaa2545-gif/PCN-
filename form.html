@@ -73,6 +73,22 @@
         </div>
       </dialog>
 
+      <dialog class="pcn-closed-dialog" id="pcnClosedDialog" aria-labelledby="pcnClosedTitle" aria-describedby="pcnClosedDescription">
+        <div class="pcn-closed-heading">
+          <span class="pcn-closed-icon" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m5 12 4 4L19 6" /></svg></span>
+          <div><p>Document complete</p><h2 id="pcnClosedTitle">PCN closed</h2></div>
+        </div>
+        <div class="pcn-closed-body" id="pcnClosedDescription">
+          <strong id="pcnClosedCode"></strong>
+          <p>All required signatures are complete. Your PCN has been saved and closed.</p>
+          <p>You can view this document anytime in Closed records.</p>
+        </div>
+        <div class="pcn-closed-actions">
+          <button id="pcnClosedContinue" type="button" autofocus>Continue viewing</button>
+          <a id="pcnClosedRecords" href="/admin?documents=closed#records">View closed records <span aria-hidden="true">→</span></a>
+        </div>
+      </dialog>
+
       <section class="pcn-create-intro" id="pcnCreateIntro" aria-labelledby="pcnCreateTitle" hidden>
         <div>
           <p class="section-label">New document</p>
@@ -138,6 +154,10 @@
                     <div class="pcn-title-bar">SUPPLIER PROCESS CHANGE NOTIFICATION (PCN)</div>
                     <div class="pcn-header-body">
                       <div class="pcn-header-info">
+                        <label class="header-line" id="documentTypeField">
+                          <span>PCN type :</span>
+                          <select id="documentType" aria-label="PCN type" required><option value="">Choose TA or SC</option><option value="ta">TA</option><option value="sc">SC</option></select>
+                        </label>
                         <label class="header-line">
                           <span>Supplier name :</span>
                           <input id="supplierName" name="supplierName" type="text" autocomplete="organization" />
@@ -326,7 +346,7 @@
 
                       <div class="signoff-grid">
                       <div class="signoff-dept">GSC/TET</div>
-                      <div class="signoff-dept">Prod.Eng/TET</div>
+                      <div class="signoff-dept" id="productionEngineeringLabel">Prod.Eng/TET</div>
                       <div class="signoff-dept">QA/TET</div>
 
                       <div class="signoff-box" data-role="gscTet">
@@ -390,7 +410,7 @@
 
                   <div class="approval-route-row">
                     <div class="approval-route-spacer" aria-hidden="true"></div>
-                    <div class="approval-route-band">ROUTE: GSC/TET (Receive info) -> Prod.Eng./TET (Review) -> QA Dept./TET (Approve) -> GSC&amp;QA/TaPBU (Approve, if any) -> GSC/TET (Inform to supplier) -> QOD-206(qualification)</div>
+                    <div class="approval-route-band" id="productionEngineeringRoute">ROUTE: GSC/TET (Receive info) -> Prod.Eng./TET (Review) -> QA Dept./TET (Approve) -> GSC&amp;QA/TaPBU (Approve, if any) -> GSC/TET (Inform to supplier) -> QOD-206(qualification)</div>
                   </div>
 
                   <div class="approval-section">
@@ -512,6 +532,7 @@
       </section>
     </div>
 
+    <script src="/pcn-types.js"></script>
     <script src="/session-client.js"></script>
     <script src="/document-recovery.js"></script>
     <script src="/document-workspace.js"></script>

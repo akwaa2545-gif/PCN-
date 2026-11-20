@@ -1,6 +1,9 @@
 const { ApiError } = require("./apiError");
 const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertStatusPermission, applySignatureIdentity, hasRole, isInternal, isEmployeeViewer, canViewAllRecords } = require('./workflowAccess');
 const { applyDocumentControl } = require('./documentControl');
+const { applyReviewTiming } = require('./reviewTiming');
+const { applyAutomaticClosure } = require('./automaticClosure');
+const { normalizeType, typeOf, isCode } = require('../pcn-types');
 const { isDeepStrictEqual } = require('node:util');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
 const { emailList } = require('./integrationService');
@@ -69,7 +72,8 @@ class PcnService {
     if (input?.schemaVersion !== 2 && current.schemaVersion === 2) {
       throw new ApiError(409, 'Mail routing changed; reload before saving');
     }
-    const settings = input?.schemaVersion === 2 ? sanitizeDepartmentRouting(input, current) : sanitizeNotificationSettings(input);
+    const routing = input?.schemaVersion === 2 ? sanitizeDepartmentRouting(input, current) : sanitizeNotificationSettings(input);
+    const settings = { ...routing, ...(Object.hasOwn(current, 'notificationPreferences') ? { notificationPreferences: structuredClone(current.notificationPreferences) } : {}) };
     await this.repository.saveNotificationSettings(settings, actor, settingsVersion(current), user);
     return this.getNotificationSettings();
   }
@@ -79,8 +83,9 @@ class PcnService {
     const now = this.clock().toISOString();
     assertWritablePayload(input);
     const data = this.normalizeInput(input);
+    if (!data.documentType) throw new ApiError(400, 'Choose TA or SC before creating a PCN');
     this.assertAllowedInitialStatus(data.status);
-    if (user) assertReviewUpdate({}, data.internalReview, user, data.riskLevel);
+    if (user) assertReviewUpdate({}, data.internalReview, user, data.riskLevel, data);
     const master = await this.repository.getMasterData();
     const record = {
       ownerUserId: user?.id || null,
@@ -91,7 +96,7 @@ class PcnService {
       createdAt: now,
       updatedAt: now,
       submittedAt: data.status === "draft" ? null : now,
-      route: buildWorkflow(data.riskLevel).map((step) => step.owner),
+      route: buildWorkflow(data.riskLevel, data).map((step) => step.owner),
       documents: commonDocuments.map((name) => ({
         name,
         required: true,
@@ -108,7 +113,7 @@ class PcnService {
 
     if (record.status !== 'draft') require('./documentChecks').assertCompletion(record, []);
 
-    return this.repository.create(applyDocumentControl(null, record, user, now), actor, user, options);
+    return this.repository.create(applyReviewTiming(null, applyDocumentControl(null, record, user, now), now), actor, user, options);
   }
 
   async update(id, input, actor = "web", user, options = {}) {
@@ -133,6 +138,9 @@ class PcnService {
             }
           }
         }
+        if (input.documentType !== undefined && normalizeType(input.documentType) !== typeOf(current)) {
+          throw new ApiError(400, 'PCN type is locked after its code is issued');
+        }
         const review = mergeReview(current.internalReview || {}, input.internalReview || {});
         const data = this.normalizeInput({ ...current, ...input, internalReview: review });
         if (user && !['draft','supplier_action'].includes(current.status)) {
@@ -144,7 +152,7 @@ class PcnService {
         const now = this.clock().toISOString();
         const nextStatus = input.status ? data.status : current.status;
         if (user) {
-          assertReviewUpdate(current.internalReview || {}, data.internalReview, user, data.riskLevel);
+          assertReviewUpdate(current.internalReview || {}, data.internalReview, user, data.riskLevel, current);
           assertStatusPermission({ ...current, internalReview: data.internalReview }, nextStatus, user);
         }
 
@@ -152,7 +160,7 @@ class PcnService {
           throw new ApiError(400, "Workflow status cannot skip steps");
         }
 
-        const next = applyDocumentControl(current, {
+        const candidate = applyDocumentControl(current, {
           ...current,
           ...data,
           id: current.id,
@@ -162,18 +170,19 @@ class PcnService {
           submittedAt: current.submittedAt || (nextStatus !== "draft" ? now : null),
           sourceTemplate: formDefinitions[data.changeForm].sheet,
           changeType: formDefinitions[data.changeForm].changeHeading,
-          route: buildWorkflow(data.riskLevel).map((step) => step.owner),
+          route: buildWorkflow(data.riskLevel, current).map((step) => step.owner),
           internalReview: {
             ...(user ? applySignatureIdentity(current.internalReview || {}, data.internalReview || {}, user, now) : data.internalReview || {}),
             pcnCode: current.id
           }
         }, user, now);
-        if (nextStatus !== current.status && !['draft', 'supplier_action'].includes(nextStatus)) {
+        const next = applyAutomaticClosure(current, candidate);
+        if (next.status !== current.status && !['draft', 'supplier_action'].includes(next.status)) {
           const { assertCompletion } = require('./documentChecks');
           const attachments = context.listAttachments ? await context.listAttachments() : [];
           assertCompletion(next, attachments, { requiredFilesOnly: !['draft', 'supplier_action'].includes(current.status) });
         }
-        return next;
+        return applyReviewTiming(current, next, now);
       },
       actor,
       input.version,
@@ -210,7 +219,8 @@ class PcnService {
     const updated = await this.repository.update(id, current => {
       assertRecordAccess(current, user);
       if (['approved', 'rejected', 'closed'].includes(current.status)) throw new ApiError(403, 'Completed PCNs cannot be reopened');
-      return applyDocumentControl(current, { ...current, updatedAt: now, status: 'supplier_action' }, user, now, { startRevision: true, reason });
+      return applyReviewTiming(current,
+        applyDocumentControl(current, { ...current, updatedAt: now, status: 'supplier_action' }, user, now, { startRevision: true, reason }), now);
     }, actor, input.version, user);
     if (!updated) throw new ApiError(404, 'PCN not found');
     return updated;
@@ -311,6 +321,8 @@ class PcnService {
   }
 
   normalizeInput(input) {
+    const documentType = input.documentType === undefined ? undefined : normalizeType(input.documentType);
+    if (input.documentType !== undefined && !documentType) throw new ApiError(400, 'PCN type must be TA or SC');
     const status = sanitizeString(input.status || "submitted", "status", 1, 40);
     const minimumRequired = status === 'draft' ? 0 : 1;
     const changeForm = sanitizeString(input.changeForm, "changeForm", 1, 40);
@@ -350,6 +362,7 @@ class PcnService {
     }
 
     return {
+      ...(documentType ? { documentType } : {}),
       changeForm,
       riskLevel,
       selectedChange,
@@ -508,7 +521,7 @@ function sanitizeString(value, field, minLength, maxLength) {
 }
 
 function assertValidId(id) {
-  if (!/^PCN-\d{4}-\d{4}$/.test(String(id))) {
+  if (!isCode(id)) {
     throw new ApiError(400, "Invalid PCN id");
   }
 }

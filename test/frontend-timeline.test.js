@@ -137,6 +137,39 @@ test('history never invents an actor, timestamp or creation event for a baseline
   assert.equal(ordered[0].actor, undefined); assert.equal(ordered[0].createdAt, undefined);
 });
 
+test('history labels the automatic Prod.Eng/TET handoff timestamp without exposing storage metadata', async () => {
+  const items = [{ revision: 2, actor: 'GSC approver', status: 'technical_review', changes: [
+    { path: 'reviewTiming.prodEngTet.startedAt', label: 'reviewTiming.prodEngTet.startedAt', before: null, after: '2026-10-20T08:30:00Z' },
+  ] }];
+  const page = portal(async () => items); await page.openTimeline({ id: 'one' });
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /Prod\.Eng\/TET review started/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /2026-10-20T08:30:00Z/);
+  assert.doesNotMatch(page.element('pcnTimelineDetails').innerHTML, /reviewTiming|Review Timing/);
+  assert.equal(page.getTimeline().revisions[0].changes[0].path, 'reviewTiming.prodEngTet.startedAt');
+});
+
+test('history labels newly configurable department handoffs without storage metadata', async () => {
+  for (const [key, name] of [['gscTet', 'GSC/TET'], ['gscTapbu', 'GSC/TaPBU'], ['qaTapbu', 'QA/TaPBU'], ['qaFinal', 'QA/TET Final Judgment']]) {
+    const page = portal(async () => [{ revision: 2, actor: 'Reviewer', status: 'gsc_review', createdAt: '2026-10-20T08:30:00Z', changes: [
+      { path: `reviewTiming.${key}.startedAt`, label: `reviewTiming.${key}.startedAt`, before: null, after: '2026-10-20T08:30:00Z' }
+    ] }]);
+    await page.openTimeline({ id: 'one' });
+    assert.ok(page.element('pcnTimelineDetails').innerHTML.includes(`${name} review started`));
+    assert.doesNotMatch(page.element('pcnTimelineDetails').innerHTML, /reviewTiming|Review Timing/);
+  }
+});
+
+test('history labels the automatic QA/TET handoff timestamp and preserves its original audit path', async () => {
+  const items = [{ revision: 3, actor: 'Prod.Eng approver', status: 'qa_review', changes: [
+    { path: 'reviewTiming.qaTet.startedAt', label: 'reviewTiming.qaTet.startedAt', before: null, after: '2026-10-23T08:30:00Z' },
+  ] }];
+  const page = portal(async () => items); await page.openTimeline({ id: 'one' });
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /QA\/TET review started/);
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /2026-10-23T08:30:00Z/);
+  assert.doesNotMatch(page.element('pcnTimelineDetails').innerHTML, /reviewTiming|Review Timing/);
+  assert.equal(page.getTimeline().revisions[0].changes[0].path, 'reviewTiming.qaTet.startedAt');
+});
+
 test('keyboard event selection stays in chronological bounds and Escape/backdrop cancel only the open dialog', async () => {
   const page = portal(async () => revisions);
   await page.openTimeline({ id: 'one' }, page.element('eye'));
@@ -284,6 +317,56 @@ test('default timeline groups one department point per stage and loads audit his
   key('Home'); assert.equal(page.getTimeline().selectedDepartment, 'gscTet');
   key('End'); assert.equal(page.getTimeline().selectedDepartment, 'qaTet');
   page.closeTimeline(); assert.equal(page.element('eye').focused, true);
+});
+
+test('Portal department popup shows Prod.Eng/TET due date and red overdue text while preserving keyboard selection', async () => {
+  const deadline = { department: 'prodEngTet', label: 'Prod.Eng/TET', startedAt: '2026-10-20T08:30:00Z', dueAt: '2026-10-23T08:30:00Z', overdue: true, source: 'handoff' };
+  const snapshot = departmentSummary();
+  snapshot.stages[1] = { ...snapshot.stages[1], key: 'prodEngTet', label: 'Prod.Eng/TET', deadline };
+  const page = portal(async () => snapshot, { initialTab: 'summary' });
+  await page.openTimeline({ id: 'one' });
+  const expected = `Prod.Eng/TET due ${new Date(deadline.dueAt).toLocaleString()} (overdue)`;
+  for (const id of ['pcnTimelineTrack', 'pcnTimelineDetails']) {
+    const markup = page.element(id).innerHTML;
+    assert.ok(markup.includes(expected)); assert.match(markup, /class="[^"]*rd-overdue[^"]*"/);
+  }
+  const select = key => page.element('pcnTimelineTrack').events.keydown({ key, preventDefault() {} });
+  select('Home'); assert.equal(page.getTimeline().selectedDepartment, 'gscTet');
+  assert.doesNotMatch(page.element('pcnTimelineDetails').innerHTML, /Prod\.Eng\/TET due/);
+  select('End'); assert.equal(page.getTimeline().selectedDepartment, 'prodEngTet');
+  assert.ok(page.element('pcnTimelineDetails').innerHTML.includes(expected));
+});
+
+test('Portal department popup shows active due date or unavailable evidence and clears deadline after completion', async () => {
+  const snapshot = departmentSummary();
+  snapshot.stages[1] = { ...snapshot.stages[1], key: 'prodEngTet', label: 'Prod.Eng/TET', deadline: { department: 'prodEngTet', label: 'Prod.Eng/TET', dueAt: '2026-10-23T08:30:00Z', overdue: false } };
+  const page = portal(async () => snapshot, { initialTab: 'summary' });
+  await page.openTimeline({ id: 'one' });
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /Prod\.Eng\/TET due/);
+  assert.doesNotMatch(page.element('pcnTimelineDetails').innerHTML, /rd-overdue/);
+  snapshot.stages[1] = { ...snapshot.stages[1], deadline: { department: 'prodEngTet', label: 'Prod.Eng/TET', dueAt: null, overdue: null } };
+  await page.loadTimeline();
+  for (const id of ['pcnTimelineTrack', 'pcnTimelineDetails']) assert.match(page.element(id).innerHTML, /Prod\.Eng\/TET — Due date unavailable/);
+  snapshot.stages[1] = { ...snapshot.stages[1], state: 'completed', completed: 3, currentStep: null, steps: snapshot.stages[1].steps.map(step => ({ ...step, completed: true })) };
+  await page.loadTimeline(); page.selectTimelineDepartment('prodEngTet');
+  for (const id of ['pcnTimelineTrack', 'pcnTimelineDetails']) assert.doesNotMatch(page.element(id).innerHTML, /Prod\.Eng\/TET due|Due date unavailable|rd-overdue/);
+});
+
+test('Portal department popup shows QA/TET due dates and overdue red text then clears the completed review deadline', async () => {
+  const initial = departmentSummary();
+  const deadline = { department: 'qaTet', label: 'QA/TET', dueAt: '2026-10-26T08:30:00Z', overdue: true };
+  let snapshot = { ...initial, stages: initial.stages.map(stage => stage.key === 'qaTet' ? { ...stage, deadline } : stage) };
+  const page = portal(async () => snapshot, { initialTab: 'summary' }); await page.openTimeline({ id: 'one' });
+  const expected = `QA/TET due ${new Date(deadline.dueAt).toLocaleString()} (overdue)`;
+  for (const id of ['pcnTimelineTrack', 'pcnTimelineDetails']) {
+    assert.ok(page.element(id).innerHTML.includes(expected)); assert.match(page.element(id).innerHTML, /rd-overdue/);
+  }
+  snapshot = { ...snapshot, stages: snapshot.stages.map(stage => stage.key === 'qaTet' ? { ...stage, deadline: { ...deadline, dueAt: null, overdue: null } } : stage) };
+  await page.loadTimeline();
+  assert.match(page.element('pcnTimelineDetails').innerHTML, /QA\/TET — Due date unavailable/);
+  snapshot = { ...snapshot, stages: snapshot.stages.map(stage => stage.key === 'qaTet' ? { ...stage, deadline: null, currentStep: null, completed: 3, state: 'completed', steps: stage.steps.map(step => ({ ...step, completed: true })) } : stage) };
+  await page.loadTimeline(); page.selectTimelineDepartment('qaTet');
+  for (const id of ['pcnTimelineTrack', 'pcnTimelineDetails']) assert.doesNotMatch(page.element(id).innerHTML, /QA\/TET due|Due date unavailable|rd-overdue/);
 });
 
 test('department timeline rejects malformed or foreign snapshots and never invents terminal waiting steps', async () => {

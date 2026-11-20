@@ -172,6 +172,18 @@ test('Canonical draft adoption retains read-only requirements for a restricted o
   assert.equal(serialize(adopted.document).internalReview,undefined);
 });
 
+test('code allocation adopts canonical type while keeping edits made during the request',()=>{
+  const model=require('../create-model');
+  const snapshot=model.toPayload({documentType:'ta',supplierName:'Before save'});
+  const current={documentType:'sc',supplierName:'Edited while saving'};
+  const record={documentType:'ta',supplierName:'Before save',id:'T-19112601',version:'1',status:'draft'};
+  const adopted=ui.savedDocument(model,current,{record,snapshot},model.toPayload);
+  assert.equal(adopted.matches,false);
+  assert.equal(adopted.document.documentType,'ta');
+  assert.equal(adopted.document.supplierName,'Edited while saving');
+  assert.equal(adopted.document.id,'T-19112601');
+});
+
 test('Reused terminal or signed canonical records keep newer local text and disable editing',()=>{
   const model=require('../create-model'),current={supplierName:'Unsaved newer name',isTestDocument:true};
   const record={supplierName:'Older committed name',id:'PCN-2026-0001',version:'2',status:'submitted',isTestDocument:false};

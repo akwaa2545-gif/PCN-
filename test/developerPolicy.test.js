@@ -97,7 +97,7 @@ test('SQL missing Developer seed rolls back account creation rather than silentl
 });
 
 test('migration 007 is append-only role seed with no existing account grants or credentials', () => {
-  assert.equal(migrationManifest.at(-1), '007_developer_role.sql');
+  assert.equal(migrationManifest[6], '007_developer_role.sql');
   const migration = fs.readFileSync(path.join(__dirname, '../sql/migrations/007_developer_role.sql'), 'utf8');
   assert.match(migration, /INSERT\s+(?:INTO\s+)?pcn\.Roles/i);
   assert.match(migration, /N'developer'/);

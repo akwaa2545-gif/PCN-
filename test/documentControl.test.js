@@ -5,6 +5,11 @@ const actor = { id: 'employee-1', displayName: 'Example Person' };
 const now = '2026-10-09T10:00:00.000Z';
 const base = { supplierName: 'Supplier', reason: 'Material change', status: 'draft', internalReview: {} };
 
+test('typed document identity participates in signatures without changing legacy digests', () => {
+  assert.notEqual(contentHash({ ...base, documentType: 'ta' }), contentHash({ ...base, documentType: 'sc' }));
+  assert.equal(contentHash(base), contentHash({ ...base, documentType: undefined }));
+});
+
 test('direct submitted creation cannot bypass completion while incomplete draft remains allowed', async () => {
   const { PcnService }=require('../src/pcnService');
   const { memoryRepository,unsignedPayload }=require('./helpers/apiHarness');

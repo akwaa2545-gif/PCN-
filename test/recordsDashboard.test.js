@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 function dashboard() {
-  const window = {};
+  const window = { PCN_TYPES: require('../pcn-types') };
   vm.runInNewContext(fs.readFileSync(require.resolve('../records.js'), 'utf8'), {
     window, document: { addEventListener() {} }, Date, Intl, Blob, URL, setTimeout, clearTimeout,
   });
@@ -15,6 +15,35 @@ const records = [
   { id: 'PCN-2026-0001', status: 'submitted', riskLevel: 'High', supplierName: 'A', updatedAt: '2026-10-14T10:00:00Z', dashboard: { action: { department: 'qaTet', label: 'QA/TET — Checked', people: [{displayName:'Jane'}] }, pending:{needsAttention:true} } },
   { id: 'PCN-2026-0002', status: 'approved', riskLevel: 'Low', supplierName: 'B', updatedAt: '2026-10-13T10:00:00Z', dashboard: { action: {terminal:true}, pending:{needsAttention:false} } },
 ];
+
+test('PCN type filters combine with lifecycle and exports without classifying legacy documents', () => {
+  const api = dashboard();
+  const items = [...records,
+    { id: 'T-19112601', documentType: 'ta', status: 'technical_review', supplierName: 'A' },
+    { id: 'S-19112601', documentType: 'sc', status: 'closed', supplierName: 'A' }];
+  assert.deepEqual(Array.from(api.filterRecords(items, { documentType: 'ta', lifecycle: 'open', supplier: 'A' }), row => row.id), ['T-19112601']);
+  assert.deepEqual(Array.from(api.filterRecords(items, { documentType: 'sc', lifecycle: 'closed' }), row => row.id), ['S-19112601']);
+  assert.equal(api.filterRecords(items, { documentType: 'legacy' }).length, 2);
+  const csv = api.exportCsv(items, ['id', 'documentType']);
+  assert.match(csv, /"PCN type"/);
+  assert.match(csv, /"T-19112601","TA"/);
+  assert.match(csv, /"S-19112601","SC"/);
+  assert.match(csv, /"PCN-2026-0001","Legacy \/ unassigned"/);
+  const views = api.readPreferences(JSON.stringify({ views: [{ name: 'TA', filters: { documentType: 'ta' } }, { name: 'Old', filters: {} }] }));
+  assert.equal(views.views[0].filters.documentType, 'ta');
+  assert.equal(views.views[1].filters.documentType, '');
+});
+
+test('document lifecycle groups terminal statuses without rewriting status or changing legacy filters', () => {
+  const api = dashboard();
+  const items = [...records, { id: 'rejected', status: 'rejected' }, { id: 'closed', status: 'closed' }, { id: 'legacy' }];
+  assert.deepEqual(JSON.parse(JSON.stringify(api.lifecycleCounts(items))), { open: 2, closed: 3 });
+  assert.deepEqual(Array.from(api.lifecycleRecords(items, 'closed'), item => item.status), ['approved', 'rejected', 'closed']);
+  assert.equal(api.filterRecords(items, {}).length, 5);
+  assert.equal(api.filterRecords(items, { lifecycle: 'open' }).length, 2);
+  assert.equal(api.filterRecords(items, { lifecycle: 'closed', status: 'approved' }).length, 1);
+  assert.equal(items[1].status, 'approved');
+});
 
 test('dashboard filters combine summary, text, department, supplier, dates and risk without changing source', () => {
   const api = dashboard();
@@ -30,7 +59,7 @@ test('counts use backend attention and approved evidence, never make missing rea
   assert.deepEqual(JSON.parse(JSON.stringify(api.summaryCounts([...records, { id: 'legacy', status: 'draft' }]))), { all: 3, review: 1, approved: 1, attention: 1 });
   assert.equal(api.documentLabel({}), 'Not available');
   assert.equal(api.documentLabel({dashboard:{documents:{}}}), 'Not available');
-  assert.equal(api.pendingLabel({ updatedAt: '2026-10-12T00:00:00Z' }, Date.parse('2026-10-14T00:00:00Z')), 'Updated 2 days ago');
+  assert.equal(api.pendingLabel({ updatedAt: '2026-10-12T00:00:00Z' }, Date.parse('2026-10-14T00:00:00Z')), '—');
   assert.doesNotMatch(api.pendingLabel({ dashboard: { dueAt: 'invalid' } }), /overdue/i);
 });
 
@@ -41,6 +70,45 @@ test('sorting and pagination are stable and do not mutate records', () => {
   const page = api.paginate(records, 999, 10);
   assert.equal(page.page, 1); assert.equal(page.items.length, 2);
   assert.equal(api.paginate([], 1, 25).pages, 1);
+});
+
+test('pending time measures the current status independently of ordinary edits', () => {
+  const api = dashboard();
+  const record = { status: 'qa_review', updatedAt: '2026-10-30T08:30:00Z', dashboard: { pending: {
+    since: '2026-10-21T08:30:00Z', source: 'status_transition', ageDays: 9
+  } } };
+  assert.equal(api.pendingLabel(record), '9 days');
+  const nextStatus = { ...record, status: 'qualification', dashboard: { pending: {
+    ...record.dashboard.pending, since: '2026-10-30T08:30:00Z', ageDays: 0
+  } } };
+  assert.equal(api.pendingLabel(nextStatus), '<1 day');
+  assert.equal(api.pendingLabel(record, Date.parse('2026-10-22T08:30:00Z')), '1 day');
+});
+
+test('pending time shows only one overdue duration using server time, without dates or repeated deadlines', () => {
+  const api = dashboard(); const base = qaRecord({ overdue: true });
+  const record = { ...base, dashboard: { pending: { ...base.dashboard.pending,
+    since: '2026-10-20T08:30:00Z', source: 'status_transition', ageDays: 9, departmentOverdueDays: 3
+  } } };
+  const expected = 'Overdue 3 days';
+  assert.equal(api.pendingLabel(record), expected);
+  assert.ok(api.exportCsv([record], ['pending']).includes(expected));
+  assert.equal(api.pendingLabel(record, Date.parse('2026-10-26T08:30:00.001Z')), 'Overdue <1 day');
+  assert.equal(api.pendingLabel(record, Date.parse('2026-10-27T08:30:00Z')), 'Overdue 1 day');
+  const both = { ...record, dashboard: { pending: { ...record.dashboard.pending,
+    reviewDueAt: '2026-10-26T08:30:00Z', reviewOverdueDays: 3
+  } } };
+  assert.equal(api.pendingLabel(both), 'Overdue 3 days');
+  assert.equal(api.pendingLabel({ ...both, dashboard: { pending: { ...both.dashboard.pending, reviewOverdueDays: 4 } } }), 'Overdue 4 days');
+});
+
+test('pending time does not invent status age or negative overdue days from missing or future timestamps', () => {
+  const api = dashboard(); const now = Date.parse('2026-10-29T08:30:00Z');
+  const base = qaRecord({ dueAt: null, overdue: null });
+  assert.doesNotMatch(api.pendingLabel({ ...base, updatedAt: '2026-10-28T08:30:00Z' }, now), /In current status|Overdue/);
+  const future = { status: 'submitted', dashboard: { pending: { source: 'status_transition', since: '2026-10-30T08:30:00Z' } } };
+  assert.equal(api.pendingLabel(future, now), '—');
+  assert.doesNotMatch(api.pendingLabel({ ...qaRecord({ overdue: true }), status: 'approved' }, now), /In current status|Overdue/);
 });
 
 test('CSV exports selected visible columns with BOM, preserves false/zero and prevents spreadsheet formulas', () => {
@@ -104,18 +172,266 @@ function controllerPage(fetch, options = {}) {
     all.push(element); return element;
   };
   document.createElement = createElement; document.body = createElement('body');
-  const window = { localStorage: {getItem(){return null;},setItem(){} } };
+  const window = { PCN_TYPES: require('../pcn-types'), location: { href: options.href || 'http://records.example/records' }, localStorage: {getItem(){return null;},setItem(){} } };
   vm.runInNewContext(fs.readFileSync(require.resolve('../records.js'), 'utf8'), {window, document, Date, Blob, URL});
   const root = createElement('main'); const rows = createElement('tbody'); root.append(rows);
   const search = createElement('input'); root.append(search);
   const count = createElement('span'); const message = createElement('p'); let accessLost = 0;
   const controller = window.PCN_RECORDS_DASHBOARD.create({root,rows,search,count,message,user:{id:'viewer'},fetch,onAccessLost(){accessLost++;}, ...options});
-  return { controller, document, rows, root, count, message, all, createElement, find:id => all.find(item => item.id === id),
+  return { controller, document, rows, root, search, count, message, all, createElement, find:id => all.find(item => item.id === id),
     button: (text, inside = root) => inside.querySelectorAll().find(item => item.tag === 'button' && (item.textContent === text || item.attributes['aria-label']?.startsWith(`${text} `))),
     lost:()=>accessLost };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('type selection survives lifecycle switching, refresh and saved views while reset keeps the active tab', async () => {
+  const page = controllerPage(async () => ({}));
+  const items = [
+    { id: 'T-19112601', documentType: 'ta', status: 'submitted', supplierName: 'Shared' },
+    { id: 'T-19112602', documentType: 'ta', status: 'closed', supplierName: 'Shared' },
+    { id: 'S-19112601', documentType: 'sc', status: 'closed', supplierName: 'Shared' },
+  ];
+  page.controller.setRecords(items);
+  const type = page.find('rdFilter-documentType');
+  assert.deepEqual(type.children.map(option => option.value), ['', 'ta', 'sc', 'legacy']);
+  type.value = 'ta'; await type.emit('change');
+  assert.equal(page.rows.children[0].dataset.pcnId, 'T-19112601');
+  await page.find('rdLifecycleTab-closed').emit('click');
+  assert.equal(type.value, 'ta'); assert.equal(page.rows.children[0].dataset.pcnId, 'T-19112602');
+  page.controller.setRecords([...items, { id: 'T-19112603', documentType: 'ta', status: 'closed' }]);
+  assert.equal(type.value, 'ta'); assert.equal(page.count.textContent, '2');
+  page.find('rdViewName').value = 'TA completed'; await page.button('Save current view').emit('click');
+  type.value = 'sc'; await type.emit('change');
+  const saved = page.find('rdFilter-saved'); saved.value = 'TA completed'; await saved.emit('change');
+  assert.equal(type.value, 'ta'); assert.equal(page.count.textContent, '2');
+  await page.button('Reset filters').emit('click');
+  assert.equal(page.controller.getState().lifecycle, 'closed');
+  assert.equal(type.value, ''); assert.equal(page.count.textContent, '3');
+});
+
+test('revision history identifies the typed engineering group while retaining the legacy signing path', () => {
+  const revisions = [{ revision: 2, changes: [{ path: 'internalReview.signoff.prodEngTet.prepared', after: true }] }];
+  const api = dashboard();
+  for (const [documentType, expected] of [['ta', 'Prod.Eng/TA'], ['sc', 'Prod.Eng/SC']]) {
+    assert.match(api.timelinePoints(revisions, { documentType })[0].label, new RegExp(`^${expected}`));
+  }
+  assert.match(api.timelinePoints(revisions)[0].label, /^Prod.Eng\/TET/);
+});
+
+test('shared records tabs default to Open and scope counts, options, summaries and refreshed rows', async () => {
+  const page = controllerPage(async () => ({}));
+  const items = [...records, { id: 'PCN-REJECTED', status: 'rejected', supplierName: 'C' }, { id: 'PCN-CLOSED', status: 'closed', supplierName: 'D' }];
+  page.controller.setRecords(items);
+  const open = page.find('rdLifecycleTab-open'); const closed = page.find('rdLifecycleTab-closed');
+  assert.equal(open.attributes.role, 'tab'); assert.equal(open.attributes['aria-selected'], 'true'); assert.equal(open.tabIndex, 0); assert.equal(closed.tabIndex, -1);
+  assert.equal(page.controller.getState().lifecycle, 'open'); assert.equal(page.count.textContent, '1');
+  assert.equal(open.children[1].textContent, '1'); assert.equal(closed.children[1].textContent, '3');
+  assert.deepEqual(page.find('rdFilter-status').children.map(item => item.value), ['', 'submitted']);
+  await closed.emit('click');
+  assert.equal(page.count.textContent, '3'); assert.equal(page.controller.getState().lifecycle, 'closed');
+  assert.equal(closed.attributes['aria-selected'], 'true'); assert.equal(open.tabIndex, -1);
+  assert.deepEqual(page.find('rdFilter-status').children.map(item => item.value), ['', 'approved', 'closed', 'rejected']);
+  const rejected = page.all.filter(item => item.dataset.summary === 'rejected').at(-1);
+  await rejected.emit('click'); assert.equal(page.count.textContent, '1'); assert.equal(page.rows.children[0].dataset.pcnId, 'PCN-REJECTED');
+  await page.button('Reset filters').emit('click'); assert.equal(page.controller.getState().lifecycle, 'closed'); assert.equal(page.count.textContent, '3');
+  page.controller.setRecords([...items, { id: 'NEW', status: 'closed' }]);
+  assert.equal(page.controller.getState().lifecycle, 'closed'); assert.equal(page.count.textContent, '4'); assert.equal(closed.children[1].textContent, '4');
+  page.controller.clear(); assert.equal(open.children[1].textContent, '0'); assert.equal(closed.children[1].textContent, '0');
+});
+
+test('lifecycle keyboard switching resets status and page while retaining search and sorting', async () => {
+  const page = controllerPage(async () => ({}));
+  page.controller.setRecords([...Array.from({length:30}, (_, index) => ({ id: `OPEN-${index}`, status: 'submitted', supplierName: 'Shared' })), { id: 'CLOSED', status: 'closed', supplierName: 'Shared' }]);
+  const status = page.find('rdFilter-status'); status.value = 'submitted'; await status.emit('change');
+  page.search.value = 'Shared'; await page.search.emit('input'); await page.button('Next').emit('click');
+  assert.equal(page.controller.getState().page, 2);
+  const tablist = page.find('rdLifecycleTab-open').parentElement;
+  await tablist.emit('keydown', {key:'End'});
+  assert.equal(page.controller.getState().lifecycle, 'closed'); assert.equal(page.controller.getState().page, 1);
+  assert.equal(page.controller.getState().filters.status, ''); assert.equal(page.controller.getState().filters.search, 'Shared');
+  assert.equal(page.document.activeElement, page.find('rdLifecycleTab-closed'));
+  assert.equal(page.count.textContent, '1');
+  await tablist.emit('keydown', {key:'ArrowRight'}); assert.equal(page.controller.getState().lifecycle, 'open');
+  await tablist.emit('keydown', {key:'ArrowLeft'}); assert.equal(page.controller.getState().lifecycle, 'closed');
+  await tablist.emit('keydown', {key:'Home'}); assert.equal(page.controller.getState().lifecycle, 'open');
+});
+
+test('closed records deep links are allowlisted and saved views retain their lifecycle', async () => {
+  const page = controllerPage(async () => ({}), { href: 'http://records.example/admin?documents=closed#records' });
+  page.controller.setRecords(records); assert.equal(page.controller.getState().lifecycle, 'closed');
+  page.find('rdViewName').value = 'Finished'; await page.button('Save current view').emit('click');
+  assert.equal(page.controller.getState().preferences.views[0].lifecycle, 'closed');
+  await page.find('rdLifecycleTab-open').emit('click'); const saved = page.find('rdFilter-saved'); saved.value = 'Finished'; await saved.emit('change');
+  assert.equal(page.controller.getState().lifecycle, 'closed'); assert.equal(page.rows.children[0].dataset.pcnId, records[1].id);
+  const invalid = controllerPage(async () => ({}), { href: 'http://records.example/records?documents=anything' });
+  assert.equal(invalid.controller.getState().lifecycle, 'open');
+  const stored = dashboard().readPreferences(JSON.stringify({ views: [{ name:'Finished', lifecycle:'closed', filters:{} }, {name:'Legacy', filters:{}}] }));
+  assert.equal(stored.views[0].lifecycle, 'closed'); assert.equal(stored.views[1].lifecycle, 'open');
+});
+
+test('legacy saved terminal views select Closed while explicit lifecycle selections are preserved', () => {
+  const views = [
+    { name: 'Approved summary', filters: { summary: 'approved' } },
+    ...['approved', 'rejected', 'closed'].map(status => ({ name: status, filters: { status } })),
+    { name: 'Rejected summary', filters: { summary: 'rejected' } },
+    { name: 'Closed summary', filters: { summary: 'closed' } },
+    { name: 'Open explicit', lifecycle: 'open', filters: { summary: 'approved' } },
+    { name: 'Closed explicit', lifecycle: 'closed', filters: {} },
+    { name: 'Open legacy', filters: { summary: 'attention', status: 'submitted' } },
+  ];
+  const restored = dashboard().readPreferences(JSON.stringify({ views })).views;
+  assert.deepEqual(Array.from(restored, view => view.lifecycle), ['closed', 'closed', 'closed', 'closed', 'closed', 'closed', 'open', 'closed', 'open']);
+  assert.equal(restored[0].filters.summary, 'approved');
+  assert.equal(restored[2].filters.status, 'rejected');
+});
+
+test('closed lifecycle empty state distinguishes no finished documents from filtered results', async () => {
+  const page = controllerPage(async () => ({})); page.controller.setRecords([records[0]]);
+  await page.find('rdLifecycleTab-closed').emit('click');
+  assert.match(page.rows.children[0].children[0].textContent, /No closed documents yet/);
+  page.controller.setRecords(records); page.search.value = 'not found'; await page.search.emit('input');
+  assert.match(page.rows.children[0].children[0].textContent, /No closed documents match/);
+  assert.equal(page.find('rdLifecycleTab-closed').children[1].textContent, '1');
+});
+
+function prodEngRecord(overrides = {}) {
+  return { id: 'PCN-DUE', status: 'technical_review', version: 1, dashboard: { pending: { overdue: false,
+    since: '2026-10-20T08:30:00Z', source: 'status_transition', ageDays: 1, departmentOverdueDays: overrides.overdue === true ? 2 : null, prodEngDeadline: {
+    department: 'prodEngTet', label: 'Prod.Eng/TET', startedAt: '2026-10-20T08:30:00Z', dueAt: '2026-10-23T08:30:00Z', overdue: false, source: 'handoff', ...overrides,
+  } } } };
+}
+
+function qaRecord(overrides = {}) {
+  const deadline = { department: 'qaTet', label: 'QA/TET', startedAt: '2026-10-23T08:30:00Z', dueAt: '2026-10-26T08:30:00Z', overdue: false, source: 'handoff', ...overrides };
+  return { id: 'PCN-QA-DUE', status: 'qa_review', version: 1, dashboard: { pending: { overdue: deadline.overdue === true,
+    since: '2026-10-23T08:30:00Z', source: 'status_transition', ageDays: 1, departmentOverdueDays: deadline.overdue === true ? 2 : null,
+    activeReviewDeadline: deadline, prodEngDeadline: null, qaDeadline: deadline } } };
+}
+
+test('QA/TET pending duration stays compact with legacy department metadata and in CSV', () => {
+  const api = dashboard(); const base = qaRecord();
+  const record = { ...base, dashboard: { pending: { ...base.dashboard.pending, prodEngDeadline: prodEngRecord().dashboard.pending.prodEngDeadline } } };
+  const expected = '1 day';
+  assert.equal(api.pendingLabel(record), expected);
+  assert.ok(api.exportCsv([record], ['pending']).includes(expected));
+  assert.equal(api.pendingLabel({ ...base, dashboard: { pending: { ...base.dashboard.pending, activeReviewDeadline: undefined } } }), expected);
+  assert.equal(api.pendingLabel(qaRecord({ dueAt: null, startedAt: null, source: 'unknown', overdue: null })), '1 day');
+});
+
+test('overdue review highlights the whole row, preserves selection and clears after completion', () => {
+  const page = controllerPage(async () => ({}), { selectedId: () => 'PCN-QA-DUE' });
+  page.controller.setRecords([qaRecord({ overdue: true }), prodEngRecord({ overdue: true }), { ...qaRecord(), id: 'PCN-ON-TIME' }]);
+  const row = id => page.rows.children.find(item => item.dataset.pcnId === id);
+  assert.match(row('PCN-QA-DUE').className || '', /rd-row-overdue/);
+  assert.match(row('PCN-QA-DUE').className, /is-selected/);
+  assert.equal(row('PCN-QA-DUE').attributes['aria-selected'], 'true');
+  assert.match(row('PCN-DUE').className || '', /rd-row-overdue/);
+  assert.doesNotMatch(row('PCN-ON-TIME').className || '', /rd-row-overdue/);
+  page.controller.setRecords([qaRecord(), prodEngRecord({ dueAt: null, overdue: null }), { ...qaRecord({ overdue: true }), status: 'approved' }]);
+  assert.ok(page.rows.children.every(row => !/rd-row-overdue/.test(row.className || '')));
+});
+
+test('QA/TET red overdue alerts and badges coexist with Prod.Eng/TET counts and clear when review completes', async () => {
+  const page = controllerPage(async () => ({}));
+  const qa = qaRecord({ overdue: true });
+  page.controller.setRecords([qa, { ...qa, id: 'PCN-QA-2' }, prodEngRecord({ overdue: true })]);
+  const banner = page.root.querySelectorAll().find(item => item.className === 'rd-overdue-alert');
+  assert.equal(banner.hidden, false); assert.match(banner.textContent, /2 PCNs overdue for QA\/TET/); assert.match(banner.textContent, /1 PCN overdue for Prod\.Eng\/TET/);
+  const pendingCell = page.rows.children.find(row => row.dataset.pcnId === qa.id).children.find(item => item.dataset.column === 'pending');
+  assert.match(pendingCell.className, /rd-overdue/); assert.equal(pendingCell.textContent, 'Overdue 2 days');
+  const pendingChoice = page.find('rdColumnChooser').querySelectorAll().find(item => item.tag === 'label' && item.children.some(child => child.textContent === 'Pending time')).children[0];
+  pendingChoice.checked = false; await pendingChoice.emit('change');
+  const qaBadges = page.rows.querySelectorAll().filter(item => item.textContent === 'QA/TET overdue');
+  assert.equal(qaBadges.length, 2); assert.ok(qaBadges.every(item => item.className.includes('rd-deadline-overdue')));
+  page.controller.setRecords([{ ...qa, dashboard: { action: { department: 'qaTet', label: 'QA/TET Final Judgment' }, pending: { overdue: false, activeReviewDeadline: null, prodEngDeadline: null, qaDeadline: null } } }]);
+  assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
+  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'QA/TET overdue'), false);
+  page.controller.setRecords([{ ...qa, status: 'approved' }]); assert.equal(banner.hidden, true);
+});
+
+test('QA/TET due time is shared by overview and current department timeline details', async () => {
+  const record = qaRecord({ overdue: true }); const deadline = record.dashboard.pending.qaDeadline;
+  const snapshot = { id: record.id, version: 1, status: 'qa_review', nextAction: { label: 'QA/TET — Prepared', terminal: false }, stages: [{
+    key: 'qaTet', label: 'QA/TET', state: 'current', completed: 0, total: 3, currentStep: 'Prepared', deadline,
+    steps: ['prepared', 'checked', 'approved'].map(action => ({ action, label: action[0].toUpperCase() + action.slice(1), completed: false, person: null, signedAt: null })),
+  }] };
+  const page = controllerPage(async url => url.endsWith('/workflow-summary') ? snapshot : url.endsWith('/progress') ? { steps: [] } : record);
+  const expected = `QA/TET due ${new Date(deadline.dueAt).toLocaleString()} (overdue)`;
+  page.controller.setRecords([record]); await page.button('Quick view').emit('click');
+  assert.ok(page.find('rdPreviewContent').querySelectorAll().some(item => item.textContent === dashboard().pendingLabel(record)));
+  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  const details = page.find('rdWorkflowDetails');
+  assert.ok(details.children.some(item => item.textContent === expected && item.className === 'rd-overdue'));
+});
+
+test('Prod.Eng/TET pending duration is shared with CSV without due dates', () => {
+  const api = dashboard(); const record = prodEngRecord();
+  const expected = '1 day';
+  assert.equal(api.pendingLabel(record), expected);
+  assert.ok(api.exportCsv([record], ['pending']).includes(expected));
+  assert.equal(api.pendingLabel(prodEngRecord({ dueAt: null, startedAt: null, source: 'unknown', overdue: null })), '1 day');
+  assert.doesNotMatch(api.pendingLabel({ ...record, status: 'approved' }), /Prod\.Eng\/TET/);
+  assert.equal(api.pendingLabel({ dashboard: { pending: { overdue: true, reviewDueAt: '2026-10-21T08:30:00Z' } } }, Date.parse('2026-10-24T08:30:00Z')), 'Overdue 3 days');
+});
+
+test('pending time counts explicit overdue days when the department deadline is unknown or still on time', () => {
+  const api = dashboard(); const now = Date.parse('2026-10-22T08:30:00Z');
+  const reviewDueAt = '2026-10-21T08:30:00Z';
+  for (const overrides of [{ overdue: false }, { dueAt: null, overdue: null, source: 'unknown' }]) {
+    const base = prodEngRecord(overrides);
+    const record = { ...base, dashboard: { pending: { ...base.dashboard.pending, overdue: true, reviewDueAt } } };
+    const text = api.pendingLabel(record, now);
+    assert.equal(text, 'Overdue 1 day');
+  }
+  const base = prodEngRecord({ overdue: true });
+  const record = { ...base, dashboard: { pending: { ...base.dashboard.pending, overdue: true, reviewDueAt: '2026-10-25T08:30:00Z' } } };
+  assert.equal(api.pendingLabel(record, Date.parse('2026-10-24T08:30:00Z')), 'Overdue 1 day');
+});
+
+test('Prod.Eng/TET overdue alert counts records and persists in PCN code when pending column is hidden', async () => {
+  const page = controllerPage(async () => ({}));
+  const overdue = prodEngRecord({ overdue: true }); overdue.dashboard.pending.overdue = true;
+  page.controller.setRecords([overdue, { ...overdue, id: 'PCN-DUE-2' }]);
+  const banner = page.root.querySelectorAll().find(item => item.className === 'rd-overdue-alert');
+  assert.ok(banner); assert.equal(banner.attributes.role, 'status'); assert.equal(banner.hidden, false);
+  assert.match(banner.textContent, /2 PCNs overdue for Prod\.Eng\/TET/);
+  const pendingCell = page.rows.querySelectorAll().find(item => item.dataset.column === 'pending');
+  assert.match(pendingCell.className, /rd-overdue/); assert.equal(pendingCell.textContent, 'Overdue 2 days');
+  const pendingChoice = page.find('rdColumnChooser').querySelectorAll().find(item => item.tag === 'label' && item.children.some(child => child.textContent === 'Pending time')).children[0];
+  pendingChoice.checked = false; await pendingChoice.emit('change');
+  assert.equal(page.rows.querySelectorAll().some(item => item.dataset.column === 'pending'), false);
+  const badges = page.rows.querySelectorAll().filter(item => item.textContent === 'Prod.Eng/TET overdue');
+  assert.equal(badges.length, 2); assert.ok(badges.every(item => item.className.includes('rd-deadline-overdue')));
+  assert.ok(badges.every(item => item.parentElement.className === 'rd-code-cell'));
+  page.controller.setRecords([prodEngRecord()]);
+  assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
+  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  page.controller.setRecords([prodEngRecord({ dueAt: null, overdue: null, source: 'unknown' })]);
+  assert.equal(banner.hidden, true);
+  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  page.controller.setRecords([{ ...overdue, status: 'qa_review', dashboard: { pending: { prodEngDeadline: null, overdue: false } } }]);
+  assert.equal(banner.hidden, true);
+  page.controller.setRecords([{ ...overdue, status: 'approved' }]);
+  assert.equal(banner.hidden, true);
+  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  page.controller.setRecords([overdue]); assert.match(banner.textContent, /^1 PCN overdue/); page.controller.clear();
+  assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
+});
+
+test('Prod.Eng/TET preview overview shows the same compact pending duration', async () => {
+  const record = prodEngRecord();
+  const page = controllerPage(async url => url.endsWith('/progress') ? { steps: [] } : record);
+  page.controller.setRecords([record]); await page.button('Quick view').emit('click');
+  const expected = '1 day';
+  assert.ok(page.find('rdPreviewContent').querySelectorAll().some(item => item.textContent === expected));
+});
+
+test('Prod.Eng/TET overdue badge and alert use readable red text with a red surface', () => {
+  const css = fs.readFileSync(require.resolve('../records.css'), 'utf8');
+  assert.match(css, /\.rd-deadline-overdue[^{}]*\{[^}]*color:\s*#8e2624/);
+  assert.match(css, /\.rd-overdue-alert[^{}]*\{[^}]*background:\s*#fff0ef/);
+});
 
 test('shared controller preserves focus after changed records and pauses polling while preview is open', async () => {
   const page = controllerPage(async url => url.endsWith('/progress') ? {steps:[]} : {id:'PCN-1',version:1});
@@ -194,6 +510,7 @@ test('Rejected displays its actual signing count without a false 100 percent com
   const record = {id:'PCN-1',version:1,status:'rejected',dashboard:{progress}};
   const page = controllerPage(async url => url.endsWith('/progress') ? progress : record);
   page.controller.setRecords([record]);
+  await page.find('rdLifecycleTab-closed').emit('click');
   assert.equal(page.rows.querySelectorAll().filter(item=>item.tag==='progress').length,0);
   assert.ok(page.rows.querySelectorAll().some(item=>item.textContent==='2/18 signing steps'));
   await page.button('Quick view').emit('click');
@@ -202,7 +519,7 @@ test('Rejected displays its actual signing count without a false 100 percent com
   assert.doesNotMatch(displayed,/Stage never signed|100%/);
   assert.equal(content.querySelectorAll().filter(item=>item.className==='rd-step-completed').length,0);
   const approved = {...record,status:'approved',dashboard:{progress:{...progress,status:'approved'}}};
-  const normal = controllerPage(async()=>({})); normal.controller.setRecords([approved]);
+  const normal = controllerPage(async()=>({})); normal.controller.setRecords([approved]); await normal.find('rdLifecycleTab-closed').emit('click');
   assert.equal(normal.rows.querySelectorAll().filter(item=>item.tag==='progress').length,1);
 });
 
@@ -314,4 +631,27 @@ test('department markers and saved placeholders use their real symbols and parti
   assert.ok(descendants.some(item => item.textContent === 'current \u00b7 1/3 signed'));
   assert.ok(descendants.some(item => item.tag === 'td' && item.textContent === '\u2014'));
   assert.equal(descendants.some(item => item.textContent === '?'), false);
+});
+
+test('department timeline shows current Prod.Eng/TET deadline in red and preserves keyboard department selection', async () => {
+  const deadline = prodEngRecord({ overdue: true }).dashboard.pending.prodEngDeadline;
+  const snapshot = { id: 'PCN-DUE', version: 1, status: 'technical_review', nextAction: { label: 'Prod.Eng/TET — Checked', terminal: false },
+    stages: ['prodEngTet', 'qaTet'].map((key, index) => ({ key, label: index ? 'QA/TET' : 'Prod.Eng/TET', state: index ? 'waiting' : 'current', completed: 0, total: 3,
+      currentStep: index ? null : 'Prepared', deadline: index ? null : deadline,
+      steps: ['prepared', 'checked', 'approved'].map(action => ({ action, label: action[0].toUpperCase() + action.slice(1), completed: false, person: null, signedAt: null })) })) };
+  const page = controllerPage(async url => url.endsWith('/workflow-summary') ? snapshot : url.endsWith('/progress') ? { steps: [] } : prodEngRecord());
+  page.controller.setRecords([prodEngRecord()]); await page.button('Quick view').emit('click');
+  await page.find('rdPreviewTab-timeline').emit('click'); await settle();
+  const expected = `Prod.Eng/TET due ${new Date(deadline.dueAt).toLocaleString()} (overdue)`;
+  const content = page.find('rdPreviewContent'); const details = page.find('rdWorkflowDetails');
+  const point = content.querySelectorAll().find(item => item.dataset.workflowStage === 'prodEngTet');
+  assert.ok(point.children.some(item => item.textContent === expected && item.className.includes('rd-overdue')));
+  assert.ok(details.children.some(item => item.textContent === expected && item.className === 'rd-overdue'));
+  const track = content.querySelectorAll().find(item => item.attributes['aria-label'] === 'Signing departments');
+  await track.emit('keydown', { key: 'ArrowRight' });
+  assert.equal(page.document.activeElement.dataset.workflowStage, 'qaTet');
+  assert.equal(details.querySelectorAll().some(item => item.textContent === expected), false);
+  await track.emit('keydown', { key: 'Home' });
+  assert.equal(page.document.activeElement, point);
+  assert.ok(details.querySelectorAll().some(item => item.textContent === expected));
 });

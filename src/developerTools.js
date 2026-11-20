@@ -3,9 +3,10 @@ const { isDeveloperAssignment, actions, departments, stageDepartments } = requir
 const { routeGroups } = require('./workflowAccess');
 const { buildWorkflowProgress } = require('./masterData');
 const { buildAction, buildChecks } = require('./documentChecks');
+const { isCode, departmentForStage } = require('../pcn-types');
 
-const recordKeys = ['id','supplierName','materialName','status','riskLevel','updatedAt','isTestDocument'];
-const fields = new Set(['status','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName',
+const recordKeys = ['id','documentType','supplierName','materialName','status','riskLevel','updatedAt','isTestDocument'];
+const fields = new Set(['documentType','status','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName',
   'desiredStart','sampleSubmitted','sampleSubmittedDate','currentCondition','newCondition','changeRows','reason',
   'identification','sampleLocation','priceLevel','internalReview','comments','approvals','documentAttachments','documents',
   'isTestDocument','submittedAt','reviewDueAt','changeType','sourceTemplate']);
@@ -23,7 +24,7 @@ function requireDeveloper(user) {
 }
 
 function assertId(id) {
-  if (typeof id !== 'string' || !/^PCN-\d{4}-\d{4}$/.test(id)) throw new ApiError(400,'Invalid PCN id');
+  if (!isCode(id)) throw new ApiError(400,'Invalid PCN id');
 }
 
 async function loadDeveloperPcns(context,user) {
@@ -40,13 +41,13 @@ function safeValue(value, root) {
     .map(([key,item]) => [key,safeValue(item,root)]));
 }
 
-function fieldLabel(path) {
+function fieldLabel(path, record) {
   const labels = {'documentControl.revisionReason':'Revision reason',documentAttachments:'Attachments',internalReview:'Review',
     desiredStart:'Target start date or lot',reason:'Reason for change'};
   if (labels[path]) return labels[path];
   const prefix = Object.keys(stageDepartments).find(stage => path.startsWith(`internalReview.${stage}.`));
   if (prefix) {
-    const department=departments.find(item => item.key === stageDepartments[prefix])?.label;
+    const department=departments.find(item => item.key === departmentForStage(record,prefix))?.label;
     const part=path.slice(`internalReview.${prefix}.`.length);
     const action=/^(prepared|checked|approved)(Name|Date)?$/.exec(part);
     const step=action ? `${action[1][0].toUpperCase()}${action[1].slice(1)}${action[2] === 'Name' ? ' by' : action[2] === 'Date' ? ' date' : ''}` : part;
@@ -56,14 +57,14 @@ function fieldLabel(path) {
     .join(' / ').replace(/^./,letter => letter.toUpperCase());
 }
 
-function safeChange(change) {
+function safeChange(change, record) {
   if (!change || typeof change.path !== 'string') throw new ApiError(503,'Document transaction history is unavailable');
   const segments=change.path.split('.');
   if ((!fields.has(segments[0]) && change.path !== 'documentControl.revisionReason') || segments.some(key => privateKeys.has(key))) return null;
-  return {path:change.path,label:fieldLabel(change.path),before:safeValue(change.before,segments[0]),after:safeValue(change.after,segments[0])};
+  return {path:change.path,label:fieldLabel(change.path,record),before:safeValue(change.before,segments[0]),after:safeValue(change.after,segments[0])};
 }
 
-function transactions(revisions,users) {
+function transactions(revisions,users,record) {
   if (!Array.isArray(revisions) || revisions.some(row => !Number.isSafeInteger(row?.revision) || row.revision < 1 || !Array.isArray(row.changes))) {
     throw new ApiError(503,'Document transaction history is unavailable');
   }
@@ -76,7 +77,7 @@ function transactions(revisions,users) {
     const known=actorReference.startsWith('user:') ? users.find(user => String(user.id) === actorReference.slice(5)) : null;
     return {revision:row.revision,contentRevision:row.contentRevision ?? null,actor:known?.displayName || known?.username || actorReference,
       actorReference,createdAt:row.createdAt || null,status:row.status || null,isBaseline:row.isBaseline === true,
-      changes:row.changes.map(safeChange).filter(Boolean)};
+      changes:row.changes.map(change=>safeChange(change,record)).filter(Boolean)};
   }),historyMessage:unavailable ? 'Earlier changes are unavailable. Baselines describe the document when tracking began; they do not establish who created it.'
     : 'Recorded document changes, newest first. Each row represents a saved change.'};
 }
@@ -87,7 +88,7 @@ function workflow(record,user,users,files) {
   const signing=['draft','supplier_action'].includes(record.status) ? false : !terminal;
   const review=record.internalReview || {};
   const stages=routeGroups(record.riskLevel,review).map(key => {
-    const department=stageDepartments[key];
+    const department=departmentForStage(record,key);
     const label=(departments.find(item => item.key === department)?.label || department)+(key === 'qateFinal.signoff' ? ' Final judgment' : '');
     return {key,label,steps:actions.map(action => {
       const completed=at(review,`${key}.${action}`) === true;
@@ -118,7 +119,7 @@ async function inspectDeveloperPcn(context,user,id) {
   if (!Array.isArray(files) || !Array.isArray(users)) throw new ApiError(503,'Workflow inspection metadata is unavailable');
   const latest=await context.service.getById(id,user);
   if (!record.version || record.version !== latest.version) throw new ApiError(409,'PCN changed while loading Developer tools; reload to see the latest changes');
-  return {record:{...summary(record),version:record.version},workflow:workflow(record,user,users,files),transactions:transactions(revisions,users)};
+  return {record:{...summary(record),version:record.version},workflow:workflow(record,user,users,files),transactions:transactions(revisions,users,record)};
 }
 
 async function handleDeveloperTools(method,url,context,user) {

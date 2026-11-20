@@ -6,6 +6,10 @@ const { migrationManifest } = require('./sqlDatabase');
 const { settingsVersion, normalizeMailRouting } = require('./mailRouting');
 const { lockUserMailRouting, readUserMailAssignments, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
 const { SqlRevisions } = require('./sqlRevisions');
+const { SqlWorkflowSettings } = require('./sqlWorkflowSettings');
+const { SqlNotificationPreferences } = require('./sqlNotificationPreferences');
+const { readNotificationPreferences } = require('./notificationPreferences');
+const { normalizeType, typeOf, parseCode, isCode, formatCode, bangkokDay } = require('../pcn-types');
 
 const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'], ['signoff.qaTet', 'QA/TET'],
@@ -14,7 +18,7 @@ const emptySettings = { flowUrl: '', directoryLookupUrl: '', groups: [
 ].map(([key, label]) => ({ key, label, emails: '', recipients: [] })) };
 
 class SqlPcnRepository {
-  constructor(pool, options = {}) { this.pool = pool; this.isSql = true; this.notifications = options.notifications; this.revisions = new SqlRevisions(); }
+  constructor(pool, options = {}) { this.pool = pool; this.isSql = true; this.notifications = options.notifications; this.revisions = new SqlRevisions(); this.workflowSettings = new SqlWorkflowSettings(pool); this.notificationPreferences = new SqlNotificationPreferences(pool); }
 
   async transaction(work) {
     const tx = this.pool.transaction();
@@ -70,6 +74,27 @@ class SqlPcnRepository {
     return `PCN-${year}-${String(sequence).padStart(4, '0')}`;
   }
 
+  async allocateTypedCode(tx, record) {
+    const documentType = normalizeType(record.documentType);
+    const issueDate = bangkokDay(record.createdAt);
+    let result;
+    try {
+      result = await tx.request().input('documentType', sql.VarChar(2), documentType).input('issueDate', sql.Char(10), issueDate).query(`
+        IF NOT EXISTS(SELECT 1 FROM pcn.PcnDailyCounters WITH (UPDLOCK,HOLDLOCK)
+          WHERE DocumentType=@documentType AND IssueDate=CONVERT(date,@issueDate,23))
+          INSERT pcn.PcnDailyCounters(DocumentType,IssueDate,LastSequence) VALUES(@documentType,CONVERT(date,@issueDate,23),0);
+        UPDATE pcn.PcnDailyCounters SET LastSequence=LastSequence+1
+          OUTPUT inserted.LastSequence AS Sequence
+          WHERE DocumentType=@documentType AND IssueDate=CONVERT(date,@issueDate,23) AND LastSequence<99;`);
+    } catch (error) {
+      if ((error.number || error.originalError?.info?.number) === 208) throw new ApiError(503, 'TA/SC numbering is not initialized; apply migration 009');
+      throw error;
+    }
+    const sequence = result.recordset?.[0]?.Sequence;
+    if (!Number.isInteger(sequence) || sequence < 1 || sequence > 99) throw new ApiError(409, 'Daily PCN sequence exhausted; contact the administrator');
+    return formatCode(documentType, issueDate, sequence);
+  }
+
   async create(record, actor = 'system', user, options = {}) {
     return this.transaction(async tx => {
       await lockUserMailRouting(tx);
@@ -81,8 +106,9 @@ class SqlPcnRepository {
         if (replay) return { ...replay, creationReused: true };
       }
       const year = Number(String(record.createdAt || new Date().toISOString()).slice(0, 4));
-      const id = record.id || await this.allocateCode(tx, year);
+      const id = record.id || (normalizeType(record.documentType) ? await this.allocateTypedCode(tx, record) : await this.allocateCode(tx, year));
       assertCode(id);
+      if (normalizeType(record.documentType) && parseCode(id).documentType !== normalizeType(record.documentType)) throw new ApiError(400, 'PCN type does not match its issued code');
       const proposed = { ...record, ...(options.clientDraftKey ? { creationDraftKey: options.clientDraftKey.toLowerCase(),
         ...(options.testDocument === true ? { isTestDocument: true } : {}) } : {}), id,
         internalReview: { ...(record.internalReview || {}), pcnCode: id } };
@@ -110,7 +136,9 @@ class SqlPcnRepository {
     const previous = rows.recordset.find(row => JSON.parse(row.LegacyExtrasJson || '{}').creationDraftKey === normalized);
     if (!previous) return null;
     if (previous.DeletedAt) throw new ApiError(409, 'This draft identity belongs to a deleted PCN; start a new document');
-    return this.readAggregate(tx, previous);
+    const saved = await this.readAggregate(tx, previous);
+    if (normalizeType(record.documentType) && typeOf(saved) !== normalizeType(record.documentType)) throw new ApiError(409, 'This draft identity already belongs to another PCN type');
+    return saved;
   }
 
   async lockCreation(tx, resource) {
@@ -231,6 +259,14 @@ class SqlPcnRepository {
     });
   }
 
+  async getWorkflowSettings(source) { return this.workflowSettings.get(source); }
+
+  async saveWorkflowSettings(input, actor, user) { return this.workflowSettings.save(input, actor, user); }
+
+  async getNotificationPreferences(source) { return this.notificationPreferences.get(source); }
+
+  async saveNotificationPreferences(input, actor, user) { return this.notificationPreferences.save(input, actor, user); }
+
   async getNotificationSettings() {
     return this.transaction(async tx => {
       await lockUserMailRouting(tx);
@@ -250,15 +286,16 @@ class SqlPcnRepository {
     return this.transaction(async tx => {
       await lockUserMailRouting(tx);
       await assertCurrentUser(tx, user);
-      if (expectedVersion !== undefined) {
-        const locked = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (UPDLOCK,HOLDLOCK) WHERE Id=1');
-        const current = locked.recordset[0] ? JSON.parse(locked.recordset[0].SettingsJson) : structuredClone(emptySettings);
-        if (settingsVersion(current) !== expectedVersion) throw new ApiError(409, 'Mail routing changed; reload before saving');
-      }
-      const effective = applyUserMailRouting(settings, await readUserMailAssignments(tx));
+      const locked = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (UPDLOCK,HOLDLOCK) WHERE Id=1');
+      const current = locked.recordset[0] ? JSON.parse(locked.recordset[0].SettingsJson) : structuredClone(emptySettings);
+      if (expectedVersion !== undefined && settingsVersion(current) !== expectedVersion) throw new ApiError(409, 'Mail routing changed; reload before saving');
+      readNotificationPreferences(current);
+      const { notificationPreferences: omitted, ...routing } = settings;
+      const preserved = { ...routing, ...(Object.hasOwn(current, 'notificationPreferences') ? {notificationPreferences:current.notificationPreferences} : {}) };
+      const effective = applyUserMailRouting(preserved, await readUserMailAssignments(tx));
       // Validate the full effective list before persisting any manual recipient changes.
       normalizeMailRouting(effective);
-      await this.writeSettings(tx, settings);
+      await this.writeSettings(tx, preserved);
       await this.audit(tx, 'notification-settings', 'updated', actor, { groups: settings.groups.length });
       return effective;
     });
@@ -304,7 +341,7 @@ class SqlPcnRepository {
   }
 
   async readiness() {
-    const required = ['PcnRequests', 'PcnInternalReviews', ...Object.values(childTables), 'PcnCounters', 'AuditLogs', 'NotificationSettings', 'NotificationGroups', 'NotificationRecipients', 'MasterDataVersions', 'Users', 'Roles', 'UserRoles', 'Sessions', 'AccountTokens', 'MigrationSourceRecords', 'NotificationJobs', 'PcnDocumentFiles', 'PcnRevisions'];
+    const required = ['PcnRequests', 'PcnInternalReviews', ...Object.values(childTables), 'PcnCounters', 'PcnDailyCounters', 'AuditLogs', 'NotificationSettings', 'WorkflowSettings', 'NotificationGroups', 'NotificationRecipients', 'MasterDataVersions', 'Users', 'Roles', 'UserRoles', 'Sessions', 'AccountTokens', 'MigrationSourceRecords', 'NotificationJobs', 'PcnDocumentFiles', 'PcnRevisions'];
     const result = await this.pool.request().query(`SELECT MigrationId FROM pcn.SchemaMigrations; SELECT TOP(1) Id FROM pcn.MasterDataVersions WHERE IsActive=1; SELECT TOP(1) Id FROM pcn.Users WHERE IsActive=1;
       SELECT COUNT(*) AS TableCount FROM sys.tables t JOIN sys.schemas s ON s.schema_id=t.schema_id WHERE s.name=N'pcn' AND t.name IN (${required.map(name => `N'${name}'`).join(',')})`);
     const applied = new Set(result.recordsets[0].map(row => row.MigrationId));
@@ -314,6 +351,17 @@ class SqlPcnRepository {
   }
 
   async raiseCounter(tx, code) {
+    const typed = parseCode(code);
+    if (typed?.kind === 'typed') {
+      await tx.request().input('documentType', sql.VarChar(2), typed.documentType).input('issueDate', sql.Char(10), typed.day)
+        .input('sequence', sql.Int, typed.sequence).query(`
+        IF NOT EXISTS(SELECT 1 FROM pcn.PcnDailyCounters WITH (UPDLOCK,HOLDLOCK)
+          WHERE DocumentType=@documentType AND IssueDate=CONVERT(date,@issueDate,23))
+          INSERT pcn.PcnDailyCounters(DocumentType,IssueDate,LastSequence) VALUES(@documentType,CONVERT(date,@issueDate,23),@sequence);
+        ELSE UPDATE pcn.PcnDailyCounters SET LastSequence=CASE WHEN LastSequence<@sequence THEN @sequence ELSE LastSequence END
+          WHERE DocumentType=@documentType AND IssueDate=CONVERT(date,@issueDate,23);`);
+      return;
+    }
     const match = /^PCN-(\d{4})-(\d{4})$/.exec(code);
     if (!match) return;
     await tx.request().input('year', sql.Int, Number(match[1])).input('sequence', sql.Int, Number(match[2])).query(`
@@ -380,7 +428,7 @@ class SqlPcnRepository {
 }
 
 function actorName(actor) { return typeof actor === 'string' ? actor : String(actor?.id || actor?.username || 'system'); }
-function assertCode(code) { if (!/^PCN-\d{4}-\d{4}$/.test(code)) throw new ApiError(400, 'Invalid PCN code'); }
+function assertCode(code) { if (!isCode(code)) throw new ApiError(400, 'Invalid PCN code'); }
 function typeFor(column) {
   if (column === 'OwnerUserId') return sql.UniqueIdentifier;
   if (column === 'MasterDataVersionId') return sql.Int;

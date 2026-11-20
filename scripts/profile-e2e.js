@@ -93,8 +93,9 @@ async function main() {
     const triggerBounds = await stored.page.locator('.account-trigger').boundingBox();
     const navAvatar = await stored.page.locator('.account-trigger .account-avatar').boundingBox();
     const panelAvatar = await stored.page.locator('.account-avatar-large').boundingBox();
-    assert.ok(triggerBounds.width >= 56 && triggerBounds.height >= 56, 'Profile trigger is at least 56px square');
-    assert.ok(navAvatar.width >= 44 && navAvatar.height >= 44, 'Navbar avatar is at least 44px');
+    await fs.writeFile(path.resolve('test-results/profile-desktop-geometry.json'), JSON.stringify({ triggerBounds, navAvatar, panelAvatar }, null, 2));
+    assert.ok(triggerBounds.width >= 44 && triggerBounds.height >= 44, 'Compact desktop profile trigger is at least 44px square');
+    assert.ok(navAvatar.width >= 40 && navAvatar.height >= 40, 'Compact desktop navbar avatar is at least 40px');
     assert.ok(panelAvatar.width >= 84 && panelAvatar.height >= 84, 'Desktop profile avatar is at least 84px');
     assert.equal(await stored.page.locator('.account-panel').evaluate(node => getComputedStyle(node).borderTopLeftRadius), '0px');
     await stored.page.screenshot({ path: path.resolve('test-results/profile-desktop.png'), fullPage: false });

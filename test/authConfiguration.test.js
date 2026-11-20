@@ -1,6 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { readAuthConfiguration } = require('../src/authConfiguration');
+
+test('employee-password mode is explicit and preserves the existing default during rollout', () => {
+  assert.equal(readAuthConfiguration({ AUTH_MODE: 'employee-password' }).mode, 'employee-password');
+  assert.equal(readAuthConfiguration({}).mode, 'employee-code');
+});
 const crypto = require('node:crypto');
 
 test('SQL employee code mode is default and does not expose directory or proxy keys', () => {

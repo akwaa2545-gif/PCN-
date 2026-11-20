@@ -74,6 +74,7 @@
       "adminMailRoutingButton",
       "adminUsersButton",
       "adminDeveloperLink",
+      "adminSystemSettingsLink",
       "mailRoutingMessage",
       "notificationHealthPanel",
       "notificationHealthStatus",
@@ -124,6 +125,14 @@
     const user = state.user;
     return user?.isActive === true && Array.isArray(user.roles) && user.roles.length === 1
       && String(user.roles[0]).toLowerCase() === 'developer' && user.department === 'developer' && user.signingStep == null;
+  }
+
+  function canManageSystemSettings() {
+    const user = state.user;
+    if (autoRefreshBlocked || user?.isActive !== true || !Array.isArray(user.roles)) return false;
+    if (user.roles.some(role => String(role).toLowerCase() === 'admin')) return true;
+    if (user.roles.some(role => String(role).toLowerCase() === 'developer')) return isDeveloper();
+    return false;
   }
 
   function initializeCreateDropdown() {
@@ -766,13 +775,16 @@
   }
 
   function timelineFieldLabel(change) {
+    const timing = /^reviewTiming\.(gscTet|prodEngTet|prodEngTa|prodEngSc|qaTet|gscTapbu|qaTapbu|qaFinal)\.startedAt$/.exec(change.path || '');
+    if (timing) return `${({ gscTet: 'GSC/TET', prodEngTet: window.PCN_TYPES?.peLabel(timeline.record) || 'Prod.Eng/TET', prodEngTa: 'Prod.Eng/TA', prodEngSc: 'Prod.Eng/SC', qaTet: 'QA/TET',
+      gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', qaFinal: 'QA/TET Final Judgment' })[timing[1]]} review started`;
     if (change.label) return change.label;
     return String(change.path || 'Field').split('.').map(part => titleCase(part.replace(/([a-z0-9])([A-Z])/g, '$1 $2'))).join(' / ');
   }
 
   function timelineEntries(item) {
     const changes = Array.isArray(item.changes) ? item.changes : [];
-    const departments = { 'signoff.gscTet': 'GSC/TET', 'signoff.prodEngTet': 'Prod.Eng/TET',
+    const departments = { 'signoff.gscTet': 'GSC/TET', 'signoff.prodEngTet': window.PCN_TYPES?.peLabel(timeline.record) || 'Prod.Eng/TET',
       'signoff.qaTet': 'QA/TET', 'tapbu.gsc': 'GSC/TaPBU', 'tapbu.qa': 'QA/TaPBU',
       'qateFinal.signoff': 'QA/TET Final Judgment' };
     if (!item.isBaseline) {
@@ -838,7 +850,7 @@
     els.pcnTimelineTrack.innerHTML = (timeline.summary?.stages || []).map(stage => {
       const caption = window.PCN_RECORDS_DASHBOARD.workflowStageCaption(stage);
       const marker = stage.state === 'completed' ? '&#10003;' : stage.state === 'current' ? '&#8226;' : '&#9675;';
-      return `<li class="pcn-timeline-item"><button class="pcn-timeline-event pcn-department-point pcn-department-${stage.state}" data-workflow-stage="${escapeHtml(stage.key)}" type="button" aria-pressed="${stage.key === timeline.selectedDepartment}" aria-controls="pcnTimelineDetails" aria-label="${escapeHtml(`${stage.label}, ${stage.completed}/${stage.total} signed, ${caption}`)}"><span class="pcn-department-caption">${escapeHtml(caption)}</span><span class="pcn-timeline-marker" aria-hidden="true">${marker}</span><strong>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</strong></button></li>`;
+      return `<li class="pcn-timeline-item"><button class="pcn-timeline-event pcn-department-point pcn-department-${stage.state}" data-workflow-stage="${escapeHtml(stage.key)}" type="button" aria-pressed="${stage.key === timeline.selectedDepartment}" aria-controls="pcnTimelineDetails" aria-label="${escapeHtml(`${stage.label}, ${stage.completed}/${stage.total} signed, ${caption}${stage.state === 'current' && stage.deadline ? `, ${window.PCN_RECORDS_DASHBOARD.deadlineLabel(stage.deadline)}` : ''}`)}"><span class="pcn-department-caption">${escapeHtml(caption)}</span><span class="pcn-timeline-marker" aria-hidden="true">${marker}</span><strong>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</strong>${departmentDeadlineMarkup(stage)}</button></li>`;
     }).join('');
     els.pcnTimelineTrack.querySelectorAll('[data-workflow-stage]').forEach(button => button.addEventListener('click', () => selectTimelineDepartment(button.dataset.workflowStage)));
     renderDepartmentDetails(); scrollSelectedTimeline();
@@ -858,7 +870,12 @@
       const waiting = stage.state === 'current' && !step.completed && step.label === stage.currentStep;
       return `<tr${waiting ? ' class="is-current"' : ''}><th scope="row">${escapeHtml(step.label)}</th><td>${step.completed ? 'Signed' : waiting ? 'Waiting for signature' : 'Not signed'}</td><td>${escapeHtml(step.completed ? step.person || 'Not recorded' : '\u2014')}</td><td>${escapeHtml(step.completed ? step.signedAt || 'Not recorded' : '\u2014')}</td></tr>`;
     }).join('');
-    els.pcnTimelineDetails.innerHTML = `<h3>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</h3><p>${escapeHtml(window.PCN_RECORDS_DASHBOARD.workflowStageCaption(stage))}</p><div class="pcn-timeline-change-scroll"><table class="pcn-timeline-change-table pcn-signature-summary"><thead><tr><th scope="col">Step</th><th scope="col">Status</th><th scope="col">Signed by</th><th scope="col">Date</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    els.pcnTimelineDetails.innerHTML = `<h3>${escapeHtml(stage.label)} \u00b7 ${stage.completed}/${stage.total} signed</h3><p>${escapeHtml(window.PCN_RECORDS_DASHBOARD.workflowStageCaption(stage))}</p>${departmentDeadlineMarkup(stage)}<div class="pcn-timeline-change-scroll"><table class="pcn-timeline-change-table pcn-signature-summary"><thead><tr><th scope="col">Step</th><th scope="col">Status</th><th scope="col">Signed by</th><th scope="col">Date</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  function departmentDeadlineMarkup(stage) {
+    if (stage.state !== 'current' || !stage.deadline) return '';
+    return `<span class="rd-department-due${stage.deadline.overdue === true ? ' rd-overdue' : ''}">${escapeHtml(window.PCN_RECORDS_DASHBOARD.deadlineLabel(stage.deadline))}</span>`;
   }
 
   function userFacingTimelineChanges(changes) {
@@ -1199,7 +1216,7 @@
     const signoff = ((record.internalReview || {}).signoff) || {};
     const groups = [
       { key: "gscTet", label: "GSC/TET" },
-      { key: "prodEngTet", label: "Prod.Eng/TET" },
+      { key: "prodEngTet", label: window.PCN_TYPES?.peLabel(record) || "Prod.Eng/TET" },
       { key: "qaTet", label: "QA/TET" }
     ];
     const actions = ["prepared", "checked", "approved"];
@@ -1244,7 +1261,7 @@
     }
 
     const departments = [
-      ["gscTet", "GSC/TET"], ["prodEngTet", "Prod.Eng/TET"], ["qaTet", "QA/TET"],
+      ["gscTet", "GSC/TET"], ["prodEngTet", "Prod.Eng/TET"], ["prodEngTa", "Prod.Eng/TA"], ["prodEngSc", "Prod.Eng/SC"], ["qaTet", "QA/TET"],
       ["gscTapbu", "GSC/TaPBU"], ["qaTapbu", "QA/TaPBU"]
     ];
     departments.forEach(([key, label]) => {
@@ -2301,6 +2318,7 @@
 
   function renderAdminView() {
     state.view = permittedView(state.view);
+    if (els.adminSystemSettingsLink) els.adminSystemSettingsLink.hidden = !canManageSystemSettings();
     els.adminMailRoutingButton.hidden = !isAdmin();
     els.adminUsersButton.hidden = !isAdmin();
     els.mailRoutingView.hidden = !isAdmin();

@@ -4,12 +4,15 @@ const { ApiError } = require('../../src/apiError');
 const { createApp } = require('../../src/httpServer');
 const { NotificationService } = require('../../src/notificationService');
 const { fieldChanges, snapshot } = require('../../src/documentControl');
+const { defaultWorkflowSettings, validateWorkflowSettings } = require('../../src/workflowSettings');
+const { normalizeType, typeOf, formatCode, bangkokDay } = require('../../pcn-types');
 const TEST_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_NEW_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_ACCESS_VERSION = '0000000000000001';
 const TEST_SECURITY_STAMP = '00000000-0000-4000-8000-000000000001';
 
 const validPayload = {
+  documentType: 'ta',
   changeForm: 'rawMaterial', riskLevel: 'RL2',
   selectedChange: 'Change of specification for a raw material that is outside of the current M-Spec',
   supplierName: 'Supplier ไทย', manufacturerName: 'A.C.O. / Zhenjiang KAWACHO', materialName: 'Copper alloy strip',
@@ -31,7 +34,9 @@ function memoryRepository() {
   let records = {};
   let revisions = {};
   let settings = { groups: [] };
+  let workflowSettings = defaultWorkflowSettings();
   let counter = 0;
+  let typedCounters = {};
   let deletedCreationKeys = new Set();
   const version = () => (++counter).toString(16).padStart(16, '0');
   const appendRevision = (id, before, after, actor) => {
@@ -60,9 +65,20 @@ function memoryRepository() {
         const identity = `${record.ownerUserId}:${options.clientDraftKey}`;
         if (deletedCreationKeys.has(identity)) throw new ApiError(409, 'Draft identity was deleted');
         const replay = Object.values(records).find(row => row.ownerUserId === record.ownerUserId && row.creationDraftKey === options.clientDraftKey);
-        if (replay) return { ...structuredClone(replay), creationReused: true };
+        if (replay) {
+          if (normalizeType(record.documentType) && typeOf(replay) !== normalizeType(record.documentType)) throw new ApiError(409, 'This draft identity already belongs to another PCN type');
+          return { ...structuredClone(replay), creationReused: true };
+        }
       }
-      const id = `PCN-${record.createdAt.slice(0, 4)}-${String(Object.keys(records).length + 1).padStart(4, '0')}`;
+      const type = normalizeType(record.documentType);
+      let id;
+      if (type) {
+        const day = bangkokDay(record.createdAt), key = `${type}:${day}`;
+        const sequence = (typedCounters[key] || 0) + 1;
+        if (sequence > 99) throw new ApiError(409, 'Daily PCN sequence exhausted; contact the administrator');
+        id = formatCode(type, day, sequence);
+        typedCounters = { ...typedCounters, [key]: sequence };
+      } else id = `PCN-${record.createdAt.slice(0, 4)}-${String(Object.keys(records).length + 1).padStart(4, '0')}`;
       const created = { ...structuredClone(record), ...(options.clientDraftKey ? { creationDraftKey: options.clientDraftKey,
         ...(options.testDocument ? { isTestDocument: true } : {}) } : {}), id, version: version(), internalReview: { ...record.internalReview, pcnCode: id } };
       appendRevision(id, null, created, actor);
@@ -85,6 +101,13 @@ function memoryRepository() {
     },
     async getNotificationSettings() { return structuredClone(settings); },
     async saveNotificationSettings(value) { settings = structuredClone(value); return structuredClone(settings); },
+    async getWorkflowSettings() { return structuredClone(workflowSettings); },
+    async saveWorkflowSettings(input, actor) {
+      const validated = validateWorkflowSettings(input);
+      if (validated.version !== workflowSettings.version) throw new ApiError(409, 'Workflow settings changed; reload before saving');
+      workflowSettings = { ...validated, version: workflowSettings.version + 1, updatedAt: new Date().toISOString(), updatedBy: actor };
+      return structuredClone(workflowSettings);
+    },
     async getAudit() { return []; },
     async getNotificationStatus() { return []; },
     async getMasterData() { return { versionId: 1, formDefinitions: {}, statusDefinitions: [] }; },

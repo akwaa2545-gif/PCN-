@@ -1,6 +1,6 @@
 const { ApiError } = require('./apiError');
 const { hasRole } = require('./workflowAccess');
-const contentFields = Object.freeze(['changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName','desiredStart','sampleSubmitted','sampleSubmittedDate','currentCondition','newCondition','changeRows','reason','identification','sampleLocation','priceLevel']);
+const contentFields = Object.freeze(['documentType','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName','desiredStart','sampleSubmitted','sampleSubmittedDate','currentCondition','newCondition','changeRows','reason','identification','sampleLocation','priceLevel']);
 const requirementFields = Object.freeze(['hazardousReport','greenProcurement','qmsEmsCertificate','supplierDocument','supplierDocumentNote','otherRequirement','otherRequirementNote']);
 const canSetRequirements = user => hasRole(user, 'admin', 'reviewer', 'gsc');
 const object = value => value && typeof value === 'object' && !Array.isArray(value);

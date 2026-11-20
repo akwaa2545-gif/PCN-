@@ -46,7 +46,7 @@ async function recordsPage(session, result = []) {
       }
     }
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'records.js'), 'utf8'), { document, window });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'records.js'), 'utf8'), { document, window, URL });
   await init();
   return { elements, requests, redirects, profiles, automatic };
 }

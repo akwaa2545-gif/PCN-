@@ -45,6 +45,14 @@ test('verified mail photo appears in both profile avatars without another lookup
   assert.equal(c.calls.length, 0);
 });
 
+test('profile access details identify TA and SC production engineering assignments', () => {
+  for (const [department, label] of [['prodEngTa', 'Prod.Eng/TA'], ['prodEngSc', 'Prod.Eng/SC']]) {
+    const c = profileClient();
+    c.api.mountProfile({ ...user, department, roles: ['productionengineering'], signingStep: 'checked', mailProfile: { photo } });
+    assert.ok(all(c.container, node => node.tagName === 'dd').some(node => node.textContent === label));
+  }
+});
+
 test('missing photo resolves only the authenticated self profile and does not replace access details', async () => {
   const c = profileClient(async () => ({ status: 'available', photo, email: 'employee@example.com', jobTitle: 'Engineer', roles: ['supplier'], department: 'other' }));
   c.api.mountProfile(user);

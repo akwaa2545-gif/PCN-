@@ -1,7 +1,8 @@
 const { ApiError } = require('./apiError');
 const { buildChecks } = require('../pcn-readiness');
 const { isInternal, isEmployeeViewer, routeGroups, hasRole } = require('./workflowAccess');
-const { actions, stageDepartments, departments, canSign } = require('./signingPermissions');
+const { actions, canSign } = require('./signingPermissions');
+const { departmentForStage, departmentLabel } = require('../pcn-types');
 
 const at = (value, field) => field.split('.').reduce((item, key) => item?.[key], value);
 function assertCompletion(record, attachments = [], { requiredFilesOnly = false } = {}) {
@@ -25,16 +26,15 @@ function buildAction(record, user, users = []) {
       people: owner ? [publicPerson(user)] : [],canAct:user.isActive !== false && !isEmployeeViewer(user) && (owner || isInternal(user)) };
   }
   const review = record.internalReview || {};
-  const groups = routeGroups(record.riskLevel, review).map(stage => [stage,stageDepartments[stage]]);
+  const groups = routeGroups(record.riskLevel, review).map(stage => [stage,departmentForStage(record, stage)]);
   for (const [stage, department] of groups) {
     for (const action of actions) {
       if (at(review, `${stage}.${action}`) === true) continue;
       const tapbuPending = stage.startsWith('tapbu.') && review.tapbu?.need !== true;
       const people = isInternal(user) ? users.filter(candidate => candidate.isActive === true
         && candidate.department === department && candidate.signingStep === action && canSign(candidate, department, action)).map(publicPerson) : [];
-      const departmentLabel = departments.find(item => item.key === department)?.label || department;
       return { stage,department,signingStep:action,
-        label: tapbuPending ? 'Confirm TaPBU requirement' : `${departmentLabel} — ${action[0].toUpperCase()}${action.slice(1)}`,
+        label: tapbuPending ? 'Confirm TaPBU requirement' : `${departmentLabel(department)} — ${action[0].toUpperCase()}${action.slice(1)}`,
         people,field:tapbuPending ? 'internalReview.tapbu.need' : `internalReview.${stage}.${action}`,
         canAct: tapbuPending ? user.isActive !== false && hasRole(user,'admin','reviewer','gsc') : canSign(user,department,action) };
     }

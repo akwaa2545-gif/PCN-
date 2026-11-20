@@ -20,7 +20,7 @@ function mapUser(row, roles) {
   return { id: row.Id, username: row.Username, employeeCode: row.EmployeeCode || null, normalizedEmployeeCode: row.NormalizedEmployeeCode || null, department: row.DepartmentKey || null,
     displayName: row.DisplayName || null, identityProvider: row.IdentityProvider || 'password',
     signingStep:row.SigningStep || null,mailDirectoryId:row.MailDirectoryId||null,mailVerifiedAt:row.MailVerifiedAt||null,mailProfile:mapProfile(row),version:versionOf(row),
-    email: row.Email, passwordHash: row.PasswordHash, isActive: row.IsActive, mustChangePassword: row.MustChangePassword,
+    email: row.Email, passwordHash: row.PasswordHash, passwordSetAt: row.PasswordSetAt || null, isActive: row.IsActive, mustChangePassword: row.MustChangePassword,
     securityStamp: row.SecurityStamp, failedLoginCount: row.FailedLoginCount, lockoutUntil: row.LockoutUntil, roles };
 }
 
@@ -213,11 +213,12 @@ class SqlAuthRepository {
       if (!user.IsActive) throw new ApiError(400, 'Only active users can be linked to an employee');
       if (user.HasDeveloperRole) throw new ApiError(409,'Remove Developer access before linking an employee');
       if (['employee-code','pcn-local'].includes(user.IdentityProvider) && user.EmployeeCode?.toLowerCase() !== employeeCode.toLowerCase()) throw new ApiError(409, 'Account is already linked to another employee');
+      const passwordAssignment = ['employee-code','pcn-local'].includes(user.IdentityProvider) ? 'PasswordHash=PasswordHash' : 'PasswordHash=NULL';
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .input('employeeCode', sql.NVarChar(100), employeeCode).input('normalizedEmployeeCode', sql.NVarChar(100), employeeCode.toLowerCase())
         .input('displayName', sql.NVarChar(200), profile.displayName ?? null).input('email', sql.NVarChar(320), profile.email ?? null)
         .input('normalizedEmail', sql.NVarChar(320), profile.email?.toLowerCase() || null).input('stamp', sql.UniqueIdentifier, crypto.randomUUID())
-        .query("UPDATE pcn.Users SET Username=@employeeCode,NormalizedUsername=@normalizedEmployeeCode,EmployeeCode=@employeeCode,NormalizedEmployeeCode=@normalizedEmployeeCode,IdentityProvider='employee-code',AdObjectGuid=NULL,AdSid=NULL,PasswordHash=NULL,DisplayName=@displayName,Email=CASE WHEN MailVerifiedAt IS NOT NULL THEN Email ELSE @email END,NormalizedEmail=CASE WHEN MailVerifiedAt IS NOT NULL THEN NormalizedEmail ELSE @normalizedEmail END,SecurityStamp=@stamp,MustChangePassword=0,FailedLoginCount=0,LockoutUntil=NULL,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id");
+        .query(`UPDATE pcn.Users SET Username=@employeeCode,NormalizedUsername=@normalizedEmployeeCode,EmployeeCode=@employeeCode,NormalizedEmployeeCode=@normalizedEmployeeCode,IdentityProvider='employee-code',AdObjectGuid=NULL,AdSid=NULL,${passwordAssignment},DisplayName=@displayName,Email=CASE WHEN MailVerifiedAt IS NOT NULL THEN Email ELSE @email END,NormalizedEmail=CASE WHEN MailVerifiedAt IS NOT NULL THEN NormalizedEmail ELSE @normalizedEmail END,SecurityStamp=@stamp,MustChangePassword=0,FailedLoginCount=0,LockoutUntil=NULL,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id`);
       await transaction.request().input('id', sql.UniqueIdentifier, id)
         .query('UPDATE pcn.Sessions SET RevokedAt=SYSUTCDATETIME() WHERE UserId=@id AND RevokedAt IS NULL; UPDATE pcn.AccountTokens SET UsedAt=SYSUTCDATETIME() WHERE UserId=@id AND UsedAt IS NULL;');
       await this.validateRoutingCapacity(transaction);
@@ -264,17 +265,27 @@ class SqlAuthRepository {
   }
 
   async saveSession(session) {
-    await this.pool.request().input('id', sql.UniqueIdentifier, session.id).input('userId', sql.UniqueIdentifier, session.userId)
+    const method = session.authenticationMethod;
+    if (method != null && !['password','employee-code','employee-password','password-setup'].includes(method)) {
+      throw new ApiError(400, 'Invalid session authentication method');
+    }
+    const request = this.pool.request().input('id', sql.UniqueIdentifier, session.id).input('userId', sql.UniqueIdentifier, session.userId)
       .input('hash', sql.Char(64), session.tokenHash).input('csrf', sql.Char(64), session.csrfToken)
       .input('stamp', sql.UniqueIdentifier, session.securityStamp).input('created', sql.DateTime2, new Date(session.createdAt))
-      .input('expires', sql.DateTime2, new Date(session.expiresAt))
-      .query('INSERT pcn.Sessions (Id,UserId,TokenHash,CsrfToken,SecurityStamp,CreatedAt,ExpiresAt) VALUES (@id,@userId,@hash,@csrf,@stamp,@created,@expires)');
+      .input('expires', sql.DateTime2, new Date(session.expiresAt));
+    // Legacy deployments can keep signing in before migration 010 is activated.
+    if (method == null) {
+      await request.query('INSERT pcn.Sessions (Id,UserId,TokenHash,CsrfToken,SecurityStamp,CreatedAt,ExpiresAt) VALUES (@id,@userId,@hash,@csrf,@stamp,@created,@expires)');
+      return;
+    }
+    await request.input('authenticationMethod', sql.NVarChar(30), method)
+      .query('INSERT pcn.Sessions (Id,UserId,TokenHash,CsrfToken,SecurityStamp,CreatedAt,ExpiresAt,AuthenticationMethod) VALUES (@id,@userId,@hash,@csrf,@stamp,@created,@expires,@authenticationMethod)');
   }
 
   async getSession(hash) {
     const result = await this.pool.request().input('hash', sql.Char(64), hash).query('SELECT * FROM pcn.Sessions WHERE TokenHash=@hash AND RevokedAt IS NULL');
     const row = result.recordset[0];
-    return row ? { id: row.Id, userId: row.UserId, tokenHash: row.TokenHash, csrfToken: row.CsrfToken, securityStamp: row.SecurityStamp, expiresAt: row.ExpiresAt, revokedAt: row.RevokedAt } : null;
+    return row ? { id: row.Id, userId: row.UserId, tokenHash: row.TokenHash, csrfToken: row.CsrfToken, securityStamp: row.SecurityStamp, expiresAt: row.ExpiresAt, revokedAt: row.RevokedAt, authenticationMethod: row.AuthenticationMethod || null } : null;
   }
 
   async revokeSession(hash) {
@@ -316,6 +327,26 @@ class SqlAuthRepository {
         .query('UPDATE pcn.Users SET PasswordHash=@hash,SecurityStamp=@stamp,MustChangePassword=0,FailedLoginCount=0,LockoutUntil=NULL,UpdatedAt=SYSUTCDATETIME() WHERE Id=@id AND SecurityStamp=@expected');
       if (result.rowsAffected[0] !== 1) throw new ApiError(409, 'Account changed. Sign in again');
       await transaction.request().input('id', sql.UniqueIdentifier, id).query('UPDATE pcn.Sessions SET RevokedAt=SYSUTCDATETIME() WHERE UserId=@id AND RevokedAt IS NULL; UPDATE pcn.AccountTokens SET UsedAt=SYSUTCDATETIME() WHERE UserId=@id AND UsedAt IS NULL;');
+      await transaction.commit();
+    } catch (error) { try { await transaction.rollback(); } catch { /* Preserve the original SQL error after automatic rollback. */ } throw error; }
+  }
+
+  async updateEmployeePassword(id, passwordHash, securityStamp, expectedStamp, { firstSetup = false } = {}) {
+    if (typeof firstSetup !== 'boolean') throw new ApiError(400, 'Invalid password setup state');
+    const transaction = this.pool.transaction();
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+    try {
+      const credentialState = firstSetup ? 'PasswordHash IS NULL AND PasswordSetAt IS NULL'
+        : 'PasswordHash IS NOT NULL AND PasswordSetAt IS NOT NULL';
+      const result = await transaction.request().input('id', sql.UniqueIdentifier, id).input('hash', sql.NVarChar(512), passwordHash)
+        .input('stamp', sql.UniqueIdentifier, securityStamp).input('expected', sql.UniqueIdentifier, expectedStamp)
+        .query(`UPDATE pcn.Users SET PasswordHash=@hash,PasswordSetAt=COALESCE(PasswordSetAt,SYSUTCDATETIME()),
+          SecurityStamp=@stamp,MustChangePassword=0,FailedLoginCount=0,LockoutUntil=NULL,UpdatedAt=SYSUTCDATETIME()
+          WHERE Id=@id AND IsActive=1 AND IdentityProvider IN ('employee-code','pcn-local')
+          AND SecurityStamp=@expected AND ${credentialState}`);
+      if (result.rowsAffected[0] !== 1) throw new ApiError(409, 'Account changed. Sign in again');
+      await transaction.request().input('id', sql.UniqueIdentifier, id)
+        .query('UPDATE pcn.Sessions SET RevokedAt=SYSUTCDATETIME() WHERE UserId=@id AND RevokedAt IS NULL; UPDATE pcn.AccountTokens SET UsedAt=SYSUTCDATETIME() WHERE UserId=@id AND UsedAt IS NULL;');
       await transaction.commit();
     } catch (error) { try { await transaction.rollback(); } catch { /* Preserve the original SQL error after automatic rollback. */ } throw error; }
   }

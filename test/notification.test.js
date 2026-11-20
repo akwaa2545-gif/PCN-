@@ -22,8 +22,8 @@ test('worker health aggregates queue totals without reading payloads or invoking
 test('worker health reports empty queue and tracks only safe idle, accepted, uncertain and error outcomes', async () => {
   const lastCheckedAt = '2026-10-06T04:05:06.000Z';
   for (const outcome of ['idle', 'accepted', 'uncertain', 'error']) {
-    const results = outcome === 'idle' ? [] : [{ recordset: [{ Id: 'private-job', PayloadJson: '{}' }] }];
-    const pool = mockPool(results);
+    const results = outcome === 'idle' ? [] : [{ recordset: [workerJob('private-job')] }];
+    const pool = mockPool(results, workerSettings);
     const worker = new NotificationWorker(pool, { clock: () => new Date(lastCheckedAt),
       integrationService: { sendMail: async () => { if (outcome === 'uncertain') throw new Error('sig=private-health-test'); } } });
     if (outcome === 'error') {
@@ -37,7 +37,7 @@ test('worker health reports empty queue and tracks only safe idle, accepted, unc
 });
 
 test('worker completion write failure remains an error instead of claiming acceptance', async () => {
-  const pool = mockPool([{ recordset: [{ Id: 'private-job', PayloadJson: '{}' }] }]);
+  const pool = mockPool([{ recordset: [workerJob('private-job')] }], workerSettings);
   const request = pool.request;
   pool.request = () => {
     const value = request();
@@ -54,14 +54,25 @@ function mockPool(results = [], settings = {}) {
   const calls = [];
   const pool = { calls, request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; }, async query(sql) {
     calls.push({ sql, inputs });
-    if (sql.includes('sp_getapplock') || sql.includes("Status=N'sending',Attempts")) return { recordset: [] };
     if (sql.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
-    return results.shift() || { recordset: [] }; } }; } };
+    if (sql.includes('FROM pcn.Users')) return { recordset: [] };
+    if (sql.includes('FROM pcn.PcnRequests')) return { recordset: [{ PcnCode: record.id,
+      Status: 'submitted', RiskLevel: 'RL0', LegacyExtrasJson: '{}', ReviewJson: JSON.stringify(record.internalReview) }] };
+    if (sql.includes('SELECT TOP(1)') || sql.includes('INSERT pcn.NotificationJobs') || sql.includes('SUM(CASE')) {
+      return results.shift() || { recordset: [] };
+    }
+    return { recordset: [] }; } }; } };
   pool.transaction = () => ({ begin: async () => {}, commit: async () => {}, rollback: async () => {}, request: () => pool.request() });
   return pool;
 }
 const complete = { approved: true, checked: true, prepared: true };
 const record = { id: 'PCN-2026-0001', version: '0000000000000001', internalReview: { signoff: { gscTet: complete } } };
+const workerSettings = { groups: [{ key: 'signoff.prodEngTet', emails: 'qa@example.com' }] };
+function workerJob(id = 'job') {
+  return { Id: id, PcnId: record.id, PcnVersion: record.version, CompletedGroup: 'signoff.gscTet', Action: 'completed',
+    EventKey: `${record.id}:${record.version}:signoff.gscTet:completed`,
+    PayloadJson: JSON.stringify({ to: 'qa@example.com', subject: 'PCN handoff', message: 'Review the PCN', senderName: 'Reviewer' }) };
+}
 
 test('workflow derives route and returns mapping-empty without queuing', async () => {
   const pool = mockPool();
@@ -94,7 +105,10 @@ test('workflow queues unique version key with parameters and server-owned link',
   assert.equal(write.inputs.eventKey, 'PCN-2026-0001:0000000000000001:signoff.gscTet:completed');
   assert.match(write.inputs.payload, /https:\/\/pcn.example\/form.html\?id=PCN-2026-0001/);
   const payload = JSON.parse(write.inputs.payload);
-  assert.deepEqual(Object.keys(payload).sort(), ['message', 'senderName', 'subject', 'to']);
+  assert.deepEqual(Object.keys(payload).sort(), ['legacyRoutingSnapshot', 'message', 'notificationPreferenceSnapshot', 'senderName', 'subject', 'to']);
+  assert.deepEqual(payload.legacyRoutingSnapshot, { nextGroupKey: 'signoff.prodEngTet' });
+  assert.deepEqual(payload.notificationPreferenceSnapshot, { type: 'actionRequired', batchIndex: 0,
+    recipients: [{ email: 'qa@example.com', source: 'default' }] });
   assert.equal(payload.to, 'qa@example.com');
   assert.equal(payload.senderName, 'QA');
   assert.equal(payload.subject, '[PCN] PCN-2026-0001 - GSC/TET completed');
@@ -104,7 +118,7 @@ test('workflow queues unique version key with parameters and server-owned link',
 });
 
 test('worker marks ambiguous send failure uncertain and never retries automatically', async () => {
-  const pool = mockPool([{ recordset: [{ Id: 'job', PayloadJson: JSON.stringify({ to: 'qa@example.com' }) }] }]);
+  const pool = mockPool([{ recordset: [workerJob()] }], workerSettings);
   const service = new NotificationWorker(pool, { integrationService: { sendMail: async () => { throw new Error('network timeout'); } } });
   assert.equal((await service.runOnce()).status, 'uncertain');
   assert.match(pool.calls.find(call => call.sql.includes('SELECT TOP(1)')).sql, /Status=N'pending'/);
@@ -115,10 +129,14 @@ test('worker marks ambiguous send failure uncertain and never retries automatica
 
 test('worker idle does not call external mail and success records sent result using claim token', async () => {
   let calls = 0;
-  const integrationService = { sendMail: async () => { calls++; } };
+  const integrationService = { sendMail: async payload => {
+    calls++;
+    assert.deepEqual(Object.keys(payload).sort(), ['message', 'senderName', 'subject', 'to']);
+    assert.deepEqual(payload, JSON.parse(workerJob().PayloadJson));
+  } };
   assert.deepEqual(await new NotificationWorker(mockPool(), { integrationService }).runOnce(), { status: 'idle' });
   assert.equal(calls, 0);
-  const pool = mockPool([{ recordset: [{ Id: 'job', PayloadJson: '{}' }] }]);
+  const pool = mockPool([{ recordset: [workerJob()] }], workerSettings);
   assert.equal((await new NotificationWorker(pool, { integrationService }).runOnce()).status, 'sent');
   assert.equal(pool.calls.find(call => call.inputs.token).inputs.token, pool.calls.at(-1).inputs.token);
   assert.equal(pool.calls.at(-1).inputs.error, null);

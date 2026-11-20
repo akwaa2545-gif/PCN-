@@ -20,7 +20,7 @@ async function main() {
   const users = actions.map(action => ({ username: `order-${action}`, displayName: `Order ${action}`, roles: ['gsc'],
     department: 'gscTet', signingStep: action }));
   const settings = { schemaVersion: 2, groups: [...actions.map(action => ({ key: `department.gscTet.${action}`, emails: `${action}@example.test` })),
-    { key: 'department.prodEngTet.prepared', emails: 'engineering-prepared@example.test' }] };
+    { key: 'department.prodEngTa.prepared', emails: 'engineering-prepared@example.test' }] };
   const jobs = [];
   const tx = { request() {
     const values = {};
@@ -51,7 +51,11 @@ async function main() {
   const service = new PcnService(repository);
   const admin = { id: 'admin-id', displayName: 'Order Administrator', roles: ['admin'] };
   let record = await service.create({ ...unsignedPayload, status: 'draft', internalReview: {} }, admin.displayName, admin);
-  const historical = await service.create({ ...unsignedPayload, status: 'draft', internalReview: {} }, admin.displayName, admin);
+  // Existing pre-type documents retain their original identity and review history.
+  const { documentType: omittedType, ...legacyPayload } = unsignedPayload;
+  const historical = await repository.create({ ...service.normalizeInput({ ...legacyPayload, status: 'draft', internalReview: {} }),
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', ownerUserId: admin.id }, admin.displayName);
+  assert.match(historical.id, /^PCN-2026-/);
   const legacyReview = { signoff: { gscTet: { approved: true, approvedName: 'Legacy Approver', approvedDate: '2026-01-01' } } };
   await repository.seedHistoricalReview(historical.id, legacyReview);
   const authService = fakeAuthService({ additionalUsers: users });
@@ -245,8 +249,8 @@ async function main() {
       const next = actions[index + 1];
       assert.equal(jobs.at(-1).to, next ? `${next}@example.test` : 'engineering-prepared@example.test');
       assert.match(jobs.at(-1).message, new RegExp(`GSC/TET ${action[0].toUpperCase()}${action.slice(1)}`));
-      assert.match(jobs.at(-1).subject, new RegExp(next ? `GSC/TET ${next[0].toUpperCase()}${next.slice(1)}` : 'Prod.Eng/TET Prepared'));
-      await assertNextAction(next ? 'gscTet' : 'prodEngTet', next || 'prepared');
+      assert.match(jobs.at(-1).subject, new RegExp(next ? `GSC/TET ${next[0].toUpperCase()}${next.slice(1)}` : 'Prod.Eng/TA Prepared'));
+      await assertNextAction(next ? 'gscTet' : 'prodEngTa', next || 'prepared');
     }
     report.checks.push('Three distinct GSC users sign only their assigned step; actual outbox plans hand off Prepared → Checked → Approved → next department Prepared with correct recipients');
     csrf = await login('admin');
@@ -277,6 +281,125 @@ async function main() {
     await expect(page.locator('[data-internal-field="signoff.gscTet.approved"]').locator('..')).toHaveAttribute('data-signature-tooltip',
       'GSC/TET Approved\nSigned by: Legacy Approver\nDate: 2026-01-01');
     report.checks.push('History records correct actor sequence; historical Approved flag, name and date stay attached to Approved');
+    const done = { prepared: true, checked: true, approved: true };
+    record = await service.create({ ...unsignedPayload, status: 'draft', internalReview: {} }, admin.displayName, admin);
+    record = await repository.seedHistoricalReview(record.id, {
+      signoff: { gscTet: done, prodEngTet: done, qaTet: done },
+      tapbu: { need: true, gsc: done, qa: { prepared: true, checked: true } }
+    });
+    await load();
+    const finalControl = field => page.locator(`[data-internal-field="qateFinal.${field}"]`);
+    const headerControl = (action, field) => page.locator(`[data-internal-field="supplierSignoff.${action}.${field}"]`);
+    for (const action of actions) {
+      await expect(headerControl(action, 'checked')).toBeDisabled();
+      await expect(headerControl(action, 'date')).toBeDisabled();
+    }
+    for (const field of ['approve', 'reject', 'qod206Number', 'completedDate', ...actions.map(action => `signoff.${action}`)]) {
+      await expect(finalControl(field)).toBeDisabled();
+    }
+    await patch({ internalReview: { qateFinal: { approve: true } } }, 400);
+    await patch({ internalReview: { qateFinal: { signoff: { prepared: true } } } }, 400);
+    await patch({ internalReview: { supplierSignoff: { prepared: { checked: true } } } }, 400);
+    await page.locator('[data-internal-field="tapbu.qa.approved"]').check();
+    await expect(finalControl('approve')).toBeEnabled();
+    await expect(finalControl('signoff.prepared')).toBeEnabled();
+    await expect(finalControl('signoff.checked')).toBeDisabled();
+    await expect(finalControl('signoff.approved')).toBeDisabled();
+    for (const action of actions) {
+      await finalControl(`signoff.${action}`).check();
+      for (const step of actions) {
+        if (action === 'approved') await expect(headerControl(step, 'checked')).toBeEnabled();
+        else await expect(headerControl(step, 'checked')).toBeDisabled();
+      }
+    }
+    await finalControl('approve').check();
+    await saveReturned(true);
+    for (const action of actions) assert.equal(record.internalReview.qateFinal.signoff[action], true);
+    assert.equal(record.internalReview.qateFinal.approve, true);
+    await load();
+    for (const action of actions) await expect(finalControl(`signoff.${action}`)).toBeChecked();
+    await expect(finalControl('approve')).toBeChecked();
+    await page.screenshot({ path: path.resolve('test-results/final-judgment-complete.png'), fullPage: true });
+    report.checks.push('Final Judgment decisions and signatures stay locked until the last TaPBU review signature; UI then unlocks and saves Prepared, Checked, Approved in order, while premature API writes fail');
+    const headerUser = (await (await context.request.get(`${origin}/api/session`)).json()).data.user;
+    const headerSigner = String(headerUser.displayName || headerUser.username || headerUser.employeeCode || '').slice(0, 200);
+    for (const action of actions) {
+      await expect(headerControl(action, 'checked')).toBeEnabled();
+      await expect(headerControl(action, 'date')).toBeEnabled();
+      await headerControl(action, 'checked').check();
+      await headerControl(action, 'date').fill('2026-10-22');
+    }
+    await saveReturned(true); await load();
+    for (const action of actions) {
+      await expect(headerControl(action, 'checked')).toBeChecked();
+      await expect(headerControl(action, 'date')).toHaveValue('2026-10-22');
+      assert.equal(record.internalReview.supplierSignoff[action].name, headerSigner);
+    }
+    await page.screenshot({ path: path.resolve('test-results/header-signatures-after-final.png'), fullPage: true });
+    report.checks.push('Top-right signatures and dates stay blocked through Final Judgment Prepared/Checked, unlock after Approved, and persist with recorded identity');
+    await expect(page.locator('#pcnClosedDialog')).toBeHidden();
+    assert.equal(record.status, 'draft', 'An explicit draft save does not close the document');
+    record = await repository.update(record.id, current => ({ ...current, status: 'qualification', internalReview: {
+      ...current.internalReview, qateFinal: { ...current.internalReview.qateFinal, approve: false, reject: false },
+      supplierSignoff: { ...current.internalReview.supplierSignoff,
+        approved: { checked: false, name: '', date: '' } }
+    } }), 'Active closure fixture', record.version);
+    await load();
+    await headerControl('approved', 'checked').check();
+    await headerControl('approved', 'date').fill('2026-10-22');
+    const beforeClose = await repository.findById(record.id);
+    const revisionsBeforeClose = await repository.getRevisions(record.id);
+    const endpoint = `${origin}/api/pcns/${record.id}`;
+    await page.route(endpoint, route => route.request().method() === 'PATCH'
+      ? route.fulfill({ status: 409, json: { success: false, error: 'Record changed. Reload before saving.' } }) : route.continue());
+    await saveReturned(false, 409);
+    await expect(page.locator('#pcnClosedDialog')).toBeHidden();
+    assert.deepEqual(await repository.findById(record.id), beforeClose, 'Failed save cannot close or sign the record');
+    await page.unroute(endpoint);
+    await saveReturned();
+    assert.equal(record.status, 'closed');
+    await expect(page.locator('#pcnClosedDialog')).toBeVisible();
+    await expect(page.locator('#pcnClosedCode')).toHaveText(record.id);
+    await expect(page.locator('#pcnClosedContinue')).toBeFocused();
+    await expect(page.locator('#pcnUpdateSuccess')).toBeHidden();
+    await expect(page.locator('#submitButton')).toBeDisabled();
+    await expect(page.locator('#saveDraftButton')).toBeHidden();
+    const closureHistory = await repository.getRevisions(record.id);
+    assert.equal(closureHistory.length, revisionsBeforeClose.length + 1, 'Last signature and closure persist in one revision');
+    assert.ok(closureHistory[0].changes.some(change => change.path === 'status' && change.after === 'closed'));
+    assert.ok(closureHistory[0].changes.some(change => change.path === 'internalReview.supplierSignoff.approved.checked' && change.after === true));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#pcnClosedDialog').screenshot({ path: path.resolve('test-results/pcn-closed-popup-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('#pcnClosedDialog').screenshot({ path: path.resolve('test-results/pcn-closed-popup-mobile.png') });
+    await page.locator('#pcnClosedContinue').click();
+    await expect(page.locator('#pcnClosedDialog')).toBeHidden();
+    await expect(headerControl('approved', 'checked')).toBeDisabled();
+    await page.reload();
+    await expect(page.locator('#submitButton')).toBeDisabled();
+    await expect(page.locator('#pcnClosedDialog')).toBeHidden();
+    await page.goto(`${origin}/admin?documents=closed#records`);
+    await expect(page.locator('#pcnAdminView #rdLifecycleTab-closed')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator(`#pcnAdminView tr[data-pcn-id="${record.id}"]`)).toContainText('Closed');
+    report.checks.push('Failed saves show no closure popup; last saved signature closes atomically, shows one accessible popup, locks editing, and appears in Closed documents');
+    const signedReview = { ...record.internalReview,
+      tapbu: { noNeed: true },
+      supplierSignoff: Object.fromEntries(actions.map(action => [action, { ...record.internalReview.supplierSignoff[action], date: '' }])) };
+    record = await repository.seedHistoricalReview(historical.id, signedReview);
+    record = await repository.update(record.id, current => ({ ...current, status: 'submitted' }), 'Historical completed fixture', record.version);
+    await load();
+    for (const action of actions) await expect(headerControl(action, 'checked')).toBeChecked();
+    await expect(finalControl('approve')).not.toBeChecked();
+    await expect(finalControl('reject')).not.toBeChecked();
+    await saveReturned();
+    assert.equal(record.status, 'closed', 'An already signed active PCN closes on its next ordinary save');
+    assert.equal(record.internalReview.qateFinal.approve, false);
+    assert.equal(record.internalReview.qateFinal.reject, false);
+    await expect(page.locator('#pcnClosedDialog')).toBeVisible();
+    await expect(page.locator('#pcnClosedCode')).toHaveText(record.id);
+    report.checks.push('An already fully signed Submitted PCN with blank header dates and no Final Judgment choice closes on ordinary save without inventing a decision');
     report.outbox = jobs.map(job => ({ to: job.to, subject: job.subject }));
     assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []);
     report.status = 'passed';

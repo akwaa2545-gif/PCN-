@@ -8,7 +8,7 @@ function login() {
   const window = {};
   const source = fs.readFileSync(path.join(__dirname, '..', 'login.js'), 'utf8')
     .replace(/\}\)\(\);\s*$/, 'window.LOGIN_TEST = { authenticationMode, employeeLoginBody };})();');
-  vm.runInNewContext(source, { window, document: { addEventListener() {} } });
+  vm.runInNewContext(source, { window, document: { addEventListener() {} } }, { filename: path.resolve(__dirname, '../login.js') });
   return window.LOGIN_TEST;
 }
 
@@ -31,7 +31,7 @@ test('employee form shows seven PIN-style digit slots and retains explicit passw
   const html = fs.readFileSync(path.join(__dirname, '..', 'login.html'), 'utf8');
   const employeeForm = html.match(/<form id="employeeLoginForm"[\s\S]*?<\/form>/)?.[0];
   assert.ok(employeeForm);
-  assert.match(employeeForm, /<h1 class="employee-entry-title">Enter your Employee ID<\/h1>/);
+  assert.match(employeeForm, /<h1 class="employee-entry-title" id="employeeEntryTitle">Enter your Employee ID<\/h1>/);
   assert.match(employeeForm, /<label[^>]*for="employeeCode">Employee ID<\/label>/);
   assert.match(employeeForm, /id="employeeCode"[^>]*maxlength="7"/);
   assert.match(employeeForm, /id="employeeCode"[^>]*aria-describedby="employeeEntryHelp employeeAuthMessage"/);
@@ -40,8 +40,9 @@ test('employee form shows seven PIN-style digit slots and retains explicit passw
   assert.ok(employeeForm.indexOf('id="employeeAuthMessage"') < employeeForm.indexOf('type="submit"'));
   assert.equal((employeeForm.match(/class="employee-pin-slot"/g) || []).length, 7);
   assert.match(employeeForm, /class="employee-lock-icon"/);
-  assert.doesNotMatch(employeeForm, /type="password"/);
-  assert.doesNotMatch(employeeForm, /Remember me/);
+  assert.match(employeeForm, /id="employeePasswordField" hidden/);
+  assert.match(employeeForm, /id="employeePassword"[^>]*type="password"[^>]*disabled/);
+  assert.match(employeeForm, /id="employeeRemember"[^>]*type="checkbox"[^>]*disabled/);
   assert.doesNotMatch(html, /windowsLoginForm|Continue with Windows|SamAccountName/);
   assert.match(html, /id="loginForm" hidden/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'auth.css'), 'utf8'), /\.auth-card \[hidden\]/);
@@ -78,7 +79,8 @@ test('focused Employee ID highlights the next empty slot and clears it on blur',
 
 async function loginPage(config = { mode: 'employee-code' }, {
   search = '', authenticated = false, loginError = null,
-  user = { mustChangePassword: false, roles: ['supplier'] }, loginResponse = null, initialCode = ''
+  user = { mustChangePassword: false, roles: ['supplier'] }, loginResponse = null, initialCode = '', setupError = null, setupResponse = null,
+  identifyResponse = null, identifyError = null
 } = {}) {
   const elements = new Map();
   function element(id) {
@@ -92,7 +94,11 @@ async function loginPage(config = { mode: 'employee-code' }, {
       addEventListener(name, handler) { this.events[name] = handler; },
       attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
-      querySelectorAll() { return [element(`${id}Submit`)]; }, focus() { this.focused = true; }, reset() {}
+      querySelectorAll(selector) { return id==='employeeLoginForm' && selector==='button'
+        ? [element(`${id}Submit`),element('employeePasswordToggle')]
+        : id==='passwordSetupForm' && selector==='button'
+          ? [element(`${id}Submit`),element('setupPasswordToggle'),element('setupConfirmPasswordToggle'),element('setupSignOutButton')]
+          : [element(`${id}Submit`)]; }, focus() { this.focused = true; }, reset() {}
     });
     return elements.get(id);
   }
@@ -101,7 +107,9 @@ async function loginPage(config = { mode: 'employee-code' }, {
   element('employeeLoginFormSubmit').textContent = 'Sign in';
   const redirects = [];
   let init;
+  const events = {};
   const window = {
+    addEventListener(name,handler){events[name]=handler;},
     location: { origin: 'https://pcn.example', pathname: '/login', search, hash: '', assign(url) { redirects.push(url); } }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'session-client.js'), 'utf8'), { window, URL, Headers });
@@ -113,18 +121,367 @@ async function loginPage(config = { mode: 'employee-code' }, {
           if (config instanceof Error) throw config;
           return config;
         }
+        if (url === '/api/auth/login' && JSON.parse(options.body).identifyOnly === true) {
+          if (identifyError) throw identifyError;
+          return identifyResponse ? identifyResponse() : {authenticated:false,passwordRequired:true};
+        }
         if (url === '/api/auth/login' && loginError) throw loginError;
         if (url === '/api/auth/login' && loginResponse) return loginResponse();
+        if (url === '/api/auth/setup-password') {
+          if (setupError) throw setupError;
+          return setupResponse ? setupResponse() : { authenticated: false, passwordSet: true };
+        }
         return { authenticated: true, user };
       }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'login.js'), 'utf8'), {
     window, URLSearchParams, URL,
     document: { getElementById: element, addEventListener(name, handler) { if (name === 'DOMContentLoaded') init = handler; } }
-  });
+  }, { filename: path.resolve(__dirname, '../login.js') });
   await init();
-  return { element, calls, redirects, setConfig(value) { config = value; } };
+  return { element, calls, redirects, events, setConfig(value) { config = value; }, setLoginResponse(value) { loginResponse = value; } };
 }
+
+const nextLoginTurn = () => new Promise(setImmediate);
+const submitLoginForm = async (page, id) => { page.element(id).events.submit({ preventDefault() {} }); await nextLoginTurn(); };
+const identifyEmployee = async (page, code = '0012345') => {
+  page.element('employeeCode').value = code; page.element('employeeCode').events.input(); await nextLoginTurn();
+};
+const passwordRequests = page => page.calls.filter(call => call.url === '/api/auth/login' && !JSON.parse(call.options.body).identifyOnly);
+
+test('employee password visibility toggles without changing its value and remasks on pagehide',async()=>{
+  const page=await loginPage({mode:'employee-password'});
+  await identifyEmployee(page);
+  const password=page.element('employeePassword'),toggle=page.element('employeePasswordToggle');
+  password.value='Ab12Cd34';
+  assert.equal(password.type,'password');
+  toggle.events.click();assert.equal(password.type,'text');assert.equal(password.value,'Ab12Cd34');
+  assert.equal(toggle.attributes['aria-label'],'Hide password');assert.equal(toggle.attributes['aria-pressed'],'true');
+  toggle.events.click();assert.equal(password.type,'password');assert.equal(toggle.attributes['aria-label'],'Show password');
+  toggle.events.click();page.events.pagehide();assert.equal(password.value,'');assert.equal(password.type,'password');
+});
+
+test('eight password circles mirror editing without exposing masked characters or retaining cleared values',async()=>{
+  const page=await loginPage({mode:'employee-password'}),input=page.element('employeePassword');
+  await identifyEmployee(page);
+  const slots=Array.from({length:8},(_,index)=>page.element(`employeePasswordDigit${index+1}`));
+  input.value='Ab12';input.events.input();input.events.focus();
+  assert.deepEqual(slots.map(slot=>slot.classList.contains('is-filled')),[true,true,true,true,false,false,false,false]);
+  assert.equal(slots.map(slot=>slot.textContent).join(''),'');
+  assert.equal(slots[4].classList.contains('is-active'),true);
+  page.element('employeePasswordToggle').events.click();
+  assert.equal(slots.map(slot=>slot.textContent).join(''),'Ab12');
+  page.element('employeePasswordToggle').events.click();
+  assert.equal(slots.map(slot=>slot.textContent).join(''),'');
+  assert.equal(input.value,'Ab12');
+  input.value='A';input.events.input();assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,1);
+  input.value='abcd1234';input.events.change();assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,8);
+  page.element('employeePasswordToggle').events.click();page.events.pagehide();
+  assert.equal(input.value,'');assert.equal(slots.map(slot=>slot.textContent).join(''),'');
+  assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,0);
+});
+
+test('setup password circles reveal independently and clear/remask both fields after mismatch and pagehide',async()=>{
+  const page=await loginPage({mode:'employee-password'}, {authenticated:true,user:{passwordSetupRequired:true}});
+  const digits=id=>Array.from({length:8},(_,index)=>page.element(`${id}Digit${index+1}`));
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    const input=page.element(id);input.value=id==='setupPassword'?'Ab12Cd34':'12345678';input.events.input();
+    assert.equal(digits(id).filter(slot=>slot.classList.contains('is-filled')).length,8);
+    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
+  }
+  page.element('setupPasswordToggle').events.click();
+  assert.equal(digits('setupPassword').map(slot=>slot.textContent).join(''),'Ab12Cd34');
+  assert.equal(digits('setupConfirmPassword').map(slot=>slot.textContent).join(''),'');
+  page.element('setupConfirmPasswordToggle').events.click();
+  assert.equal(digits('setupConfirmPassword').map(slot=>slot.textContent).join(''),'12345678');
+  assert.equal(page.calls.some(call=>call.url==='/api/auth/setup-password'),false);
+  await submitLoginForm(page,'passwordSetupForm');
+  assert.match(page.element('authMessage').textContent,/do not match/);
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    assert.equal(page.element(id).value,'');assert.equal(page.element(id).type,'password');
+    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
+    assert.equal(digits(id).filter(slot=>slot.classList.contains('is-filled')).length,0);
+    assert.equal(page.element(`${id}Toggle`).attributes['aria-pressed'],'false');
+    page.element(id).value='abcdefgh';page.element(id).events.change();page.element(`${id}Toggle`).events.click();
+  }
+  page.events.pagehide();
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    assert.equal(page.element(id).value,'');assert.equal(page.element(id).type,'password');
+    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
+  }
+});
+
+test('setup request masks and disables both circle controls until its response',async()=>{
+  let finish;
+  const pending=new Promise(resolve=>{finish=resolve;});
+  const page=await loginPage({mode:'employee-password'}, {authenticated:true,user:{passwordSetupRequired:true},setupResponse:()=>pending});
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    page.element(id).value='Ab12Cd34';page.element(id).events.input();page.element(`${id}Toggle`).events.click();
+  }
+  await submitLoginForm(page,'passwordSetupForm');
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    assert.equal(page.element(id).disabled,true);assert.equal(page.element(id).type,'password');
+    assert.equal(page.element(`${id}Toggle`).disabled,true);
+    assert.equal(page.element(`${id}ToggleText`).textContent,'Show');
+    assert.equal(page.element(`${id}Digit1`).textContent,'');
+  }
+  finish({authenticated:false,passwordSet:true});await nextLoginTurn();
+  assert.equal(page.element('employeeLoginForm').hidden,false);
+  for(const id of ['setupPassword','setupConfirmPassword']) {
+    assert.equal(page.element(id).value,'');assert.equal(page.element(id).disabled,false);
+    assert.equal(page.element(`${id}Digit1`).classList.contains('is-filled'),false);
+  }
+});
+
+test('Remember me sends true only when selected and stays disabled in code-only mode',async()=>{
+  for(const remember of [false,true]) {
+    const page=await loginPage({mode:'employee-password'});
+    await identifyEmployee(page);
+    assert.equal(page.element('employeeRemember').checked,false);
+    assert.equal(page.element('employeeRemember').disabled,false);
+    page.element('employeeCode').value='0012345';page.element('employeePassword').value='12345678';
+    page.element('employeeRemember').checked=remember;
+    await submitLoginForm(page,'employeeLoginForm');
+    const body=JSON.parse(passwordRequests(page)[0].options.body);
+    assert.equal(body.remember,remember?true:undefined);
+    assert.equal(page.element('employeePassword').value,'');
+  }
+  const legacy=await loginPage({mode:'employee-code'});
+  assert.equal(legacy.element('employeeRemember').disabled,true);
+  assert.equal(legacy.element('employeePasswordToggle').disabled,true);
+});
+
+test('pending sign-in masks and disables password controls without rewriting the Show label',async()=>{
+  let release;
+  const page=await loginPage({mode:'employee-password'},{loginResponse:()=>new Promise(resolve=>{release=resolve;})});
+  await identifyEmployee(page);
+  page.element('employeeCode').value='0012345';page.element('employeePassword').value='abcdefgh';
+  page.element('employeePasswordToggle').events.click();
+  await submitLoginForm(page,'employeeLoginForm');
+  assert.equal(page.element('employeePassword').type,'password');
+  assert.equal(page.element('employeePasswordToggle').disabled,true);
+  assert.equal(page.element('employeeRemember').disabled,true);
+  assert.equal(page.element('employeePasswordToggleText').textContent,'Show');
+  release({authenticated:false});await nextLoginTurn();
+  assert.equal(page.element('employeePasswordToggleText').textContent,'Show');
+  assert.equal(page.element('employeePasswordToggle').disabled,false);
+  assert.equal(page.element('employeePassword').value,'');
+});
+
+test('employee password mode starts with ID only, checks once at seven digits, then signs in at eight password characters', async () => {
+  const page = await loginPage({ mode: 'employee-password' });
+  assert.equal(page.element('employeeLoginForm').hidden, false);
+  assert.equal(page.element('employeePasswordField').hidden, true);
+  assert.equal(page.element('employeePassword').disabled, true);
+  assert.equal(page.element('employeeLoginFormSubmit').textContent, 'Continue');
+  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input();
+  await nextLoginTurn();
+  assert.deepEqual(JSON.parse(page.calls.find(call=>call.url==='/api/auth/login').options.body), {employeeCode:'0012345',identifyOnly:true});
+  page.element('employeeCode').events.change(); await nextLoginTurn();
+  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
+  assert.equal(page.element('employeePasswordField').hidden,false);
+  assert.equal(page.element('employeePassword').focused,true);
+  assert.equal(page.element('employeeLoginFormSubmit').textContent,'Sign in');
+  assert.deepEqual(page.redirects,[]);
+  page.element('employeePassword').value = '12345678';
+  page.element('employeePassword').events.input(); await nextLoginTurn();
+  assert.equal(passwordRequests(page).length,1);
+  const request = passwordRequests(page)[0];
+  assert.deepEqual(JSON.parse(request.options.body), { employeeCode: '0012345', password: '12345678' });
+  assert.equal(page.element('employeePassword').value, '');
+  assert.deepEqual(page.redirects, ['/admin']);
+});
+
+test('a complete password starts only one pending sign-in and preserves Remember me',async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  const page=await loginPage({mode:'employee-password'},{loginResponse:()=>pending});
+  await identifyEmployee(page);page.element('employeeRemember').checked=true;
+  const input=page.element('employeePassword');
+  for(const value of ['A','Ab12Cd3']) {input.value=value;input.events.input();}
+  assert.equal(passwordRequests(page).length,0);
+  input.value='Ab12Cd34';input.events.input();input.events.change();
+  await submitLoginForm(page,'employeeLoginForm');
+  assert.equal(passwordRequests(page).length,1);
+  assert.deepEqual(JSON.parse(passwordRequests(page)[0].options.body),{employeeCode:'0012345',password:'Ab12Cd34',remember:true});
+  assert.equal(input.disabled,true);
+  release({authenticated:true,user:{roles:['qa']}});await nextLoginTurn();
+  assert.deepEqual(page.redirects,['/admin']);assert.equal(input.value,'');
+});
+
+test('failed automatic password sign-in waits for deliberate re-entry and accepts a native autofill change',async()=>{
+  const page=await loginPage({mode:'employee-password'},{loginError:new Error('Invalid employee code or password')});
+  await identifyEmployee(page);const input=page.element('employeePassword');
+  input.value='12345678';input.events.change();await nextLoginTurn();
+  assert.equal(passwordRequests(page).length,1);assert.equal(input.value,'');
+  for(const event of ['focus','blur','keyup','input','change']) input.events[event]();await nextLoginTurn();
+  assert.equal(passwordRequests(page).length,1);
+  assert.match(page.element('employeeAuthMessage').textContent,/Invalid/);
+  input.value='abcdefgh';input.events.input();await nextLoginTurn();
+  assert.equal(passwordRequests(page).length,2);
+});
+
+test('automatic password submission ignores invalid values and rejects paste before maxlength can truncate it',async()=>{
+  const page=await loginPage({mode:'employee-password'});await identifyEmployee(page);
+  const input=page.element('employeePassword');
+  for(const value of ['1234567','123456789','abcd123!']) {input.value=value;input.events.input();}
+  assert.equal(passwordRequests(page).length,0);
+  for(const text of ['123456789','abcd123!',' abcd1234']) {
+    let prevented=false;input.value='';
+    input.events.paste({clipboardData:{getData:()=>text},preventDefault(){prevented=true;}});
+    assert.equal(prevented,true);
+  }
+  let prevented=false;input.events.paste({clipboardData:{getData:()=>'Ab12Cd34'},preventDefault(){prevented=true;}});
+  assert.equal(prevented,false);assert.equal(passwordRequests(page).length,0);
+  input.value='Ab12Cd34';input.events.input();await nextLoginTurn();
+  assert.equal(passwordRequests(page).length,1);
+});
+
+test('editing the identified Employee ID resets password, reveal and Remember me before another lookup',async()=>{
+  const page=await loginPage({mode:'employee-password'});await identifyEmployee(page);
+  page.element('employeePassword').value='Ab12Cd34';page.element('employeePasswordToggle').events.click();
+  page.element('employeeRemember').checked=true;
+  page.element('employeeCode').value='001234';page.element('employeeCode').events.input();
+  assert.equal(page.element('employeePasswordField').hidden,true);
+  assert.equal(page.element('employeePassword').value,'');assert.equal(page.element('employeePassword').type,'password');
+  assert.equal(page.element('employeeRemember').checked,false);assert.equal(page.element('employeeRemember').disabled,true);
+  await identifyEmployee(page,'0012346');
+  assert.equal(page.element('employeePasswordField').hidden,false);
+  assert.equal(passwordRequests(page).length,0);
+});
+
+test('pending identification blocks duplicates, ignores stale codes and allows an explicit retry',async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  const page=await loginPage({mode:'employee-password'},{identifyResponse:()=>pending});
+  const input=page.element('employeeCode');input.value='0012345';input.events.input();input.events.change();
+  await submitLoginForm(page,'employeeLoginForm');
+  assert.equal(input.disabled,true);assert.equal(page.element('employeeLoginFormSubmit').textContent,'Checking…');
+  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
+  input.value='0012346';release({authenticated:false,passwordRequired:true});await nextLoginTurn();
+  assert.equal(page.element('employeePasswordField').hidden,true);assert.equal(input.disabled,false);
+  assert.deepEqual(page.redirects,[]);
+  await submitLoginForm(page,'employeeLoginForm');
+  assert.equal(page.element('employeePasswordField').hidden,false);
+});
+
+test('identification rejects malformed/full-access replies and never retries automatically after an error',async()=>{
+  for(const response of [{authenticated:false},{authenticated:true,user:{roles:['admin']}},{authenticated:false,passwordRequired:'true'}]) {
+    const page=await loginPage({mode:'employee-password'},{identifyResponse:()=>response});await identifyEmployee(page);
+    assert.equal(page.element('employeePasswordField').hidden,true);assert.deepEqual(page.redirects,[]);
+    assert.match(page.element('employeeAuthMessage').textContent,/did not complete/);
+  }
+  const page=await loginPage({mode:'employee-password'},{identifyError:new Error('Too many sign-in attempts. Try again shortly')});
+  await identifyEmployee(page);page.element('employeeCode').events.input();page.element('employeeCode').events.change();await nextLoginTurn();
+  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
+  assert.match(page.element('employeeAuthMessage').textContent,/Too many/);
+  await submitLoginForm(page,'employeeLoginForm');assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,2);
+});
+
+test('a restored Employee ID waits for Continue and pagehide invalidates a pending lookup',async()=>{
+  let release;const pending=new Promise(resolve=>{release=resolve;});
+  const page=await loginPage({mode:'employee-password'},{initialCode:'0012345',identifyResponse:()=>pending});
+  page.element('employeeCode').events.change();assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,0);
+  await submitLoginForm(page,'employeeLoginForm');page.events.pagehide();
+  release({authenticated:true,user:{passwordSetupRequired:true}});await nextLoginTurn();
+  assert.equal(page.element('passwordSetupForm').hidden,true);assert.deepEqual(page.redirects,[]);
+});
+
+test('Continue checks an autofilled ID once even if a delayed change event follows the challenge',async()=>{
+  const page=await loginPage({mode:'employee-password'});
+  page.element('employeeCode').value='0012345';
+  await submitLoginForm(page,'employeeLoginForm');
+  assert.equal(page.element('employeePasswordField').hidden,false);
+  page.element('employeeCode').events.change();await nextLoginTurn();
+  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
+  assert.equal(page.element('employeePasswordField').hidden,false);
+});
+
+test('first employee password sign-in opens setup and requires a fresh password sign-in afterward', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, {
+    search: '?returnTo=%2Fform.html%3Fid%3DT-20112601',
+    identifyResponse: async () => ({ authenticated: true, user: { roles: ['qa'], passwordSetupRequired: true, mustChangePassword: true } })
+  });
+  page.element('employeeCode').value = '0012345';
+  page.element('employeeCode').events.input();await nextLoginTurn();
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/auth/login').options.body), { employeeCode: '0012345', identifyOnly:true });
+  assert.equal(page.element('passwordSetupForm').hidden, false);
+  assert.equal(page.element('employeeLoginForm').hidden, true);
+  assert.equal(page.element('passwordChangeForm').hidden, true);
+  assert.equal(page.element('setupPassword').focused, true);
+  assert.deepEqual(page.redirects, []);
+  page.element('setupPassword').value = 'abcdefgh'; page.element('setupConfirmPassword').value = 'abcdefgh';
+  await submitLoginForm(page, 'passwordSetupForm');
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/auth/setup-password').options.body), { newPassword: 'abcdefgh', confirmPassword: 'abcdefgh' });
+  assert.equal(page.element('passwordSetupForm').hidden, true);
+  assert.equal(page.element('employeeLoginForm').hidden, false);
+  assert.equal(page.element('setupPassword').value, '');
+  assert.equal(page.element('setupConfirmPassword').value, '');
+  assert.match(page.element('employeeAuthMessage').textContent, /Password set.*Sign in/i);
+  assert.deepEqual(page.redirects, []);
+  page.setLoginResponse(async () => ({ authenticated: true, user: { roles: ['qa'], canChangePassword: true } }));
+  page.element('employeePassword').value = 'abcdefgh';
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.deepEqual(page.redirects, ['/form.html?id=T-20112601']);
+});
+
+test('a restored setup-only session cannot redirect into the portal', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, {
+    authenticated: true, user: { roles: ['admin'], passwordSetupRequired: true, mustChangePassword: true }
+  });
+  assert.equal(page.element('passwordSetupForm').hidden, false);
+  assert.deepEqual(page.redirects, []);
+});
+
+test('employee setup accepts numeric, letter-only or mixed eight-character passwords', async () => {
+  for (const value of ['12345678', 'abcdefgh', 'Ab12Cd34']) {
+    const page = await loginPage({ mode: 'employee-password' }, { authenticated: true, user: { roles: [], passwordSetupRequired: true } });
+    page.element('setupPassword').value = value; page.element('setupConfirmPassword').value = value;
+    await submitLoginForm(page, 'passwordSetupForm');
+    assert.equal(page.calls.filter(call => call.url === '/api/auth/setup-password').length, 1, value);
+    assert.equal(page.element('employeeLoginForm').hidden, false);
+  }
+});
+
+test('employee setup rejects invalid lengths, non-alphanumeric values and mismatched confirmation without a request', async () => {
+  for (const [value, confirmation, message] of [
+    ['1234567', '1234567', /8/], ['123456789', '123456789', /8/],
+    ['abcd!234', 'abcd!234', /letters|numbers/], ['12345678', 'abcdefgh', /match/]
+  ]) {
+    const page = await loginPage({ mode: 'employee-password' }, { authenticated: true, user: { roles: [], passwordSetupRequired: true } });
+    page.element('setupPassword').value = value; page.element('setupConfirmPassword').value = confirmation;
+    await submitLoginForm(page, 'passwordSetupForm');
+    assert.equal(page.calls.some(call => call.url === '/api/auth/setup-password'), false);
+    assert.equal(page.element('passwordSetupForm').hidden, false);
+    assert.match(page.element('authMessage').textContent, message);
+    assert.equal(page.element('setupPassword').value, '');
+  }
+});
+
+test('employee login and setup failures clear password fields and allow retry', async () => {
+  const login = await loginPage({ mode: 'employee-password' }, { loginError: new Error('Invalid employee code or password') });
+  await identifyEmployee(login);
+  login.element('employeeCode').value = '0012345'; login.element('employeePassword').value = '12345678';
+  await submitLoginForm(login, 'employeeLoginForm');
+  assert.equal(login.element('employeePassword').value, '');
+  assert.equal(login.element('employeePassword').disabled, false);
+  assert.equal(login.element('employeeLoginFormSubmit').disabled, false);
+  assert.match(login.element('employeeAuthMessage').textContent, /Invalid/);
+  const setup = await loginPage({ mode: 'employee-password' }, { authenticated: true, user: { passwordSetupRequired: true }, setupError: new Error('Setup expired. Sign in again') });
+  setup.element('setupPassword').value = '12345678'; setup.element('setupConfirmPassword').value = '12345678';
+  await submitLoginForm(setup, 'passwordSetupForm');
+  assert.equal(setup.element('passwordSetupForm').hidden, false);
+  assert.equal(setup.element('setupPassword').value, '');
+  assert.equal(setup.element('passwordSetupFormSubmit').disabled, false);
+  assert.match(setup.element('authMessage').textContent, /expired/);
+});
+
+test('employee password profile-change success is shown at login and roleless users retain Records routing', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, { search: '?passwordChanged=1', user: { roles: [] } });
+  assert.match(page.element('employeeAuthMessage').textContent, /Password changed/);
+  await identifyEmployee(page);
+  page.element('employeeCode').value = '0012345'; page.element('employeePassword').value = 'abcdefgh';
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.deepEqual(page.redirects, ['/records']);
+});
 
 test('configured employee login reveals only the employee form and submits its code without credentials', async () => {
   const page = await loginPage();

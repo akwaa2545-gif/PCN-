@@ -7,6 +7,12 @@ function validatePassword(password) {
   }
 }
 
+function validateEmployeePassword(password) {
+  if (typeof password !== 'string' || !/^[A-Za-z0-9]{8}$/.test(password)) {
+    throw new ApiError(400, 'Use exactly 8 letters or numbers. All letters, all numbers, or a mix are allowed.');
+  }
+}
+
 async function hashPassword(password) {
   return argon2.hash(password, { type: argon2.argon2id, memoryCost: 65536, timeCost: 3, parallelism: 1 });
 }
@@ -15,4 +21,4 @@ async function verifyPassword(hash, password) {
   return argon2.verify(hash, password);
 }
 
-module.exports = { hashPassword, verifyPassword, validatePassword };
+module.exports = { hashPassword, verifyPassword, validatePassword, validateEmployeePassword };

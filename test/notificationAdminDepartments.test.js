@@ -4,10 +4,12 @@ const { notificationDepartmentKeys, notificationRecipient, filterPendingUpdates 
 const { NotificationService } = require('../src/notificationService');
 const { NotificationWorker } = require('../src/notificationWorker');
 
-const base = { id: 'PCN-2026-0001', version: '0000000000000001', ownerUserId: 'owner', status: 'gsc_review', riskLevel: 'RL0',
+const userId = name => require('node:crypto').createHash('sha256').update(name).digest('hex').slice(0, 32)
+  .replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
+const base = { id: 'PCN-2026-0001', version: '0000000000000001', ownerUserId: userId('owner'), status: 'gsc_review', riskLevel: 'RL0',
   mailRoutingPolicyVersion: 2, internalReview: {} };
 const signed = { prepared: true, checked: true, approved: true };
-const admin = (id, department, patch = {}) => ({ id, department, roles: ['admin'], isActive: true, identityProvider: 'employee-code',
+const admin = (id, department, patch = {}) => ({ id: userId(id), department, roles: ['admin'], isActive: true, identityProvider: 'employee-code',
   email: `${id}@example.test`, mailVerifiedAt: '2026-10-01', mailDirectoryId: id,
   mailProfile: { id, email: `${id}@example.test` }, ...patch });
 const snapshot = user => ({ userId: user.id, email: user.email, directoryId: user.mailDirectoryId,
@@ -75,7 +77,8 @@ function transaction(users, savedPayload, settings = { schemaVersion: 2, groups:
         IsActive: user.isActive, IdentityProvider: user.identityProvider, DepartmentKey: user.department, SigningStep: user.signingStep,
         Email: user.email, MailDirectoryId: user.mailDirectoryId, MailVerifiedAt: user.mailVerifiedAt,
         MailProfileJson: JSON.stringify(user.mailProfile), RoleName: user.roles[0] })) };
-      if (query.includes('SELECT TOP(1)')) return { recordset: [{ Id: 'job', PayloadJson: JSON.stringify(savedPayload) }] };
+      if (query.includes('SELECT TOP(1)')) return { recordset: [{ Id: 'job', PcnId: savedPayload?.updateSnapshot?.pcnId,
+        PayloadJson: JSON.stringify(savedPayload) }] };
       if (query.includes('SELECT PcnCode,OwnerUserId')) return { recordset: [{ PcnCode: base.id, OwnerUserId: base.ownerUserId }] };
       return { recordset: [] };
     } };
@@ -92,10 +95,10 @@ test('general update queue saves changed scope and Administrator department, exc
   const saved = update.batches[0].updateSnapshot;
   assert.deepEqual(saved.departmentKeys, ['gscTet']);
   assert.equal(saved.audiencePolicyVersion, 1);
-  assert.deepEqual(saved.recipients.map(entry => entry.userId).sort(), ['dev', 'gsc']);
-  assert.equal(saved.recipients.find(entry => entry.userId === 'gsc').department, 'gscTet');
+  assert.deepEqual(saved.recipients.map(entry => entry.userId).sort(), [userId('dev'), userId('gsc')].sort());
+  assert.equal(saved.recipients.find(entry => entry.userId === userId('gsc')).department, 'gscTet');
   const dedup = await service.prepareUpdate(tx, after, { queued: true, payload: { to: 'GSC@example.test' } }, 'Internal review', base);
-  assert.deepEqual(dedup.batches[0].updateSnapshot.recipients.map(entry => entry.userId), ['dev']);
+  assert.deepEqual(dedup.batches[0].updateSnapshot.recipients.map(entry => entry.userId), [userId('dev')]);
   const prepared = await service.prepare(tx, base, after);
   assert.deepEqual(prepared.plan.update.batches[0].updateSnapshot.departmentKeys, ['gscTet'], 'prepare forwards prior record');
 });

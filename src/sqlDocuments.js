@@ -8,10 +8,11 @@ const { SqlRevisions } = require('./sqlRevisions');
 const { applyDocumentControl, hasSignatures } = require('./documentControl');
 const { documentRequirements } = require('./documentRequirements');
 const { lockUserMailRouting, assertCurrentUser } = require('./userMailRouting');
+const { isCode } = require('../pcn-types');
 
 const maxBytes = 10 * 1024 * 1024;
 const types = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'text/plain': '.txt' };
-function assertCode(code) { if (!/^PCN-\d{4}-\d{4}$/.test(code)) throw new ApiError(400, 'Invalid PCN id'); }
+function assertCode(code) { if (!isCode(code)) throw new ApiError(400, 'Invalid PCN id'); }
 function assertId(id) { if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) throw new ApiError(400, 'Invalid document id'); }
 function validateFile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ApiError(400, 'Document body must be an object');

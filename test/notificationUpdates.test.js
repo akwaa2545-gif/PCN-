@@ -5,7 +5,7 @@ const { NotificationService } = require('../src/notificationService');
 const { NotificationWorker } = require('../src/notificationWorker');
 const { SqlPcnRepository } = require('../src/sqlPcnRepository');
 const record = { id: 'PCN-2026-0001', status: 'gsc_review', ownerUserId: 'owner', internalReview: {} };
-const user = { id: 'admin', identityProvider: 'employee-code', isActive: true, roles: ['admin'], department: 'gscTet', email: 'Admin@example.test',
+const user = { id: '00000000-0000-4000-8000-000000000001', identityProvider: 'employee-code', isActive: true, roles: ['admin'], department: 'gscTet', email: 'Admin@example.test',
   mailVerifiedAt: '2026-10-07', mailDirectoryId: 'ad1', mailProfile: { id: 'ad1', email: 'admin@example.test' } };
 
 test('meaningful updates ignore server metadata and drafts but include domain changes, resets and comments', () => {
@@ -14,6 +14,12 @@ test('meaningful updates ignore server metadata and drafts but include domain ch
   assert.deepEqual(meaningfulUpdate(record, { ...record, status: 'draft' }), ['Status']);
   assert.deepEqual(meaningfulUpdate(record, { ...record, comments: [{ body: 'new' }], internalReview: { signoff: { gscTet: { prepared: true } } } }), ['Comments', 'Internal review']);
   assert.deepEqual(meaningfulUpdate(null, { ...record, status: 'submitted' }), ['PCN submitted']);
+});
+
+test('server-owned review deadline metadata never adds a business-update email', () => {
+  const timed = { ...record, reviewTiming: { prodEngTet: { startedAt: '2026-10-20T03:00:00.000Z' } } };
+  assert.deepEqual(meaningfulUpdate(record, timed), []);
+  assert.deepEqual(meaningfulUpdate(timed, record), []);
 });
 
 test('general audience includes same-department no-step admin and only active verified users with record access', () => {
@@ -59,7 +65,8 @@ function transaction({ users = [user], settings = { schemaVersion: 2, groups: []
       calls.push({ query, inputs });
       if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
       if (query.includes('u.MailProfileJson')) return { recordset: users.map(sqlUser) };
-      if (query.includes('SELECT TOP(1)')) return { recordset: payload ? [{ Id: 'job', PayloadJson: JSON.stringify(payload) }] : [] };
+      if (query.includes('SELECT TOP(1)')) return { recordset: payload ? [{ Id: 'job', PcnId: payload.updateSnapshot?.pcnId,
+        PayloadJson: JSON.stringify(payload) }] : [] };
       if (query.includes('SELECT PcnCode,OwnerUserId')) return { recordset: current ? [{ PcnCode: current.id, OwnerUserId: current.ownerUserId }] : [] };
       if (query.includes('INSERT pcn.NotificationJobs')) {
         if (++writes === failAt) throw new Error('outbox insert failed');

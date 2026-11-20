@@ -222,6 +222,15 @@ body.auth-page {
   text-align: center;
 }
 
+#employeeAuthMessage.is-success:not(:empty),
+#authMessage.is-success:not(:empty) {
+  color:#166534;
+}
+#authMessage.is-success:not(:empty) {
+  border-color:#b5dbc2;
+  background:#f0fdf4;
+}
+
 .auth-content form {
   display: grid;
   gap: 18px;
@@ -587,6 +596,204 @@ body.auth-page {
   color: #667085;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.employee-password-field {
+  width:100%;
+  margin-top:28px;
+}
+
+.employee-password-heading {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:4px;
+}
+.employee-password-heading>label {
+  display:block;
+  margin:0;
+  color:#173967;
+  font-size:13px;
+  font-weight:650;
+}
+.employee-password-control {
+  position:relative;
+  display:grid;
+  align-items:center;
+  min-height:56px;
+  border-radius:6px;
+}
+.employee-password-control:focus-within {
+  outline:2px solid #173967;
+  outline-offset:2px;
+}
+.employee-password-control .password-circle-input {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  min-width:0;
+  min-height:56px;
+  margin:0;
+  padding:12px;
+  border:0;
+  border-radius:6px;
+  outline:0;
+  background:transparent;
+  color:transparent;
+  -webkit-text-fill-color:transparent;
+  caret-color:transparent;
+  font:inherit;
+  font-size:16px;
+  line-height:1.5;
+}
+.employee-password-control .password-circle-input::selection { background:transparent; }
+.employee-password-circles {
+  position:relative;
+  display:grid;
+  grid-template-columns:repeat(8,minmax(0,1fr));
+  justify-items:center;
+  align-items:center;
+  gap:6px;
+  padding:8px 4px;
+  pointer-events:none;
+}
+.employee-password-circles>span {
+  display:grid;
+  place-items:center;
+  width:min(100%,34px);
+  aspect-ratio:1;
+  border:2px solid #72899c;
+  border-radius:50%;
+  background:#fff;
+  color:#173967;
+  font-size:16px;
+  font-weight:650;
+  line-height:1;
+}
+.employee-password-circles>span.is-filled { border-color:#173967; background:#173967; }
+.employee-password-circles>span.is-revealed { background:#eaf0f7; }
+.employee-password-circles>span.is-active { outline:2px solid #173967; outline-offset:3px; }
+.employee-password-circles>span.is-disabled { opacity:.5; }
+@media (forced-colors:active) {
+  .employee-password-circles { visibility:hidden; }
+  .employee-password-control .password-circle-input {
+    border:1px solid CanvasText;
+    color:CanvasText;
+    -webkit-text-fill-color:CanvasText;
+    caret-color:CanvasText;
+    background:Canvas;
+  }
+  .employee-password-control .password-circle-input::selection {
+    background:Highlight;
+    color:HighlightText;
+    -webkit-text-fill-color:HighlightText;
+  }
+}
+.auth-content .employee-password-toggle {
+  flex:none;
+  width:auto;
+  min-width:60px;
+  min-height:44px;
+  margin:4px;
+  padding:8px 10px;
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:#173967;
+  font:inherit;
+  font-size:13px;
+  font-weight:650;
+  cursor:pointer;
+}
+.auth-content .employee-password-toggle:hover:not(:disabled) { background:#e7eef6; }
+.auth-content .employee-password-toggle:focus-visible { outline:2px solid #173967; outline-offset:-2px; }
+.auth-content .employee-password-toggle:disabled { opacity:.6; cursor:wait; }
+.employee-signin-options {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  flex-wrap:wrap;
+  gap:6px 14px;
+  margin-top:18px;
+}
+.employee-password-field .employee-remember {
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  min-height:32px;
+  margin:0;
+  color:#263b53;
+  font-size:13px;
+  font-weight:600;
+  cursor:pointer;
+}
+.employee-remember #employeeRemember {
+  flex:none;
+  width:18px;
+  height:18px;
+  min-height:0;
+  margin:0;
+  padding:0;
+  accent-color:#173967;
+}
+.employee-remember #employeeRemember:focus-visible { outline:2px solid #173967; outline-offset:3px; }
+#employeeRememberHelp { color:#596579; font-size:12px; line-height:1.5; }
+
+#employeePasswordHelp,#setupPasswordHelp {
+  margin:8px 0 0;
+  color:#596579;
+  font-size:12px;
+  line-height:1.5;
+}
+
+.employee-password-mode .employee-lock-icon {
+  width:92px;
+  height:90px;
+  margin-bottom:10px;
+}
+
+.employee-password-mode .employee-entry-help {
+  margin-bottom:22px;
+}
+
+@keyframes auth-password-reveal {
+  from { opacity:0; transform:translateY(-8px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+@keyframes auth-setup-enter {
+  from { opacity:0; transform:translateY(12px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+@keyframes auth-password-circle-fill {
+  0% { transform:scale(.82); }
+  65% { transform:scale(1.06); }
+  100% { transform:scale(1); }
+}
+
+#employeePasswordField:not([hidden]) {
+  animation:auth-password-reveal 280ms cubic-bezier(.22,1,.36,1) both;
+}
+
+.auth-content:has(#passwordSetupForm:not([hidden])) #authIntro,
+#passwordSetupForm:not([hidden]) {
+  animation:auth-setup-enter 320ms cubic-bezier(.22,1,.36,1) both;
+}
+
+.employee-password-circles>span.is-filled {
+  animation:auth-password-circle-fill 180ms ease-out;
+}
+
+@media (prefers-reduced-motion:reduce) {
+  #employeePasswordField:not([hidden]),
+  .auth-content:has(#passwordSetupForm:not([hidden])) #authIntro,
+  #passwordSetupForm:not([hidden]),
+  .employee-password-circles>span.is-filled {
+    animation:none;
+  }
 }
 
 @media (max-width: 820px) {

@@ -6,6 +6,43 @@ const { startApi, fakeAuthService, unsignedPayload } = require('./helpers/apiHar
 const done = Object.freeze({prepared:true,checked:true,approved:true});
 const base = {id:'PCN-2026-0001',version:'0000000000000001',status:'submitted',riskLevel:'RL2'};
 
+test('workflow summaries use current settings for every distinct stage and omit disabled deadlines', () => {
+  const startedAt = '2026-10-23T09:45:00.000Z';
+  const now = new Date('2026-10-25T09:45:00.000Z');
+  const route = [['gscTet','signoff.gscTet'],['prodEngTet','signoff.prodEngTet'],['qaTet','signoff.qaTet'],
+    ['gscTapbu','tapbu.gsc'],['qaTapbu','tapbu.qa'],['qaFinal','qateFinal.signoff']];
+  for (let index = 0; index < route.length; index++) {
+    const [key, stageKey] = route[index];
+    const internalReview = { signoff: {}, tapbu: { need: true }, qateFinal: {} };
+    for (const [, path] of route.slice(0,index)) {
+      const [section, part] = path.split('.');
+      internalReview[section] = { ...internalReview[section], [part]: done };
+    }
+    const record = { ...base, internalReview, reviewTiming: { [key]: { startedAt } } };
+    const settings = { pendingDays: Object.fromEntries(route.map(([rule]) => [rule, 1])) };
+    const summary = buildWorkflowSummary(record, now, settings);
+    const current = summary.stages.find(stage => stage.key === stageKey);
+    assert.equal(current.deadline.stageKey, stageKey);
+    assert.equal(current.deadline.dueAt, '2026-10-24T09:45:00.000Z');
+    assert.equal(current.deadline.overdue, true);
+    assert.equal(summary.stages.filter(stage => stage.deadline).length, 1);
+    assert.equal(buildWorkflowSummary(record, now, { pendingDays: { ...settings.pendingDays, [key]: null } })
+      .stages.some(stage => stage.deadline), false);
+  }
+});
+
+test('current Prod.Eng timeline exposes its handoff deadline and stops alerting after completion', () => {
+  const record = { ...base, internalReview: { signoff: { gscTet: done, prodEngTet: { prepared: true } } },
+    reviewTiming: { prodEngTet: { startedAt: '2026-10-23T09:45:00.000Z' } } };
+  const active = buildWorkflowSummary(record, new Date('2026-10-26T09:45:00.001Z')).stages[1];
+  assert.equal(active.state, 'current');
+  assert.equal(active.deadline.dueAt, '2026-10-26T09:45:00.000Z');
+  assert.equal(active.deadline.overdue, true);
+  const finished = buildWorkflowSummary({ ...record, internalReview: { signoff: { gscTet: done, prodEngTet: done } } }).stages[1];
+  assert.equal(finished.state, 'completed');
+  assert.equal(finished.deadline, null);
+});
+
 test('workflow department summaries count actual signatures in Prepared, Checked, Approved order and identify current step',() => {
   const record = {...base,internalReview:{signoff:{gscTet:done,prodEngTet:done,qaTet:{prepared:true,preparedName:'QA reviewer',preparedDate:'2026-10-15'}}}};
   const summary = buildWorkflowSummary(record);
@@ -24,6 +61,20 @@ test('workflow department summaries count actual signatures in Prepared, Checked
   assert.deepEqual(qa.steps[1],{action:'checked',label:'Checked',completed:false,person:null,signedAt:null});
   assert.equal(summary.stages[5].label,'QA/TET Final judgment');
   assert.deepEqual(summary.nextAction,{stage:'signoff.qaTet',signingStep:'checked',label:'QA/TET — Checked',terminal:false});
+});
+
+test('QA review deadline appears only on its review stage and ends before final judgment', () => {
+  const record = { ...base, riskLevel: 'RL0', reviewTiming: { qaTet: { startedAt: '2026-10-23T09:45:00Z' } },
+    internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true } } } };
+  const summary = buildWorkflowSummary(record, new Date('2026-10-26T09:45:00.001Z'));
+  const qa = summary.stages.find(stage => stage.key === 'signoff.qaTet');
+  assert.equal(qa.state, 'current');
+  assert.equal(qa.deadline.label, 'QA/TET');
+  assert.equal(qa.deadline.overdue, true);
+  assert.equal(summary.stages.find(stage => stage.key === 'signoff.prodEngTet').deadline, null);
+  assert.equal(summary.stages.find(stage => stage.key === 'qateFinal.signoff').deadline, null);
+  const completed = buildWorkflowSummary({ ...record, internalReview: { signoff: { ...record.internalReview.signoff, qaTet: done } } });
+  assert.equal(completed.stages.find(stage => stage.key === 'signoff.qaTet').deadline, null);
 });
 
 test('saved signature binding identity has precedence and unchecked historical name/date never imply a signature',() => {

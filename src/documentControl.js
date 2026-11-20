@@ -13,6 +13,7 @@ const stable = value => Array.isArray(value) ? value.map(stable) : value && type
 function contentHash(record) {
   const defaults = { changeRows: [], sampleSubmitted: 'pending', priceLevel: 'no-change' };
   const content = Object.fromEntries(contentFields.map(key => [key, record?.[key] ?? defaults[key] ?? '']));
+  if (record?.documentType) content.documentType = record.documentType;
   content.materialCodeDescription = record?.internalReview?.materialCodeDescription || '';
   // Only the attachment content generation participates; routine review work does not invalidate prior stages.
   content.attachmentGeneration = record?.documentControl?.attachmentGeneration || 0;

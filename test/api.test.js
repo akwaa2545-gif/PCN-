@@ -2,6 +2,60 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { startApi, validPayload, unsignedPayload, fakeAuthService, TEST_PASSWORD, TEST_NEW_PASSWORD } = require('./helpers/apiHarness');
 
+test('HTTP Final Judgment stays locked until the last required review signature is saved', async t => {
+  const api = await startApi(t);
+  const admin = await api.login('admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: { ...unsignedPayload, internalReview: {} } });
+  assert.equal(created.status, 201);
+  const done = { prepared: true, checked: true, approved: true };
+  let record = await api.repository.seedHistoricalReview(created.body.data.id, {
+    signoff: { gscTet: done, prodEngTet: done, qaTet: done },
+    tapbu: { need: true, gsc: done, qa: { prepared: true, checked: true } }
+  });
+  const patch = internalReview => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin,
+    body: { version: record.version, internalReview } });
+  for (const internalReview of [{ qateFinal: { approve: true } }, { qateFinal: { reject: true } },
+    { qateFinal: { signoff: { prepared: true } } }]) {
+    const before = await api.repository.findById(record.id);
+    const rejected = await patch(internalReview);
+    assert.equal(rejected.status, 400, rejected.text);
+    assert.deepEqual(await api.repository.findById(record.id), before, 'Rejected judgment leaves saved record unchanged');
+  }
+  const completed = await patch({ tapbu: { qa: { approved: true } } });
+  assert.equal(completed.status, 200, completed.text); record = completed.body.data;
+  const prepared = await patch({ qateFinal: { signoff: { prepared: true } } });
+  assert.equal(prepared.status, 200, prepared.text); record = prepared.body.data;
+  const decision = await patch({ qateFinal: { approve: true } });
+  assert.equal(decision.status, 200, decision.text);
+  assert.equal(decision.body.data.internalReview.qateFinal.approve, true);
+});
+
+test('HTTP top-right signatures wait for the final Approved signature', async t => {
+  const api = await startApi(t); const admin = await api.login('admin');
+  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  const done = { prepared: true, checked: true, approved: true };
+  let record = await api.repository.seedHistoricalReview(created.body.data.id, {
+    signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { need: true, gsc: done, qa: done },
+    qateFinal: { signoff: { prepared: true, checked: true } }
+  });
+  const patch = internalReview => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session: admin,
+    body: { version: record.version, internalReview } });
+  for (const action of ['prepared', 'checked', 'approved']) {
+    for (const value of [{ checked: true }, { date: '2026-10-22' }]) {
+      const rejected = await patch({ supplierSignoff: { [action]: value } });
+      assert.equal(rejected.status, 400, rejected.text);
+      assert.deepEqual(await api.repository.findById(record.id), record);
+    }
+  }
+  const final = await patch({ qateFinal: { signoff: { approved: true } } });
+  assert.equal(final.status, 200, final.text); record = final.body.data;
+  for (const action of ['prepared', 'checked', 'approved']) {
+    const signed = await patch({ supplierSignoff: { [action]: { checked: true, date: '2026-10-22' } } });
+    assert.equal(signed.status, 200, signed.text); record = signed.body.data;
+    assert.equal(record.internalReview.supplierSignoff[action].checked, true);
+  }
+});
+
 test('HTTP rejects new terminal status when legacy final signatures hide incomplete preceding groups', async t => {
   const api = await startApi(t);
   const admin = await api.login('admin');
@@ -136,13 +190,8 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
   assert.equal((await patch({ signoff: { gscTet: { approved: true } } }, disabled)).status, 403, 'disabled administrator cannot sign');
   assert.equal((await api.repository.findById(record.id)).version, record.version);
 
-  for (const action of ['prepared', 'checked', 'approved']) {
-    const response = await patch({ supplierSignoff: { [action]: { checked: true, name: 'Forged Supplier' } } });
-    assert.equal(response.status, 200, `supplier ${action}`);
-    record = response.body.data;
-    assert.equal(record.internalReview.supplierSignoff[action].checked, true);
-    assert.equal(record.internalReview.supplierSignoff[action].name, displayName);
-  }
+  assert.equal((await patch({ supplierSignoff: { prepared: { checked: true } } })).status, 400,
+    'top-right signing waits for Final Judgment');
   const required = await patch({ tapbu: { need: true } });
   assert.equal(required.status, 200);
   record = required.body.data;
@@ -162,15 +211,27 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
       assert.equal(signature[`${action}Date`], record.updatedAt.slice(0, 10));
     }
   }
-  for (const internalReview of [
-    { signoff: { gscTet: { approvedName: 'Rewritten Name' } } },
-    { signoff: { gscTet: { approvedDate: '1900-01-01' } } },
-    { supplierSignoff: { prepared: { name: 'Rewritten Supplier' } } }
-  ]) assert.equal((await patch(internalReview)).status, 400, 'administrator cannot rewrite signed identity');
   const judgment = await patch({ qateFinal: { approve: true } });
   assert.equal(judgment.status, 200);
   record = judgment.body.data;
   assert.equal(record.internalReview.qateFinal.approve, true);
+  for (const action of ['prepared', 'checked', 'approved']) {
+    const response = await patch({ supplierSignoff: { [action]: { checked: true, name: 'Forged Supplier' } } });
+    assert.equal(response.status, 200, `supplier ${action}`);
+    record = response.body.data;
+    assert.equal(record.internalReview.supplierSignoff[action].checked, true);
+    assert.equal(record.internalReview.supplierSignoff[action].name, displayName);
+    if (action === 'checked') {
+      for (const internalReview of [
+        { signoff: { gscTet: { approvedName: 'Rewritten Name' } } },
+        { signoff: { gscTet: { approvedDate: '1900-01-01' } } },
+        { supplierSignoff: { prepared: { name: 'Rewritten Supplier' } } }
+      ]) assert.equal((await patch(internalReview)).status, 400, 'administrator cannot rewrite signed identity');
+    }
+  }
+  assert.equal(record.status, 'closed', 'last header signature closes the completed route');
+  assert.equal((await patch({ supplierSignoff: { prepared: { checked: false } } })).status, 403,
+    'completed documents remain read-only');
   for (const [section, group] of stages) {
     for (const action of ['prepared', 'checked', 'approved']) {
       assert.equal(record.internalReview[section][group][action], true);
@@ -247,7 +308,8 @@ test('PCN CRUD preserves historical workbook signatures, comments and approval m
   const create = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
   assert.equal(create.status, 201);
   const record = await api.repository.seedHistoricalReview(create.body.data.id, validPayload.internalReview);
-  assert.match(record.id, /^PCN-\d{4}-\d{4}$/);
+  assert.match(record.id, /^T-\d{6}01$/);
+  assert.equal(record.documentType, 'ta');
   assert.match(record.version, /^[a-f0-9]{16}$/i);
   assert.equal(record.ownerUserId, 'admin-id');
   const get = await api.request(`/api/pcns/${record.id}`, { session: admin });
@@ -343,7 +405,7 @@ test('notification mappings start empty, expose no secret URL and never auto sen
     body: { completedGroup: 'GSC/TET', nextGroupKey: 'signoff.prodEngTet', nextGroup: 'Prod.Eng/TET' } });
   assert.equal(notify.status, 202);
   assert.equal(notify.body.data.queued, false);
-  assert.equal(notify.body.data.reason, 'recipient_not_configured');
+  assert.equal(notify.body.data.reason, 'handled_on_save');
   assert.equal(api.messages.length, 0);
   assert.equal((await api.request('/api/notification-settings', { session: await api.login('supplier') })).status, 403);
 });

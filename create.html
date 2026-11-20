@@ -42,6 +42,21 @@
         <div class="create-content">
           <section class="create-stage" data-panel="details" aria-labelledby="detailsTitle"><div class="create-section-heading"><div><p class="create-eyebrow">Step 1 of 4</p><h2 id="detailsTitle" tabindex="-1">Supplier &amp; material details</h2><p>Fields marked <span aria-label="required">*</span> are required to submit.</p></div></div>
             <div class="create-fields">
+              <fieldset class="create-type-field create-field-wide" id="documentTypeGroup" aria-describedby="documentTypeHelp">
+                <legend>PCN type <span aria-hidden="true">*</span></legend>
+                <input type="hidden" id="documentType" data-field="documentType" aria-describedby="documentTypeHelp" />
+                <div class="create-type-options">
+                  <label class="create-type-option">
+                    <input type="radio" name="documentTypeChoice" id="documentTypeTa" value="ta" required aria-describedby="documentTypeHelp" />
+                    <span class="create-type-card"><span class="create-type-copy"><span class="create-type-label">TA</span><span class="create-type-selected" aria-hidden="true">Selected</span></span><span class="create-type-indicator" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" focusable="false"><path d="m5 12 4 4 10-10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" /></svg></span></span>
+                  </label>
+                  <label class="create-type-option">
+                    <input type="radio" name="documentTypeChoice" id="documentTypeSc" value="sc" required aria-describedby="documentTypeHelp" />
+                    <span class="create-type-card"><span class="create-type-copy"><span class="create-type-label">SC</span><span class="create-type-selected" aria-hidden="true">Selected</span></span><span class="create-type-indicator" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" focusable="false"><path d="m5 12 4 4 10-10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" /></svg></span></span>
+                  </label>
+                </div>
+                <small id="documentTypeHelp" class="create-field-help">You can change TA or SC until you click Save draft.</small><small data-error="documentType"></small>
+              </fieldset>
               <label class="create-field">Supplier name <span>*</span><input id="supplierName" data-field="supplierName" autocomplete="organization" maxlength="160" /><small data-error="supplierName"></small></label>
               <label class="create-field">Manufacturer<input id="manufacturerName" data-field="manufacturerName" maxlength="180" /><small data-error="manufacturerName"></small></label>
               <label class="create-field create-field-wide">Material / chemical name <span>*</span><input id="materialName" data-field="materialName" maxlength="180" /><small data-error="materialName"></small></label>
@@ -68,7 +83,7 @@
           <section class="create-stage" data-panel="documents" aria-labelledby="documentsTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 3 of 4</p><h2 id="documentsTitle" tabindex="-1">Supporting documents</h2><p>A required document is complete when its uploaded file passes the security scan.</p></div></div><div id="createDocuments"></div></section>
           <section class="create-stage" data-panel="review" aria-labelledby="reviewTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 4 of 4</p><h2 id="reviewTitle" tabindex="-1">Review &amp; submit</h2><p>Confirm the document information before starting approval.</p></div></div><div id="reviewSummary"></div><section class="create-next-action"><p class="create-eyebrow">After you submit</p><h3 id="nextActionLabel">Check your document to see the next responsible person.</h3><p id="nextActionPeople"></p><p id="reviewMailStatus"></p><button type="button" class="create-button" id="refreshReview">Check readiness</button></section></section>
         </div>
-        <aside class="create-readiness" aria-labelledby="readinessTitle"><p class="create-eyebrow">Document readiness</p><h2 id="readinessTitle">Ready for review?</h2><strong id="completionCount">0 of 8 required items complete</strong><progress id="completionProgress" aria-labelledby="completionCount" max="8" value="0"></progress><p>Your draft can be saved at any stage.</p><ul id="completionItems"></ul><button class="create-button" id="previewDocument" type="button">Preview document</button><button class="create-link" id="newDocument" type="button">Start another PCN</button></aside>
+        <aside class="create-readiness" aria-labelledby="readinessTitle"><p class="create-eyebrow">Document readiness</p><h2 id="readinessTitle">Ready for review?</h2><strong id="completionCount">0 of 9 required items complete</strong><progress id="completionProgress" aria-labelledby="completionCount" max="9" value="0"></progress><p>Choose TA or SC, then click Save draft to issue a code. Later edits save automatically.</p><ul id="completionItems"></ul><button class="create-button" id="previewDocument" type="button">Preview document</button><button class="create-link" id="newDocument" type="button">Start another PCN</button></aside>
       </div>
       <footer class="create-actionbar"><div><button id="saveDraftButton" class="create-button" type="button">Save draft</button><span id="actionSaveStatus"></span></div><div><button id="previousStage" class="create-button" type="button">Back</button><button id="nextStage" class="create-button create-primary" type="button">Continue</button><button id="submitButton" class="create-button create-primary" type="button" hidden>Submit PCN</button></div></footer>
       </fieldset>
@@ -82,6 +97,6 @@
     <iframe id="documentPreviewFrame" title="Read-only PCN document" sandbox="allow-scripts allow-same-origin" hidden></iframe>
   </dialog>
   <dialog class="create-dialog" id="createConfirm" aria-labelledby="confirmTitle" aria-describedby="confirmMessage"><h2 id="confirmTitle"></h2><p id="confirmMessage"></p><div><button class="create-button" id="confirmCancel" type="button">Cancel</button><button class="create-button create-primary" id="confirmAccept" type="button">Continue</button></div></dialog>
-  <script src="/session-client.js"></script><script src="/pcn-readiness.js"></script><script src="/create-model.js"></script><script src="/create-autosave.js"></script><script src="/document-recovery.js"></script><script src="/create-documents.js"></script><script src="/create.js"></script>
+  <script src="/pcn-types.js"></script><script src="/session-client.js"></script><script src="/pcn-readiness.js"></script><script src="/create-model.js"></script><script src="/create-autosave.js"></script><script src="/document-recovery.js"></script><script src="/create-documents.js"></script><script src="/create.js"></script>
 </body>
 </html>

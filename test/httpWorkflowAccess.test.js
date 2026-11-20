@@ -5,7 +5,10 @@ const {
   hasRole, isInternal, routeGroups, complete
 } = require('../src/workflowAccess');
 
-const user = role => ({ id: 'owner', roles: [role], ...(role === 'qa' ? { department: 'qaTet', signingStep: 'approved' } : {}) });
+const user = role => ({ id: 'owner', roles: [role],
+  ...({ qa: { department: 'qaTet', signingStep: 'approved' },
+    productionengineering: { department: 'prodEngTet', signingStep: 'approved' },
+    tapbu: { department: 'qaTapbu', signingStep: 'approved' } }[role] || {}) });
 const signoff = { approved: true, checked: true, prepared: true };
 const finished = () => ({ signoff: { gscTet: { ...signoff }, prodEngTet: { ...signoff }, qaTet: { ...signoff } },
   tapbu: { need: true, gsc: { ...signoff }, qa: { ...signoff } }, qateFinal: { signoff: { ...signoff }, approve: true } });
@@ -88,5 +91,7 @@ test('final judgments require QA privileges, complete signoffs and recorded deci
   }
   const rejected = { ...undecided, qateFinal: { ...undecided.qateFinal, reject: true } };
   assertStatusPermission({ status: 'final_review', internalReview: rejected }, 'rejected', user('qa'));
-  assertStatusPermission({ status: 'approved', internalReview: finished() }, 'closed', user('qa'));
+  assert.throws(() => assertStatusPermission({ status: 'approved', internalReview: finished() }, 'closed', user('qa')), { statusCode: 400 });
+  const header = { prepared: { checked: true }, checked: { checked: true }, approved: { checked: true } };
+  assertStatusPermission({ status: 'approved', internalReview: { ...finished(), supplierSignoff: header } }, 'closed', user('qa'));
 });

@@ -11,13 +11,14 @@ $script:ServiceName = 'SupplierPCNTest'
 $script:MaximumArchive = 200MB
 $script:MaximumExpanded = 500MB
 $script:RuntimeFiles = @(
-    'server.js', 'package.json', 'package-lock.json',
+    'server.js', 'package.json', 'package-lock.json', 'pcn-types.js',
     'admin.html', 'form.html', 'records.html', 'index.html', 'login.html',
     'app.js', 'admin.js', 'records.js', 'login.js', 'session-client.js', 'master-data.js',
     'auth.css', 'admin.css', 'records.css', 'styles.css', 'tokin-header-logo.png', 'thailand-login.jpg',
     'document-workspace.js', 'document-workspace.css', 'document-recovery.js', 'document-bridge.js',
     'create.html', 'create.js', 'create.css', 'create-model.js', 'create-autosave.js', 'create-documents.js', 'pcn-readiness.js',
     'developer.html', 'developer.js', 'developer.css',
+    'system-settings.html', 'system-settings.js', 'system-settings.css', 'notification-settings.js',
     'compic20220308153715_T3zHf.png', 'CairoliClassic-Bold.otf', 'SegoeUI-Semibold.ttf',
     'scripts/read-sql-credential.ps1', 'admin-users.js'
 )

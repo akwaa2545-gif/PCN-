@@ -1,21 +1,23 @@
 (function (root, factory) {
-  const api = factory();
+  const types = typeof module === 'object' && module.exports ? require('./pcn-types') : root.PCN_TYPES;
+  const api = factory(types);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else root.PCN_CREATE_MODEL = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (types) {
   'use strict';
   const textFields = ['supplierName','manufacturerName','materialName','selectedChange','reason',
     'currentCondition','newCondition','desiredStart','sampleSubmittedDate','identification','sampleLocation'];
   const requirementKeys = ['hazardousReport','greenProcurement','qmsEmsCertificate','supplierDocument','otherRequirement'];
   const noteKeys = ['supplierDocumentNote','otherRequirementNote'];
   const string = value => typeof value === 'string' ? value.trim() : '';
+  const documentType = value => types?.normalizeType(value) || (['ta','sc'].includes(value) ? value : null);
   const definitions = master => master?.formDefinitions || master || {};
   const emptyDocs = () => Object.fromEntries([...requirementKeys.map(key => [key,false]),...noteKeys.map(key => [key,''])]);
 
   function blank(master) {
     const forms = definitions(master);
     const changeForm = forms.rawMaterial ? 'rawMaterial' : Object.keys(forms)[0] || 'rawMaterial';
-    return { status:'draft',changeForm,riskLevel:'RL2',...Object.fromEntries(textFields.map(key=>[key,''])),
+    return { status:'draft',documentType:'',changeForm,riskLevel:'RL2',...Object.fromEntries(textFields.map(key=>[key,''])),
       sampleSubmitted:'pending',priceLevel:'no-change',changeRows:[],internalReview:{materialCodeDescription:'',docs:emptyDocs()} };
   }
 
@@ -31,7 +33,7 @@
     const review=record.internalReview || {};
     const docs={...emptyDocs(),...Object.fromEntries(requirementKeys.map(key=>[key,review.docs?.[key]===true])),
       ...Object.fromEntries(noteKeys.map(key=>[key,string(review.docs?.[key])]))};
-    return {changeForm:string(record.changeForm)||'rawMaterial',riskLevel:string(record.riskLevel)||'RL2',
+    return {...(documentType(record.documentType)?{documentType:documentType(record.documentType)}:{}),changeForm:string(record.changeForm)||'rawMaterial',riskLevel:string(record.riskLevel)||'RL2',
       ...Object.fromEntries(textFields.map(key=>[key,string(record[key])])),
       sampleSubmitted:string(record.sampleSubmitted)||'pending',priceLevel:string(record.priceLevel)||'no-change',
       changeRows:copyRows(record.changeRows),internalReview:{materialCodeDescription:string(review.materialCodeDescription),docs}};
@@ -79,7 +81,7 @@
 
   function fieldStage(field) {
     if (['materialCodeDescription','internalReview.materialCodeDescription'].includes(field) || field?.startsWith('internalReview.docs.')) return 'documents';
-    if (['supplierName','manufacturerName','materialName','changeForm','riskLevel'].includes(field)) return 'details';
+    if (['documentType','supplierName','manufacturerName','materialName','changeForm','riskLevel'].includes(field)) return 'details';
     if ([...textFields,'sampleSubmitted','priceLevel','changeRows'].includes(field)) return 'changes';
     return 'review';
   }

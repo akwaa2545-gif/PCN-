@@ -154,7 +154,7 @@ test('Developer opens Administrator frontend pages and can sign every valid form
   const source = fs.readFileSync('app.js', 'utf8');
   const functionSource = source.slice(source.indexOf('  function canSignStep('), source.indexOf('  function getApprovalRouteControls('));
   const state = { user: { roles: ['developer'], department: 'developer', isActive: true } };
-  const context = vm.createContext({ state });
+  const context = vm.createContext({ state, types: require('../pcn-types') });
   vm.runInContext(functionSource, context);
   for (const group of ['signoff.gscTet', 'signoff.prodEngTet', 'signoff.qaTet', 'tapbu.gsc', 'tapbu.qa', 'qateFinal.signoff']) {
     for (const action of ['approved', 'checked', 'prepared']) assert.equal(context.canSignStep(group, action), true);

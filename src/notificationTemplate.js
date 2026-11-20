@@ -101,4 +101,32 @@ function buildPcnUpdateNotificationMessage(record, notification) {
   return buildNotificationMessage(record, notification, false);
 }
 
-module.exports = { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage };
+function buildReviewDeadlineNotificationMessage(record, notification) {
+  if (!record || typeof record !== 'object' || Array.isArray(record) || !notification || typeof notification !== 'object' || Array.isArray(notification)) {
+    throw new ApiError(503, 'Notification message is invalid');
+  }
+  const { kind, departmentLabel, role, dueAt, pcnUrl } = notification;
+  const date = typeof dueAt === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(dueAt) ? new Date(dueAt) : null;
+  if (!['due_soon', 'overdue'].includes(kind) || !date || !Number.isFinite(date.getTime())) throw new ApiError(503, 'Notification deadline is invalid');
+  const overdue = kind === 'overdue';
+  const title = overdue ? 'Review overdue' : 'Review due within 24 hours';
+  const color = overdue ? '#991b1b' : '#92400e';
+  const background = overdue ? '#fef2f2' : '#fffbeb';
+  const rows = [['PCN Code', record.id], ['Supplier', record.supplierName], ['Material', record.materialName],
+    ['Risk Level', record.riskLevel], ['Responsible Department', departmentLabel], ['Pending Signing Step', role],
+    ['Review Due Date', `${date.toISOString()} (UTC)`]]
+    .map(([label, value]) => `<tr><th align="left" style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(label)}</th><td style="padding:8px;border-bottom:1px solid #e5e7eb;">${escapeHtml(value)}</td></tr>`).join('');
+  const link = pcnUrl === undefined || pcnUrl === null || pcnUrl === '' ? '' : validateLink(pcnUrl);
+  const marker = record.isTestDocument === true ? '<p style="background:#fff0c2;color:#743a00;padding:12px;font-weight:800;">TESTING DOC</p>' : '';
+  const message = `<table role="presentation" style="width:100%;max-width:640px;border:1px solid #cbd5e1;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;"><tr><td style="padding:20px;">
+    ${marker}<div style="font-size:12px;color:#475569;">Supplier PCN Workflow</div>
+    <h1 style="font-size:22px;padding:14px;background:${background};color:${color};">${title}</h1>
+    <p>The ${escapeHtml(departmentLabel)} review is awaiting completion. ${overdue ? 'The review deadline has passed. Please complete the pending action.' : 'Please complete the pending action before the review deadline.'}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">${rows}</table>
+    ${link ? `<p><a href="${link}" style="display:inline-block;background:${color};color:#fff;padding:10px 14px;text-decoration:none;">Open PCN to take action</a></p>` : ''}
+    </td></tr></table>`;
+  if (message.length > 20000) throw new ApiError(503, 'Notification message is too large');
+  return message;
+}
+
+module.exports = { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage, buildReviewDeadlineNotificationMessage };

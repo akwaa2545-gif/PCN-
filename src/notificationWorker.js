@@ -1,9 +1,11 @@
 const crypto = require('node:crypto');
 const sql = require('mssql');
-const { lockUserMailRouting, readUserMailAssignments, readGeneralNotificationUsers, filterPendingRecipients } = require('./userMailRouting');
-const { filterPendingUpdates } = require('./notificationUpdates');
-const { actions, resolveNextMailTarget } = require('./mailRouting');
+const { lockUserMailRouting, filterPendingRecipients } = require('./userMailRouting');
+const { filterPendingUpdates, notificationRecipient } = require('./notificationUpdates');
+const { actions, resolveNextMailTarget, legacyDefinitions } = require('./mailRouting');
 const { routeGroups } = require('./workflowAccess');
+const { readNotificationSettings, readPreferenceUsers, defaultRoutingRecipients, filteredPreferenceMail,
+  validBatchEvent } = require('./notificationPreferenceRuntime');
 
 function currentAction(payload, job, row) {
   if (!row) return false;
@@ -18,10 +20,10 @@ function currentAction(payload, job, row) {
       const step = stage.split('.').reduce((value, key) => value?.[key], review);
       return actions.every(action => step?.[action] === true);
     });
-  const target = resolveNextMailTarget({ status: finalNotice ? 'approved' : row.Status,
+  const target = resolveNextMailTarget({ ...extra, id: row.PcnCode, status: finalNotice ? 'approved' : row.Status,
     riskLevel: row.RiskLevel, internalReview: review });
   return Boolean(target && !target.blockedReason && snapshot.pcnId === job.PcnId && row.PcnCode === job.PcnId
-    && snapshot.activationId === state.activationId && job.EventKey === `${job.PcnId}:${state.activationId}:handoff`
+    && snapshot.activationId === state.activationId && validBatchEvent(`${job.PcnId}:${state.activationId}:handoff`, job, payload)
     && job.Action === (target.action || 'notification')
     && ['stageKey', 'action', 'groupKey'].every(key => snapshot[key] === target[key] && state[key] === target[key]));
 }
@@ -30,6 +32,7 @@ class NotificationWorker {
   constructor(pool, options = {}) {
     this.pool = pool;
     this.integrationService = options.integrationService;
+    this.reviewDeadlineNotifications = options.reviewDeadlineNotifications;
     this.clock = options.clock || (() => new Date());
     this.lastCheck = { lastCheckedAt: null, lastOutcome: null };
   }
@@ -72,28 +75,61 @@ class NotificationWorker {
       // Expired leases are ambiguous; never return them to the pending queue.
       const result = await tx.request().query(`UPDATE pcn.NotificationJobs SET Status=N'uncertain',
         LastError=N'Worker lease expired; operator review required' WHERE Status=N'sending' AND LeaseExpiresAt<SYSUTCDATETIME();
-        SELECT TOP(1) Id,PayloadJson,PcnId,Action,EventKey FROM pcn.NotificationJobs WITH(UPDLOCK,READPAST,ROWLOCK)
+        SELECT TOP(1) Id,PayloadJson,PcnId,PcnVersion,CompletedGroup,Action,EventKey FROM pcn.NotificationJobs WITH(UPDLOCK,READPAST,ROWLOCK)
         WHERE Status=N'pending' ORDER BY CreatedAt,Id;`);
       const row = result.recordset[0];
       if (!row) { await tx.commit(); return null; }
       const savedPayload = JSON.parse(row.PayloadJson);
+      const settings = await readNotificationSettings(tx);
       let payload;
       let staleAction = false;
-      if (savedPayload.notificationKind === 'pcn_update') {
-        const current = await tx.request().input('code', sql.NVarChar(32), savedPayload.updateSnapshot?.pcnId)
+      if (savedPayload.notificationKind !== undefined && !['review_deadline', 'pcn_update'].includes(savedPayload.notificationKind)) {
+        payload = {}; staleAction = true;
+      } else if (savedPayload.notificationKind === 'review_deadline') {
+        payload = this.reviewDeadlineNotifications
+          ? await this.reviewDeadlineNotifications.prepareClaim(tx, row, savedPayload, this.clock()) : null;
+        staleAction = !payload;
+        payload = payload || {};
+      } else if (savedPayload.notificationKind === 'pcn_update') {
+        const current = await tx.request().input('code', sql.NVarChar(32), row.PcnId)
           .query('SELECT PcnCode,OwnerUserId FROM pcn.PcnRequests WITH(HOLDLOCK) WHERE PcnCode=@code AND DeletedAt IS NULL');
-        const row = current.recordset[0];
-        const record = row ? { id: row.PcnCode, ownerUserId: row.OwnerUserId } : null;
-        payload = filterPendingUpdates(savedPayload, await readGeneralNotificationUsers(tx), record);
+        const currentRow = current.recordset[0];
+        const record = currentRow ? { id: currentRow.PcnCode, ownerUserId: currentRow.OwnerUserId } : null;
+        const users = await readPreferenceUsers(tx, settings);
+        const scope = Array.isArray(savedPayload.updateSnapshot?.departmentKeys) ? savedPayload.updateSnapshot.departmentKeys : [];
+        const defaults = users.map(user => notificationRecipient(user, record, scope)).filter(Boolean);
+        const snapshot = savedPayload.notificationPreferenceSnapshot;
+        const legacy = snapshot ? savedPayload : filterPendingUpdates(savedPayload, users, record);
+        const types = snapshot ? [snapshot.type] : ['submitted', 'updated', 'completed'];
+        const valid = row.PcnId === savedPayload.updateSnapshot?.pcnId && (!snapshot || (types.every(type => ['submitted', 'updated', 'completed'].includes(type))
+          && Number.isSafeInteger(snapshot.batchIndex) && snapshot.batchIndex >= 0 && snapshot.batchIndex <= 9999
+          && row.PcnId === savedPayload.updateSnapshot?.pcnId
+          && row.EventKey === `${row.PcnId}:${row.PcnVersion}:update:${snapshot.batchIndex}`));
+        payload = valid ? this.filterPreferences(settings, types, legacy, { record, users, defaultRecipients: defaults }) : null;
+        staleAction = !payload; payload = payload || {};
       } else {
-        if (savedPayload.actionSnapshot || ['prepared', 'checked', 'approved', 'notification'].includes(row.Action)) {
-          const current = await tx.request().input('code', sql.NVarChar(32), row.PcnId)
-            .query(`SELECT p.PcnCode,p.Status,p.RiskLevel,p.LegacyExtrasJson,r.ReviewJson
+        const current = await tx.request().input('code', sql.NVarChar(32), row.PcnId)
+            .query(`SELECT p.PcnCode,p.Status,p.RiskLevel,p.OwnerUserId,p.LegacyExtrasJson,r.ReviewJson
               FROM pcn.PcnRequests p WITH(HOLDLOCK) LEFT JOIN pcn.PcnInternalReviews r WITH(HOLDLOCK) ON r.PcnId=p.PcnId
               WHERE p.PcnCode=@code AND p.DeletedAt IS NULL`);
-          staleAction = !currentAction(savedPayload, row, current.recordset[0]);
+        const currentRow = current.recordset[0];
+        const record = currentRow ? { ...JSON.parse(currentRow.LegacyExtrasJson || '{}'), id: currentRow.PcnCode,
+          status: currentRow.Status, riskLevel: currentRow.RiskLevel, ownerUserId: currentRow.OwnerUserId,
+          internalReview: JSON.parse(currentRow.ReviewJson || '{}') } : null;
+        const users = await readPreferenceUsers(tx, settings);
+        if (savedPayload.actionSnapshot || ['prepared', 'checked', 'approved', 'notification'].includes(row.Action)) {
+          staleAction = !currentAction(savedPayload, row, currentRow);
         }
-        payload = savedPayload.routingSnapshot ? filterPendingRecipients(savedPayload, await readUserMailAssignments(tx)) : savedPayload;
+        const key = savedPayload.actionSnapshot?.groupKey;
+        const defaults = key ? defaultRoutingRecipients(settings, users, key)
+          : this.legacyRecipients(settings, row.CompletedGroup, record, savedPayload.legacyRoutingSnapshot?.nextGroupKey);
+        if (!key && savedPayload.notificationPreferenceSnapshot && !validBatchEvent(
+          `${row.PcnId}:${row.PcnVersion}:${row.CompletedGroup}:completed`, row, savedPayload)) staleAction = true;
+        const candidate = savedPayload.notificationPreferenceSnapshot ? savedPayload : filterPendingRecipients(savedPayload, users);
+        payload = !staleAction && record && (!savedPayload.notificationPreferenceSnapshot
+          || savedPayload.notificationPreferenceSnapshot.type === 'actionRequired')
+          ? this.filterPreferences(settings, ['actionRequired'], candidate, { record, users, defaultRecipients: defaults }) : null;
+        staleAction = staleAction || !payload; payload = payload || {};
       }
       const cancelled = staleAction || Boolean((savedPayload.routingSnapshot || savedPayload.notificationKind === 'pcn_update') && !payload.to);
       await tx.request().input('id', sql.UniqueIdentifier, row.Id).input('token', sql.UniqueIdentifier, claimToken)
@@ -111,6 +147,21 @@ class NotificationWorker {
       try { await tx.rollback(); } catch { /* Preserve the original database error. */ }
       throw error;
     }
+  }
+
+  filterPreferences(settings, types, payload, context) {
+    try { return filteredPreferenceMail(settings, types, payload, context); }
+    catch (error) { if (error.statusCode === 400 || error.statusCode === 503) return null; throw error; }
+  }
+
+  legacyRecipients(settings, completedGroup, record, savedKey) {
+    if (!record) return [];
+    const route = [...routeGroups(record.riskLevel, record.internalReview), 'supplierNotification'];
+    const next = route[route.indexOf(completedGroup) + 1];
+    if (savedKey && savedKey !== next) return [];
+    if (!legacyDefinitions.some(group => group.key === next)) return [];
+    const groups = settings.schemaVersion === 2 ? settings.legacyGroups : settings.groups;
+    return [groups?.find(group => group.key === next)?.emails || ''];
   }
 
   async health() {

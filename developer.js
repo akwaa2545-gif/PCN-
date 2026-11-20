@@ -1,14 +1,15 @@
 (function (root, factory) {
   'use strict';
-  const api = factory();
+  const api = factory(typeof module === 'object' && module.exports ? require('./pcn-types') : root.PCN_TYPES);
   if (typeof module === 'object' && module.exports) module.exports = api;
   else {
     root.PCN_DEVELOPER_TOOLS = api;
     root.document.addEventListener('DOMContentLoaded', () => api.mount(root));
   }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (pcnTypes) {
   'use strict';
-  const pcnPattern = /^PCN-\d{4}-\d{4}$/;
+  const validPcn = value => pcnTypes.isCode(value);
+  const tabNames = ['workflow', 'transactions', 'adminTools'];
   function isDeveloper(user) {
     return Boolean(user?.isActive === true && Array.isArray(user.roles) && user.roles.length === 1
       && typeof user.roles[0] === 'string' && user.roles[0].toLowerCase() === 'developer'
@@ -16,7 +17,7 @@
   }
   function requestedPcn(search) {
     const ids = new URLSearchParams(search).getAll('pcn');
-    return ids.length === 1 && pcnPattern.test(ids[0]) ? ids[0] : '';
+    return ids.length === 1 && validPcn(ids[0]) ? ids[0] : '';
   }
   function displayValue(value) {
     if (value === null || value === undefined || value === '') return '—';
@@ -277,7 +278,7 @@
       try {
         const data = await root.PCN_SESSION.fetch('/api/developer/pcns');
         if (generation !== state.listGeneration) return;
-        state.list = (Array.isArray(data?.items) ? data.items : []).filter(item => pcnPattern.test(item.id || ''));
+        state.list = (Array.isArray(data?.items) ? data.items : []).filter(item => validPcn(item.id));
         state.selected = state.list.some(item => item.id === preferredId) ? preferredId : '';
         renderChoices();
         lock(false);
@@ -296,7 +297,9 @@
       }
     }
     function chooseTab(target, focus = false) {
-      for (const name of ['workflow', 'transactions']) {
+      el('developerPcnPicker').hidden = target === 'adminTools';
+      el('refreshDeveloper').hidden = target === 'adminTools';
+      for (const name of tabNames) {
         const active = name === target, tab = el(`${name}Tab`);
         tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
         el(`${name}Panel`).hidden = !active;
@@ -313,12 +316,14 @@
       for (const [id, delta] of [['transactionPrevious', -1], ['transactionNext', 1]]) {
         el(id).addEventListener('click', () => { state.page += delta; renderTransactions(); });
       }
-      for (const name of ['workflow', 'transactions']) {
+      for (const [index, name] of tabNames.entries()) {
         el(`${name}Tab`).addEventListener('click', () => chooseTab(name));
         el(`${name}Tab`).addEventListener('keydown', event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
           event.preventDefault();
-          chooseTab(event.key === 'Home' ? 'workflow' : event.key === 'End' ? 'transactions' : name === 'workflow' ? 'transactions' : 'workflow', true);
+          const target = event.key === 'Home' ? 0 : event.key === 'End' ? tabNames.length - 1
+            : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabNames.length) % tabNames.length;
+          chooseTab(tabNames[target], true);
         });
       }
     }

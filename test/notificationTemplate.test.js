@@ -1,9 +1,49 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage } = require('../src/notificationTemplate');
+const { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage, buildReviewDeadlineNotificationMessage } = require('../src/notificationTemplate');
+
+test('deadline messages do not hardcode a three-day allowance when administrators can change it', () => {
+  const message = buildReviewDeadlineNotificationMessage({ id: 'PCN-2026-0001' }, {
+    departmentLabel: 'QA/TET', role: 'Prepared', dueAt: '2026-10-30T00:00:00Z', kind: 'due_soon'
+  });
+  assert.doesNotMatch(message, /three-calendar-day/);
+});
 
 const record = { id: 'PCN-2026-0001', supplierName: 'Supplier ไทย', materialName: 'Copper strip', riskLevel: 'RL2' };
 const notification = { completedGroup: 'GSC/TET', nextGroup: 'Prod.Eng/TET', pcnUrl: 'https://pcn.example/form.html?id=PCN-2026-0001' };
+
+test('deadline mail distinguishes amber due soon from red overdue for either department', () => {
+  for (const departmentLabel of ['Prod.Eng/TET', 'QA/TET']) {
+    for (const [kind, title, color] of [['due_soon', 'Review due within 24 hours', '#92400e'], ['overdue', 'Review overdue', '#991b1b']]) {
+      const message = buildReviewDeadlineNotificationMessage(record, { departmentLabel, role: 'Checked',
+        dueAt: '2026-10-26T09:45:00.000Z', kind, pcnUrl: notification.pcnUrl });
+      for (const value of [title, color, departmentLabel, 'Checked', '2026-10-26T09:45:00.000Z (UTC)', record.id, 'Open PCN to take action']) assert.ok(message.includes(value), value);
+      assert.ok(message.length < 20000);
+    }
+  }
+});
+
+test('deadline mail escapes details and preserves test-document marker', () => {
+  const message = buildReviewDeadlineNotificationMessage({ ...record, isTestDocument: true, supplierName: '<img src=x>' }, {
+    departmentLabel: 'QA/TET<script>', role: '<b>Approved</b>', dueAt: '2026-10-26T09:45:00Z', kind: 'overdue', pcnUrl: notification.pcnUrl });
+  assert.match(message, /TESTING DOC/);
+  assert.match(message, /&lt;img src=x&gt;/);
+  assert.match(message, /QA\/TET&lt;script&gt;/);
+  assert.doesNotMatch(message, /<img|<script>|<b>Approved/);
+});
+
+test('deadline template rejects unsafe inputs and transport overflow', () => {
+  const options = { departmentLabel: 'QA/TET', role: 'Prepared', dueAt: '2026-10-26T09:45:00Z', kind: 'due_soon' };
+  for (const change of [{ kind: 'daily' }, { dueAt: 'bad' }, { dueAt: null }, { pcnUrl: 'javascript:alert(1)' }, { role: {} }]) {
+    assert.throws(() => buildReviewDeadlineNotificationMessage(record, { ...options, ...change }), { statusCode: 503 });
+  }
+  for (const value of [null, [], 'bad']) {
+    assert.throws(() => buildReviewDeadlineNotificationMessage(value, options), { statusCode: 503 });
+    assert.throws(() => buildReviewDeadlineNotificationMessage(record, value), { statusCode: 503 });
+  }
+  assert.throws(() => buildReviewDeadlineNotificationMessage({ ...record, supplierName: '<'.repeat(10000) }, options), { statusCode: 503 });
+  assert.doesNotMatch(buildReviewDeadlineNotificationMessage(record, options), /<a /);
+});
 
 test('workflow email restores the original rich HTML with status, details and an Open PCN button', () => {
   const message = buildWorkflowNotificationMessage(record, notification);

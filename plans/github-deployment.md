@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-10-16. Signed `pcn-test-21-1` is installed on the existing HTTP :8443 origin. All 28 CI steps, exact-release identity, 31 public asset checks and SQL readiness passed. Migrations 001–007 were already applied with matching checksums. Five live browser groups passed. A repeat consumer returned `already_current` with Node PID 8400 unchanged, and final independent checks confirmed the SYSTEM task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
+Updated: 2026-10-19. Signed `pcn-test-22-2` is installed with canonical origin `http://tet-pcn.kemet.com:8443`. Release CI, exact-release identity, SQL readiness and guarded real DNS browser login/session/CSRF/logout acceptance passed. Only the two approved nonsecret origin settings changed; private file ACLs, proxy, IIS binding, firewall scope and deployment trust anchors were retained. Repeat consumer and SYSTEM task checks returned `already_current`; final independent checks confirmed Node PID 10044 unchanged and the task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -13,6 +13,10 @@ Push main -> Windows Actions tests -> production runtime ZIP -> signed prereleas
                                       |
                              failed check -> previous release
 ```
+
+## Pending System Settings release — not deployed
+
+The 2026-10-21 local settings feature adds `system-settings.html/js/css` to the runtime allowlist and requires explicit SQL migration **008_workflow_settings.sql**. After the user approved a local startup repair, migration 008 was applied to configured `SVR120A / Scn_DB`, preserving existing business counts and PCN versions; local readiness now succeeds. SQL migration scripts remain excluded from public runtime archives and are never run by the consumer. Update the protected consumer's reviewed asset allowlist separately before selecting a release containing these assets. Earlier signed runtime evidence describes the version originally validated against migrations 001–007; no signed deployment of the settings page was performed.
 
 ## Build and signing contract
 
@@ -34,7 +38,7 @@ The allowlist excludes `.env`, credentials, certificates, private keys, reposito
 
 The established IIS site, certificate, service and configuration are described in [windows-test-deployment.md](windows-test-deployment.md). This pipeline changes the running application release only. It does not create SQL tables, import data, bootstrap users, change IIS/firewall settings, distribute certificates or send integration mail.
 
-Automatic updates, introduced in runtime 15 and retained in runtime 21, reuse the existing `session-client.js` asset and authorized GET routes. Visible pages poll every five seconds; unchanged data is not redrawn, filters/focus/scroll are retained, and hidden pages pause. Busy actions, open dialogs and routing drafts defer refresh; failures back off to thirty seconds. Clean saved PCNs refresh automatically, while unsaved edits keep their saved-version baseline and show **Reload latest** with discard confirmation. This needs no protected-consumer or IIS update and makes no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
+Automatic updates, introduced in runtime 15 and retained in runtime 22, reuse the existing `session-client.js` asset and authorized GET routes. Visible pages poll every five seconds; unchanged data is not redrawn, filters/focus/scroll are retained, and hidden pages pause. Busy actions, open dialogs and routing drafts defer refresh; failures back off to thirty seconds. Clean saved PCNs refresh automatically, while unsaved edits keep their saved-version baseline and show **Reload latest** with discard confirmation. This needs no protected-consumer or IIS update and makes no SQL writes or mail calls. Runtime 15's live acceptance remains historical evidence below.
 
 Install these independently reviewed files under `C:\SupplierPCN\deployment`, accessible for modification only by SYSTEM and local Administrators:
 
@@ -98,7 +102,17 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current runtime — pcn-test-21-1; motion and compact laptop layouts
+### Current runtime — pcn-test-22-2; internal DNS login origin
+
+[Actions 39224662731, attempt 2](https://github.com/akwaa2545-gif/PCN-/actions/runs/39224662731/attempts/2) passed all configured gates in 6m 55s and published signed [pcn-test-22-2](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-22-2) from commit `db43208503ff611adebcc24fb42d226f22750bf9`. The 15,878,057-byte ZIP has SHA-256 `7046a203bb6a3ff61533b5078b0d55c96b910d6b1985133422437d762f1d97aa`. Attempt 1 stopped on an unrelated motion/Create browser-fixture undefined-model failure; two local passes of the seven-group suite supported retrying the same source without an application change. Local validation passed all 991 tests, including 20 targeted origin/configuration checks, with 88.25% line / 91.10% branch / 94.62% function coverage. An isolated DNS browser journey also passed login, host-only HTTP cookie isolation, session, CSRF rejection and logout.
+
+The signed runtime was installed at observed host UTC `2026-10-19T09:07:08.2076185Z`, initially retaining the IP origin. The approved configuration switch completed at `2026-10-19T09:07:55.0357595Z`, changing only `PUBLIC_ORIGIN=http://tet-pcn.kemet.com:8443` and `INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com`. The protected backup is `C:\SupplierPCN\deployment\dns-origin-transition\20261019T090745Z-0ea1e8e96c5a4f00a8cf413aff409a7d`. Environment ACLs were unchanged; the resulting environment SHA-256 is `302CCF97309F662E5A8B55D5742B1A10F16D478599549CF24E0F32F8E70042F8`. SQL/integration values, production mode, loopback backend, proxy, IIS HTTP :8443 binding, employee-network firewall restrictions and deployment trust anchors were retained. Deployment ran no DDL, account import, business-data mutation or test mail.
+
+DNS SQL readiness and `/login` returned 200. An empty login with the exact DNS Origin reached authentication (401), while old-IP, wrong-scheme, wrong-port and lookalike Origins returned 403. Private `.env` and `server.js` requests returned 404. Guarded real browser acceptance passed at workstation UTC `2026-10-19T09:03:54.117Z`–`2026-10-19T09:04:20.226Z`: employee-code login returned 200 with `returnTo=/`, Portal loaded, the host-only HttpOnly / SameSite Strict `pcn_session_http` cookie remained isolated from the IP URL, authenticated reload succeeded, missing-CSRF logout returned 403 and valid logout returned 200 with the session revoked. Only existing-account login/logout requests were allowed as writes; profile/notification integration reads were guarded locally. There were no page errors, blocked requests, business writes or operational mail calls. An earlier fixture run logged in but failed while reading a login response body after immediate navigation; cleanup revoked that session, and the corrected repeat is the acceptance evidence. The host clock runs ahead of the workstation, so these timestamps are recorded separately. Ignored evidence is in `test-results/dns-origin-live.json`.
+
+Repeat protected-consumer and SYSTEM task checks returned `already_current`; at observed host UTC `2026-10-19T09:11:25.3952518Z`, the task was enabled / Ready / last result 0 with Node PID 10044 unchanged. Final independent checks at `2026-10-19T09:12:16.6141552Z` confirmed runtime 22 / commit `db43208503ff611adebcc24fb42d226f22750bf9`, exact-release Node PID 10044 beneath WinSW parent PID 1800 as NetworkService, the sole `127.0.0.1:3000` listener, the exact DNS configuration, SQL readiness, preserved environment ACL/proxy/control hashes and IIS HTTP :8443 binding, and unrelated Default Web Site HTTP :80 returning 200. The task remained enabled / Ready / last result 0. Ignored evidence is in `test-results/dns-origin-resumed.json` and `test-results/dns-origin-identity-final.json`.
+
+### Historical runtime — pcn-test-21-1; motion and compact laptop layouts
 
 [Actions 38845184965](https://github.com/akwaa2545-gif/PCN-/actions/runs/38845184965) completed all 28 steps successfully and published signed [pcn-test-21-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-21-1) from commit `1d6f77f9e27307033c09a3f3d5c96568cd06c1bc` at `2026-10-16T03:29:24Z`. The 15,877,833-byte ZIP has SHA-256 `abac6c298b9c259a6e352d1c6d687605da71222f8eee9aafdf4067c1ebffdb24`. CI passed its unit/API, high/critical audit and existing browser gates, plus the normal motion, native-select, compatibility, populated Users and compact Records suites. Local verification passed 989 tests with 88.23% line / 91.09% branch / 94.61% function coverage; detailed fixture/LAN evidence is in [the motion and layout record](ui-motion.md).
 

@@ -19,12 +19,19 @@ test('browser and server readiness share identical policies and output', () => {
 });
 
 test('readiness preserves required clean file checks and advisory sample date', () => {
-  const record = {supplierName:'S',materialName:'M',selectedChange:'C',reason:'R',currentCondition:'O',newCondition:'N',desiredStart:'Lot',sampleSubmitted:'yes',internalReview:{docs:{greenProcurement:true}}};
+  const record = {documentType:'ta',supplierName:'S',materialName:'M',selectedChange:'C',reason:'R',currentCondition:'O',newCondition:'N',desiredStart:'Lot',sampleSubmitted:'yes',internalReview:{docs:{greenProcurement:true}}};
   for (const file of [{scanStatus:'pending'}, {scanStatus:'clean',isDeleted:true}, {scanStatus:'clean',DeletedAt:'now'}]) {
     assert.equal(shared.buildChecks(record,[{requirementName:'greenProcurement',...file}]).ready,false);
   }
   const result = shared.buildChecks(record,[{requirementName:'greenProcurement',scanStatus:'clean'}]);
   assert.equal(result.ready,true);
   assert.equal(result.items.find(item => item.key==='sampleSubmittedDate').blocking,false);
-  assert.equal(shared.buildChecks({}).items.length,8);
+  assert.equal(shared.buildChecks({}).items.length,9);
+});
+
+test('new PCNs require TA or SC while saved legacy records stay readable', () => {
+  const check = record => shared.buildChecks(record).items.find(item => item.key === 'documentType');
+  assert.equal(check({}).complete, false);
+  assert.equal(check({documentType:'sc'}).complete, true);
+  assert.equal(check({id:'PCN-2026-0001'}), undefined);
 });

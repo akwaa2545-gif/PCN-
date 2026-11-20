@@ -86,8 +86,9 @@ async function main() {
     assert.equal((await signingIn).status(), 200, 'Entering the complete employee code signs in automatically');
     await page.waitForURL(`${origin}/form.html`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#saveDraftButton')).toBeEnabled();
+    await page.locator('#documentType').selectOption('ta');
     const save = async (draft = false) => {
-      const response = page.waitForResponse(res => /\/api\/pcns(?:\/PCN-\d{4}-\d{4})?$/.test(new URL(res.url()).pathname) && ['POST', 'PATCH'].includes(res.request().method()));
+      const response = page.waitForResponse(res => /\/api\/pcns(?:\/(?:PCN-\d{4}-\d{4}|[TS]-\d{8}))?$/.test(new URL(res.url()).pathname) && ['POST', 'PATCH'].includes(res.request().method()));
       await page.locator(draft ? '#saveDraftButton' : '#submitButton').click();
       const result = await response;
       assert.ok(result.ok(), `Save failed: ${result.status()} ${await result.text()}`);

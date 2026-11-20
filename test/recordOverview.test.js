@@ -55,6 +55,70 @@ test('overdue requires explicit valid review deadline and active record; desired
   assert.equal(buildRecordOverview({...record,updatedAt:'2026-10-12T02:00:00+07:00'},admin,[],[],now).dashboard.pending.since,'2026-10-11T19:00:00.000Z');
 });
 
+test('Prod.Eng overview uses the persisted handoff deadline and keeps explicit deadlines separate', () => {
+  const current = { ...record, reviewTiming: { prodEngTet: { startedAt: '2026-10-11T12:00:00.000Z' } },
+    internalReview: { signoff: { gscTet: { prepared: true, checked: true, approved: true }, prodEngTet: { prepared: true } } } };
+  const onTime = buildRecordOverview(current, admin, [], [], now).dashboard.pending;
+  assert.equal(onTime.prodEngDeadline.dueAt, '2026-10-14T12:00:00.000Z');
+  assert.equal(onTime.prodEngDeadline.overdue, false);
+  assert.equal(onTime.overdue, false);
+  assert.equal(onTime.departmentOverdueDays, null);
+  assert.equal(onTime.reviewDueAt, null);
+  const overdue = buildRecordOverview(current, admin, [], [], new Date('2026-10-14T12:00:00.001Z')).dashboard.pending;
+  assert.equal(overdue.prodEngDeadline.overdue, true);
+  assert.equal(overdue.overdue, true);
+  assert.equal(overdue.departmentOverdueDays, 0);
+  assert.ok(overdue.reasons.includes('overdue'));
+  assert.equal(overdue.needsAttention, true);
+  const explicit = buildRecordOverview({ ...current, reviewDueAt: '2026-10-20T12:00:00Z' }, admin, [], [], new Date('2026-10-15T12:00:00Z')).dashboard.pending;
+  assert.equal(explicit.reviewDueAt, '2026-10-20T12:00:00.000Z');
+  assert.equal(explicit.prodEngDeadline.dueAt, '2026-10-14T12:00:00.000Z');
+  assert.equal(explicit.overdue, true);
+  assert.equal(explicit.departmentOverdueDays, 1);
+  assert.equal(explicit.reviewOverdueDays, null);
+  const both = buildRecordOverview({ ...current, reviewDueAt: '2026-10-13T12:00:00Z' }, admin, [], [], new Date('2026-10-17T12:00:00Z')).dashboard.pending;
+  assert.equal(both.departmentOverdueDays, 3);
+  assert.equal(both.reviewOverdueDays, 4);
+  const completed = buildRecordOverview({ ...current, internalReview: { signoff: {
+    gscTet: { prepared: true, checked: true, approved: true }, prodEngTet: { prepared: true, checked: true, approved: true } } } }, admin, [], [], now).dashboard.pending;
+  assert.equal(completed.prodEngDeadline, null);
+  assert.equal(completed.overdue, null);
+  assert.equal(completed.departmentOverdueDays, null);
+});
+
+test('legacy active Prod.Eng records report unknown deadlines without manufacturing one from status or saved age', () => {
+  const current = { ...record, status: 'technical_review',
+    internalReview: { signoff: { gscTet: { prepared: true, checked: true, approved: true } } } };
+  const pending = buildRecordOverview(current, admin, [], [], now).dashboard.pending;
+  assert.equal(pending.prodEngDeadline.source, 'unknown');
+  assert.equal(pending.prodEngDeadline.dueAt, null);
+  assert.equal(pending.overdue, null);
+  assert.ok(!pending.reasons.includes('overdue'));
+  const waiting = buildRecordOverview({ ...record, status: 'technical_review' }, admin, [], [], now).dashboard.pending;
+  assert.equal(waiting.prodEngDeadline, null);
+});
+
+test('QA review deadline follows Prod.Eng completion and clears before final judgment', () => {
+  const done = { prepared: true, checked: true, approved: true };
+  const current = { ...record, reviewTiming: { qaTet: { startedAt: '2026-10-11T12:00:00.000Z' } },
+    internalReview: { signoff: { gscTet: done, prodEngTet: done, qaTet: { prepared: true } } } };
+  const pending = buildRecordOverview(current, admin, [], [], new Date('2026-10-14T12:00:00.001Z')).dashboard.pending;
+  assert.equal(pending.prodEngDeadline, null);
+  assert.equal(pending.qaDeadline.label, 'QA/TET');
+  assert.equal(pending.qaDeadline.dueAt, '2026-10-14T12:00:00.000Z');
+  assert.deepEqual(pending.activeReviewDeadline, pending.qaDeadline);
+  assert.equal(pending.overdue, true);
+  assert.ok(pending.reasons.includes('overdue'));
+  const complete = { ...current, internalReview: { signoff: { ...current.internalReview.signoff, qaTet: done } } };
+  const finished = buildRecordOverview(complete, admin, [], [], now).dashboard.pending;
+  assert.equal(finished.qaDeadline, null);
+  assert.equal(finished.activeReviewDeadline, null);
+  assert.equal(finished.overdue, null);
+  const legacy = buildRecordOverview({ ...current, reviewTiming: undefined }, admin, [], [], now).dashboard.pending;
+  assert.equal(legacy.qaDeadline.source, 'unknown');
+  assert.equal(legacy.overdue, null);
+});
+
 test('supplier names remain restricted and active assignees require correct signing permission', () => {
   const supplier={id:'supplier',roles:['supplier'],isActive:true};
   assert.deepEqual(buildRecordOverview(record,supplier,[assigned],[clean],now).dashboard.action.people,[]);

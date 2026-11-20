@@ -9,12 +9,14 @@ const { SqlAuthRepository } = require('./src/sqlAuthRepository');
 const { IntegrationService } = require('./src/integrationService');
 const { NotificationService } = require('./src/notificationService');
 const { NotificationWorker } = require('./src/notificationWorker');
+const { ReviewDeadlineNotifications } = require('./src/reviewDeadlineNotifications');
 const { SqlDocuments } = require('./src/sqlDocuments');
 const { createAttachmentScanner } = require('./src/attachmentScanner');
 const { createApp } = require('./src/httpServer');
 const { readAuthConfiguration } = require('./src/authConfiguration');
 const { SqlEmployeeDirectory } = require('./src/sqlEmployeeDirectory');
 const { COOKIE_NAME, HTTP_COOKIE_NAME } = require('./src/authHttp');
+const { assertEmployeePasswordReadiness } = require('./src/employeePasswordReadiness');
 
 function parsePublicOrigin(value) {
   if (typeof value !== 'string' || !value) throw new Error('Invalid PUBLIC_ORIGIN: use a canonical HTTP or HTTPS origin');
@@ -77,14 +79,26 @@ async function main() {
   const atomicNotifications = new NotificationService(pool,{publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL,mailConfigurationStatus:()=>integrationService.mailConfigurationStatus()});
   const repository = new SqlPcnRepository(pool,{notifications:atomicNotifications});
   await repository.readiness();
-  const worker = new NotificationWorker(pool,{integrationService});
+  const passwordReadiness = authConfiguration.mode === 'employee-password' ? () => assertEmployeePasswordReadiness(pool) : null;
+  if (passwordReadiness) await passwordReadiness();
+  const reviewDeadlineNotifications = new ReviewDeadlineNotifications(pool,{notificationService:atomicNotifications});
+  const worker = new NotificationWorker(pool,{integrationService,reviewDeadlineNotifications});
   const authService = new AuthService(new SqlAuthRepository(pool),{authMode:authConfiguration.mode,developerPasswordHash:authConfiguration.developerPasswordHash,employeeDirectory,integrationService});
-  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,runtimeEnvironment,secureCookies,sessionCookieName});
+  server = createApp({trustProxy,rootDir:path.resolve(__dirname),repository,authService,authMode:authConfiguration.mode,passwordReadiness,employeeDirectory,integrationService,notificationWorker:worker,notificationService:new NotificationService(pool,{repository,publicOrigin,mailUrl:process.env.POWER_AUTOMATE_MAIL_URL}),documents:new SqlDocuments(pool,{scanner:attachmentScanner}),publicOrigin,runtimeEnvironment,secureCookies,sessionCookieName});
   let sending = false;
+  let nextDeadlineCheck = 0;
   timer = setInterval(async()=>{
     if (sending || !process.env.POWER_AUTOMATE_MAIL_URL) return;
     sending = true;
-    try { await worker.runOnce(); } catch (error) { console.error(JSON.stringify({level:'error',operation:'notification-worker',code:error.code || 'UNKNOWN'})); }
+    try {
+      if (Date.now() >= nextDeadlineCheck) {
+        try {
+          await reviewDeadlineNotifications.queueDue();
+          nextDeadlineCheck = Date.now() + 60000;
+        } catch (error) { console.error(JSON.stringify({level:'error',operation:'review-deadline-notifications',code:error.code || 'UNKNOWN'})); }
+      }
+      await worker.runOnce();
+    } catch (error) { console.error(JSON.stringify({level:'error',operation:'notification-worker',code:error.code || 'UNKNOWN'})); }
     finally { sending = false; }
   },5000);
   timer.unref();

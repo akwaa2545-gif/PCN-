@@ -14,9 +14,9 @@ function repository(value = legacy) {
 }
 function input(settings) { return { schemaVersion: 2, version: settings.version, groups: structuredClone(settings.groups) }; }
 
-test('five departments have three separate fixed lists and QA final reuses QA lists', () => {
-  assert.equal(mailGroups.length, 16);
-  assert.equal(new Set(mailGroups.map(group => group.key)).size, 16);
+test('seven departments have three separate fixed lists and QA final reuses QA lists', () => {
+  assert.equal(mailGroups.length, 22);
+  assert.equal(new Set(mailGroups.map(group => group.key)).size, 22);
   assert.deepEqual(mailGroups.slice(0, 3).map(group => group.action), ['prepared', 'checked', 'approved']);
   const review = { signoff: Object.fromEntries(['gscTet', 'prodEngTet', 'qaTet'].map(key => [key, { approved: true, checked: true, prepared: true }])) };
   assert.equal(resolveNextMailTarget({ riskLevel: 'RL0', status: 'submitted', internalReview: review }).groupKey, 'department.qaTet.prepared');
@@ -48,9 +48,9 @@ test('legacy contacts stay unassigned while supplier list is retained without mo
   const normalized = normalizeMailRouting(legacy);
   assert.equal(normalized.schemaVersion, 2);
   assert.match(normalized.version, /^[a-f0-9]{64}$/);
-  assert.equal(normalized.groups.length, 16);
-  assert.ok(normalized.groups.slice(0, 15).every(group => group.emails === ''));
-  assert.equal(normalized.groups[15].emails, 'supplier@example.com');
+  assert.equal(normalized.groups.length, 22);
+  assert.ok(normalized.groups.filter(group => group.key !== 'supplierNotification').every(group => group.emails === ''));
+  assert.equal(normalized.groups.find(group => group.key === 'supplierNotification').emails, 'supplier@example.com');
   assert.deepEqual(normalized.legacyGroups.find(group => group.key === 'signoff.gscTet'), legacy.groups[0]);
   assert.deepEqual(legacy, before);
 });
@@ -121,5 +121,5 @@ test('public routing response strips integration properties and unsafe profile U
   assert.equal(group.recipients[0].flowUrl, undefined);
   assert.equal(group.recipients[0].photo, '');
   assert.equal(group.recipients[0].displayName, 'Original');
-  assert.deepEqual(normalizeMailRouting(null).groups.length, 16);
+  assert.deepEqual(normalizeMailRouting(null).groups.length, 22);
 });

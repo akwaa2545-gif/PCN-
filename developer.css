@@ -27,6 +27,14 @@
 .developer-tabs button { padding: 18px 22px; border: 0; border-bottom: 4px solid transparent; border-radius: 0; color: #506a84; font: inherit; font-weight: 700; background: transparent; cursor: pointer; }
 .developer-tabs button[aria-selected="true"] { background: white; color: #003f7f; border-bottom-color: #f0b900; }
 .developer-panel { border: 1px solid #d4deea; background: #fff; padding: 26px; min-width: 0; }
+.developer-admin-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 22px; }
+.developer-admin-tool { display: flex; flex-direction: column; gap: 14px; padding: 22px; border: 1px solid #c9d5e2; border-top: 3px solid #003f7f; color: #173452; text-decoration: none; min-width: 0; }
+.developer-admin-tool h3 { margin: 0; color: #003f7f; font-size: 17px; }
+.developer-admin-tool p { margin: 0; color: #536d87; font-size: 14px; line-height: 1.6; }
+.developer-admin-tool > span { margin-top: auto; padding-top: 16px; border-top: 1px solid #d4deea; color: #003f7f; font-size: 13px; font-weight: 700; }
+.developer-admin-tool > span > span { float: right; color: #946c00; }
+.developer-admin-tool:hover { background: #f4f8fc; border-color: #003f7f; }
+.developer-admin-tool:focus-visible { outline: 3px solid #0074d4; outline-offset: 3px; }
 .developer-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .developer-summary-card { background: #f4f7fa; border-top: 3px solid #003f7f; padding: 18px; overflow-wrap: anywhere; }
 .developer-summary-card h3 { font-size: 12px; color: #536d87; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 10px; }
@@ -82,7 +90,8 @@
   .developer-heading { align-items: flex-start; }
   .developer-heading h1 { font-size: 23px; }
   .developer-picker, .developer-panel { padding: 18px 14px; }
-  .developer-picker-fields, .developer-summary, .developer-filters { grid-template-columns: 1fr; }
+  .developer-picker-fields, .developer-summary, .developer-filters, .developer-admin-tools { grid-template-columns: 1fr; }
+  .developer-tabs { flex-wrap: wrap; }
   .developer-stage ol { grid-template-columns: 1fr; }
   .developer-tabs button { padding: 15px 12px; font-size: 13px; }
   .developer-pagination { align-items: flex-start; flex-direction: column; }

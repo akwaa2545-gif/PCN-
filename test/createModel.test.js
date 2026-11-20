@@ -6,6 +6,19 @@ const { buildChecks } = require('../src/documentChecks');
 const vm=require('node:vm');
 const fs=require('node:fs');
 
+test('TA/SC selection is independent from form layout and copied without document identity', () => {
+  const blank=model.blank(master);
+  assert.equal(blank.documentType,'');
+  const typed={...model.sample(master),documentType:'sc',id:'S-19112601'};
+  assert.equal(model.toPayload(typed).documentType,'sc');
+  assert.equal(model.changeForm(typed,'packaging',master).documentType,'sc');
+  const copy=model.fromTemplate(typed);
+  assert.equal(copy.documentType,'sc');
+  assert.equal(copy.id,undefined);
+  assert.equal(model.fieldStage('documentType'),'details');
+  assert.equal(model.toPayload({id:'PCN-2026-0001'}).documentType,undefined);
+});
+
 test('blank remains empty while sample contains normal validated draft data', () => {
   const blank = model.blank(master);
   assert.equal(blank.status,'draft');
@@ -18,7 +31,8 @@ test('blank remains empty while sample contains normal validated draft data', ()
   assert.equal(sample.isTestDocument,true);
   assert.notEqual(blank.isTestDocument,true);
   assert.equal(model.toPayload(sample).isTestDocument,undefined);
-  assert.equal(buildChecks(sample).ready,true);
+  assert.equal(buildChecks(sample).ready,false);
+  assert.equal(buildChecks({...sample,documentType:'ta'}).ready,true);
   assert.equal(model.hasMeaningfulContent(sample,master),true);
   assert.ok(master.formDefinitions.rawMaterial.riskOptions.some(option => option.text===sample.selectedChange && option.risk===sample.riskLevel));
   assert.equal(Object.keys(sample).some(key=>/bypass|skip|testMode/i.test(key)),false);

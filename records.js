@@ -1,9 +1,14 @@
 (function () {
-  const columns = { id: 'PCN code', status: 'Status', riskLevel: 'Risk', supplierName: 'Supplier', materialName: 'Material', progress: 'Progress', next: 'Next responsible', documents: 'Documents', pending: 'Pending time', updatedAt: 'Updated' };
+  const pcnTypes = window.PCN_TYPES;
+  const recordType = record => pcnTypes?.typeOf(record) || null;
+  const typeLabel = record => ({ ta: 'TA', sc: 'SC' }[recordType(record)] || 'Legacy / unassigned');
+  const columns = { id: 'PCN code', documentType: 'PCN type', status: 'Status', riskLevel: 'Risk', supplierName: 'Supplier', materialName: 'Material', progress: 'Progress', next: 'Next responsible', documents: 'Documents', pending: 'Pending time', updatedAt: 'Updated' };
   const defaults = Object.keys(columns);
-  const filterKeys = ['summary', 'search', 'status', 'risk', 'supplier', 'department', 'from', 'to'];
-  const departments = { gscTet: 'GSC/TET', prodEngTet: 'Prod.Eng/TET', qaTet: 'QA/TET', gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU' };
+  const filterKeys = ['summary', 'search', 'status', 'risk', 'documentType', 'supplier', 'department', 'from', 'to'];
+  const departments = { gscTet: 'GSC/TET', prodEngTet: 'Prod.Eng/TET', prodEngTa: 'Prod.Eng/TA', prodEngSc: 'Prod.Eng/SC', qaTet: 'QA/TET', gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU' };
   const terminal = status => ['approved', 'rejected', 'closed'].includes(status);
+  const lifecycleRecords = (records, lifecycle) => records.filter(record => lifecycle === 'closed' ? terminal(record.status) : !terminal(record.status));
+  const lifecycleCounts = records => ({ open: lifecycleRecords(records, 'open').length, closed: lifecycleRecords(records, 'closed').length });
   const text = value => value === null || value === undefined || value === '' ? '—' : String(value);
   const label = value => text(value).replace(/_/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
   const validDate = value => Boolean(value) && Number.isFinite(Date.parse(value));
@@ -21,18 +26,21 @@
   function filterRecords(records, filters = {}) {
     const query = String(filters.search || '').trim().toLowerCase();
     return records.filter(record => {
+      if (filters.lifecycle === 'open' && terminal(record.status) || filters.lifecycle === 'closed' && !terminal(record.status)) return false;
       if (filters.summary === 'review' && !inReview(record)) return false;
       if (filters.summary === 'approved' && record.status !== 'approved') return false;
+      if (['rejected', 'closed', 'draft'].includes(filters.summary) && record.status !== filters.summary) return false;
       if (filters.summary === 'attention' && !attention(record)) return false;
       if (filters.status && record.status !== filters.status) return false;
       if (filters.risk && record.riskLevel !== filters.risk) return false;
+      if (filters.documentType && (recordType(record) || 'legacy') !== filters.documentType) return false;
       if (filters.supplier && record.supplierName !== filters.supplier) return false;
       if (filters.department && ![action(record).department, departmentName(record)].includes(filters.department)) return false;
       const updated = record.updatedAt || record.createdAt;
       const date = validDate(updated) ? new Date(updated).toISOString().slice(0, 10) : '';
       if (dayFilter(filters.from) && (!date || date < filters.from)) return false;
       if (dayFilter(filters.to) && (!date || date > filters.to)) return false;
-      return !query || [record.id, record.status, record.riskLevel, record.supplierName, record.materialName, action(record).label, personNames(record)]
+      return !query || [record.id, typeLabel(record), record.status, record.riskLevel, record.supplierName, record.materialName, action(record).label, personNames(record)]
         .some(value => String(value ?? '').toLowerCase().includes(query));
     });
   }
@@ -44,18 +52,57 @@
     return count > 0 ? `Missing ${count} required document${count === 1 ? '' : 's'}` : 'Documents ready';
   }
 
-  function pendingLabel(record, now = Date.now()) {
+  const daysLabel = days => days ? `${days} day${days === 1 ? '' : 's'}` : '<1 day';
+
+  function elapsedDaysLabel(since, now) {
+    if (!validDate(since) || Date.parse(since) > now) return '';
+    const days = Math.floor((now - Date.parse(since)) / 86400000);
+    return daysLabel(days);
+  }
+
+  function pendingAgeLabel(record, now, serverDays) {
     const pending = record.dashboard?.pending || {};
-    if (pending.overdue === true && validDate(pending.reviewDueAt)) return `Overdue · due ${new Date(pending.reviewDueAt).toLocaleDateString()}`;
+    if (pending.source !== 'status_transition' || terminal(record.status)) return '';
     const date = pending.since || record.updatedAt || record.createdAt;
-    if (!validDate(date)) return 'Time not available';
-    const days = Math.max(0, Math.floor((now - Date.parse(date)) / 86400000));
-    const waiting = pending.source === 'status_transition' && !terminal(record.status);
-    const age = days ? `${days} day${days === 1 ? '' : 's'}${waiting ? '' : ' ago'}` : 'today';
-    return `${waiting ? 'Waiting' : 'Updated'} ${age}`;
+    const age = Number.isInteger(serverDays) && serverDays >= 0 && validDate(date) ? daysLabel(serverDays) : elapsedDaysLabel(date, now);
+    return age;
+  }
+
+  function pendingLabel(record, now) {
+    const pending = record.dashboard?.pending || {};
+    const useServerDays = now === undefined;
+    now = now ?? Date.now();
+    const deadline = activeReviewDeadline(record);
+    const explicitOverdue = useServerDays && Object.hasOwn(pending, 'reviewOverdueDays') ? Number.isInteger(pending.reviewOverdueDays)
+      : pending.overdue === true && Date.parse(pending.reviewDueAt) < now;
+    const overdueDays = terminal(record.status) ? [] : [
+      [pending.reviewDueAt, explicitOverdue, pending.reviewOverdueDays],
+      [deadline?.dueAt, deadline?.overdue === true, pending.departmentOverdueDays]
+    ].flatMap(([dueAt, overdue, serverDays]) => {
+      if (!overdue || !validDate(dueAt)) return [];
+      if (useServerDays && Number.isInteger(serverDays) && serverDays >= 0) return [serverDays];
+      return Date.parse(dueAt) < now ? [Math.floor((now - Date.parse(dueAt)) / 86400000)] : [];
+    });
+    if (overdueDays.length) return `Overdue ${daysLabel(Math.max(...overdueDays))}`;
+    return pendingAgeLabel(record, now, useServerDays ? pending.ageDays : undefined) || '—';
+  }
+
+  function activeReviewDeadline(record) {
+    if (terminal(record.status)) return null;
+    const pending = record.dashboard?.pending;
+    return pending?.activeReviewDeadline || pending?.prodEngDeadline || pending?.qaDeadline || null;
+  }
+
+  const deadlineName = deadline => deadline.label || departments[deadline.department] || 'Review';
+
+  function deadlineLabel(deadline) {
+    const name = deadlineName(deadline);
+    if (!validDate(deadline.dueAt)) return `${name} — Due date unavailable`;
+    return `${name} due ${new Date(deadline.dueAt).toLocaleString()}${deadline.overdue === true ? ' (overdue)' : ''}`;
   }
 
   function columnValue(record, key) {
+    if (key === 'documentType') return typeLabel(record);
     if (key === 'progress') return record.dashboard?.progress?.currentStepTitle || 'Not available';
     if (key === 'next') return [action(record).label, personNames(record)].filter(Boolean).join(' · ') || 'Not available';
     if (key === 'documents') return documentLabel(record);
@@ -97,7 +144,12 @@
   }
 
   function cleanFilters(value = {}) {
-    return Object.fromEntries(filterKeys.map(key => [key, typeof value[key] === 'string' ? value[key].slice(0, 200) : '']));
+    return Object.fromEntries(filterKeys.map(key => [key, key === 'documentType' && !['ta', 'sc', 'legacy'].includes(value[key]) ? '' : typeof value[key] === 'string' ? value[key].slice(0, 200) : '']));
+  }
+
+  function savedViewLifecycle(view) {
+    if (['open', 'closed'].includes(view.lifecycle)) return view.lifecycle;
+    return terminal(view.filters.status) || terminal(view.filters.summary) ? 'closed' : 'open';
   }
 
   function readPreferences(raw) {
@@ -108,14 +160,14 @@
       if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
       const saved = (Array.isArray(value.views) ? value.views : []).slice(0, 10).filter(view => typeof view?.name === 'string' && view.name.trim().length && view.name.length <= 50 && view.filters && typeof view.filters === 'object');
       const selected = Array.isArray(value.columns) ? [...new Set(value.columns.filter(key => Object.hasOwn(columns, key)))] : defaults;
-      return { ...fallback, views: saved.map(view => ({ name: view.name.trim(), filters: cleanFilters(view.filters) })),
+      return { ...fallback, views: saved.map(view => ({ name: view.name.trim(), filters: cleanFilters(view.filters), lifecycle: savedViewLifecycle(view) })),
         columns: ['id', ...selected.filter(key => key !== 'id')], pageSize: [10, 25, 50, 100].includes(value.pageSize) ? value.pageSize : 25,
         sort: Object.hasOwn(columns, value.sort) ? value.sort : 'updatedAt', direction: value.direction === 'asc' ? 'asc' : 'desc' };
     } catch { return fallback; }
   }
 
-  function timelinePoints(revisions) {
-    const names = { 'signoff.gscTet': 'GSC/TET', 'signoff.prodEngTet': 'Prod.Eng/TET', 'signoff.qaTet': 'QA/TET', 'tapbu.gsc': 'GSC/TaPBU', 'tapbu.qa': 'QA/TaPBU', 'qateFinal.signoff': 'QA/TET Final Judgment' };
+  function timelinePoints(revisions, record) {
+    const names = { 'signoff.gscTet': 'GSC/TET', 'signoff.prodEngTet': pcnTypes?.peLabel(record) || 'Prod.Eng/TET', 'signoff.qaTet': 'QA/TET', 'tapbu.gsc': 'GSC/TaPBU', 'tapbu.qa': 'QA/TaPBU', 'qateFinal.signoff': 'QA/TET Final Judgment' };
     return [...revisions].sort((a, b) => Number(a.revision) - Number(b.revision)).flatMap(item => {
       const changes = Array.isArray(item.changes) ? item.changes : [];
       const points = item.isBaseline ? [] : changes.flatMap(change => {
@@ -196,7 +248,8 @@
     const storageKey = identity ? `pcn-records-dashboard:v1:${encodeURIComponent(identity)}` : null;
     let preferences;
     try { preferences = readPreferences(storageKey ? window.localStorage?.getItem(storageKey) : null); } catch { preferences = readPreferences(null); }
-    let state = { records: [], filters: cleanFilters({ search: search.value }), page: 1, preferences, accessible: true };
+    const initialLifecycle = new URL(window.location?.href || '/', 'http://pcn.local').searchParams.get('documents') === 'closed' ? 'closed' : 'open';
+    let state = { records: [], lifecycle: initialLifecycle, filters: cleanFilters({ search: search.value }), page: 1, preferences, accessible: true };
     let preview = { record: null, tab: 'overview', request: 0, cache: {}, opener: null };
     let rowMenus = [];
     const closeRowMenus = (restoreFocus = false, except = null) => {
@@ -212,8 +265,28 @@
     };
     document.addEventListener('click', outsideRowMenu);
     const toolbar = node('section', undefined, 'rd-controls'); toolbar.setAttribute('aria-label', 'Record controls');
+    const lifecycleTabs = node('div', undefined, 'rd-lifecycle-tabs'); lifecycleTabs.setAttribute('role', 'tablist'); lifecycleTabs.setAttribute('aria-label', 'Document lifecycle');
+    const lifecycleButtons = {};
+    const lifecycleLabels = { open: 'Open', closed: 'Closed' };
+    const selectLifecycle = lifecycle => {
+      if (state.lifecycle === lifecycle) return;
+      state = { ...state, lifecycle, filters: { ...state.filters, summary: '', status: '', department: '' }, page: 1 }; render();
+    };
+    Object.entries(lifecycleLabels).forEach(([key, title]) => {
+      const item = button(title, () => selectLifecycle(key), 'rd-lifecycle-tab'); item.id = `rdLifecycleTab-${key}`; item.setAttribute('role', 'tab'); item.setAttribute('aria-controls', 'rdRecordsPanel');
+      item.setAttribute('aria-selected', String(key === state.lifecycle)); item.tabIndex = key === state.lifecycle ? 0 : -1;
+      item.replaceChildren(node('span', `${title} documents`), node('strong', '0', 'rd-lifecycle-count'));
+      lifecycleButtons[key] = item; lifecycleTabs.append(item);
+    });
+    lifecycleTabs.addEventListener('keydown', event => {
+      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 'open' : event.key === 'End' ? 'closed' : state.lifecycle === 'open' ? 'closed' : 'open';
+      selectLifecycle(next); lifecycleButtons[next].focus();
+    });
     const cards = node('div', undefined, 'rd-summary');
     const fields = node('div', undefined, 'rd-filters');
+    const overdueAlert = node('p', '', 'rd-overdue-alert'); overdueAlert.setAttribute('role', 'status'); overdueAlert.hidden = true;
     const footer = node('div', undefined, 'rd-pagination');
     const table = rows.closest?.('table');
     const tableHead = table?.querySelector?.('thead');
@@ -230,6 +303,7 @@
       input.addEventListener('change', () => setFilter(key, input.value)); return input;
     };
     selectField('status', 'Status', options.statusFilter); selectField('risk', 'Risk', options.riskFilter);
+    selectField('documentType', 'PCN type');
     selectField('supplier', 'Supplier'); selectField('department', 'Department');
     ['from', 'to'].forEach(key => {
       const wrapper = node('label', key === 'from' ? 'Updated from (UTC)' : 'Updated to (UTC)'); const input = node('input'); input.type = 'date'; input.id = `rdFilter-${key}`; refs[key] = input;
@@ -239,7 +313,7 @@
     const saved = selectField('saved', 'Saved views');
     saved.addEventListener('change', () => {
       const view = state.preferences.views.find(item => item.name === saved.value);
-      if (view) { state = { ...state, filters: { ...view.filters }, page: 1 }; search.value = state.filters.search; render(); }
+      if (view) { state = { ...state, lifecycle: view.lifecycle, filters: { ...view.filters }, page: 1 }; search.value = state.filters.search; render(); }
     });
     const viewEditor = node('details', undefined, 'rd-editor'); viewEditor.id = 'rdViewEditor'; viewEditor.append(node('summary', 'Save view'));
     const viewName = node('input'); viewName.id = 'rdViewName'; viewName.type = 'text'; viewName.maxLength = 50; viewName.placeholder = 'View name'; viewName.setAttribute('aria-label', 'View name'); viewEditor.append(viewName);
@@ -248,7 +322,7 @@
       if (!name || name.length > 50) { message.textContent = 'Enter a view name of 1–50 characters.'; return; }
       const views = state.preferences.views.filter(view => view.name !== name);
       if (views.length >= 10) { message.textContent = 'You can save up to 10 views. Delete a view before adding another.'; return; }
-      state = { ...state, preferences: { ...state.preferences, views: [...views, { name, filters: cleanFilters(state.filters) }] } }; savePrefs(); viewEditor.open = false; render(); saved.value = name;
+      state = { ...state, preferences: { ...state.preferences, views: [...views, { name, lifecycle: state.lifecycle, filters: cleanFilters(state.filters) }] } }; savePrefs(); viewEditor.open = false; render(); saved.value = name;
     }));
     tools.append(viewEditor);
     tools.append(button('Delete selected view', () => {
@@ -271,11 +345,12 @@
       if (editor.open) options.onOpen?.();
     }));
     tools.append(button('Export filtered CSV', () => {
-      const csv = exportCsv(sortRecords(filterRecords(state.records, state.filters), state.preferences.sort, state.preferences.direction), state.preferences.columns);
+      const csv = exportCsv(sortRecords(filterRecords(state.records, { ...state.filters, lifecycle: state.lifecycle }), state.preferences.sort, state.preferences.direction), state.preferences.columns);
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); const link = node('a'); link.href = url; link.download = 'pcn-records.csv'; link.click(); URL.revokeObjectURL(url);
     }));
-    toolbar.append(cards); toolbar.append(fields); toolbar.append(tools);
+    toolbar.append(lifecycleTabs); toolbar.append(cards); toolbar.append(fields); toolbar.append(tools); toolbar.append(overdueAlert);
     const wrap = rows.closest?.('.admin-table-wrap'); if (wrap?.parentNode) wrap.parentNode.insertBefore(toolbar, wrap); else root.prepend?.(toolbar);
+    const recordsPanel = wrap || node('section'); recordsPanel.id = 'rdRecordsPanel'; recordsPanel.setAttribute('role', 'tabpanel'); recordsPanel.setAttribute('aria-labelledby', lifecycleButtons[state.lifecycle].id); recordsPanel.tabIndex = 0;
     if (wrap?.parentNode) wrap.after(footer); else root.append?.(footer);
     const dialog = node('dialog', undefined, 'rd-preview'); dialog.id = 'rdPreviewDialog'; dialog.setAttribute('aria-labelledby', 'rdPreviewTitle');
     const header = node('div', undefined, 'rd-preview-header'); const title = node('h2'); title.id = 'rdPreviewTitle';
@@ -308,15 +383,37 @@
       const focused = document.activeElement;
       const focusKey = focused?.dataset?.rdFocus;
       const focusId = focused?.id;
-      const totals = summaryCounts(state.records); cards.replaceChildren();
-      [['all', 'All records'], ['review', 'In review'], ['approved', 'Approved'], ['attention', 'Needs attention']].forEach(([key, titleText]) => {
+      const scoped = lifecycleRecords(state.records, state.lifecycle);
+      const tabCounts = lifecycleCounts(state.records);
+      Object.entries(lifecycleButtons).forEach(([key, item]) => {
+        item.setAttribute('aria-selected', String(key === state.lifecycle)); item.tabIndex = key === state.lifecycle ? 0 : -1;
+        item.replaceChildren(node('span', `${lifecycleLabels[key]} documents`), node('strong', String(tabCounts[key]), 'rd-lifecycle-count'));
+      });
+      recordsPanel.setAttribute('aria-labelledby', lifecycleButtons[state.lifecycle].id);
+      const totals = { ...summaryCounts(scoped), draft: scoped.filter(record => record.status === 'draft').length, rejected: scoped.filter(record => record.status === 'rejected').length, closed: scoped.filter(record => record.status === 'closed').length }; cards.replaceChildren();
+      const overdueDeadlines = scoped.map(activeReviewDeadline).filter(deadline => deadline?.overdue === true);
+      const overdueGroups = [...new Set(overdueDeadlines.map(deadlineName))].map(name => {
+        const count = overdueDeadlines.filter(deadline => deadlineName(deadline) === name).length;
+        return `${count} PCN${count === 1 ? '' : 's'} overdue for ${name}`;
+      });
+      overdueAlert.hidden = overdueDeadlines.length === 0;
+      const overdueMessage = overdueGroups.length ? `${overdueGroups.join('; ')}. Complete the department review to clear the alert.` : '';
+      if (overdueAlert.textContent !== overdueMessage) overdueAlert.textContent = overdueMessage;
+      const summaries = state.lifecycle === 'closed' ? [['all', 'All closed documents'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['closed', 'Closed']]
+        : [['all', 'All open documents'], ['review', 'In review'], ['draft', 'Drafts'], ['attention', 'Needs attention']];
+      summaries.forEach(([key, titleText]) => {
         const item = button('', () => setFilter('summary', key), `rd-summary-card rd-summary-${key}`); item.dataset.summary = key; item.dataset.rdFocus = `summary:${key}`; item.setAttribute('aria-pressed', String(state.filters.summary === key || key === 'all' && !state.filters.summary));
         item.append(node('strong', String(totals[key]))); item.append(node('span', titleText)); cards.append(item);
       });
-      updateOptions(refs.status, state.records.map(record => record.status), 'All statuses', state.filters.status, true);
-      updateOptions(refs.risk, state.records.map(record => record.riskLevel), 'All risks', state.filters.risk, true);
-      updateOptions(refs.supplier, state.records.map(record => record.supplierName), 'All suppliers', state.filters.supplier, true);
-      updateOptions(refs.department, state.records.map(departmentName), 'All departments', state.filters.department, true);
+      updateOptions(refs.status, scoped.map(record => record.status), 'All statuses', state.filters.status, true);
+      updateOptions(refs.risk, scoped.map(record => record.riskLevel), 'All risks', state.filters.risk, true);
+      refs.documentType.replaceChildren();
+      for (const [value, title] of [['', 'All types'], ['ta', 'TA'], ['sc', 'SC'], ['legacy', 'Legacy / unassigned']]) {
+        const item = node('option', title); item.value = value; refs.documentType.append(item);
+      }
+      refs.documentType.value = state.filters.documentType;
+      updateOptions(refs.supplier, scoped.map(record => record.supplierName), 'All suppliers', state.filters.supplier, true);
+      updateOptions(refs.department, scoped.map(departmentName), 'All departments', state.filters.department, true);
       updateOptions(saved, state.preferences.views.map(view => view.name), 'Select saved view', saved.value);
       refs.from.value = state.filters.from; refs.to.value = state.filters.to;
       if (tableHead) {
@@ -324,9 +421,9 @@
         state.preferences.columns.forEach(key => { const cell = node('th'); cell.scope = 'col'; cell.setAttribute('aria-sort', state.preferences.sort === key ? state.preferences.direction === 'asc' ? 'ascending' : 'descending' : 'none'); const sort = button(`${columns[key]}${state.preferences.sort === key ? state.preferences.direction === 'asc' ? ' ↑' : ' ↓' : ''}`, () => { state = { ...state, preferences: { ...state.preferences, sort: key, direction: state.preferences.sort === key && state.preferences.direction === 'asc' ? 'desc' : 'asc' }, page: 1 }; savePrefs(); render(); }, 'rd-sort'); sort.dataset.rdFocus = `sort:${key}`; cell.append(sort); heading.append(cell); });
         const actions = node('th', 'Actions'); actions.scope = 'col'; heading.append(actions); tableHead.append(heading);
       }
-      const filtered = sortRecords(filterRecords(state.records, state.filters), state.preferences.sort, state.preferences.direction);
+      const filtered = sortRecords(filterRecords(scoped, state.filters), state.preferences.sort, state.preferences.direction);
       const page = paginate(filtered, state.page, state.preferences.pageSize); state = { ...state, page: page.page }; count.textContent = String(filtered.length); closeRowMenus(); rowMenus = []; rows.replaceChildren();
-      if (!page.items.length) { const row = node('tr'); const cell = node('td', state.records.length ? 'No records match these filters. Reset filters to see all records.' : 'No PCN records are available.', 'records-empty'); cell.colSpan = state.preferences.columns.length + 1; row.append(cell); rows.append(row); }
+      if (!page.items.length) { const row = node('tr'); const cell = node('td', scoped.length ? `No ${state.lifecycle} documents match these filters. Reset filters to see all ${state.lifecycle} documents.` : state.lifecycle === 'closed' ? 'No closed documents yet. Completed PCNs will appear here.' : state.records.length ? 'No open documents. All available PCNs have finished their review.' : 'No PCN records are available.', 'records-empty'); cell.colSpan = state.preferences.columns.length + 1; row.append(cell); rows.append(row); }
       page.items.forEach(record => renderRow(record)); renderFooter(page, filtered.length);
       if (focusKey || focusId) {
         const target = Array.from(root.querySelectorAll?.('[data-rd-focus], [id]') || []).find(item => focusKey ? item.dataset.rdFocus === focusKey : item.id === focusId);
@@ -337,7 +434,8 @@
     function renderRow(record) {
       const row = node('tr'); row.dataset.pcnId = record.id; row.dataset.rdFocus = `row:${record.id}`;
       const selected = options.selectedId?.() === record.id;
-      if (selected) row.className = 'is-selected';
+      const deadline = activeReviewDeadline(record);
+      row.className = [selected && 'is-selected', deadline?.overdue === true && 'rd-row-overdue'].filter(Boolean).join(' ');
       row.setAttribute('aria-selected', String(selected));
       state.preferences.columns.forEach(key => {
         const cell = node('td'); cell.dataset.column = key;
@@ -346,6 +444,7 @@
           const href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`;
           const link = node('a', record.id, 'rd-code-link'); link.dataset.rdFocus = `code:${record.id}`; link.href = href;
           identity.append(link);
+          if (deadline?.overdue === true) identity.append(node('span', `${deadlineName(deadline)} overdue`, 'rd-badge rd-deadline-overdue'));
           if (record.isTestDocument === true) identity.append(node('span', 'TESTING DOC', 'rd-test-badge'));
           const openLink = node('a', 'Open PCN', 'rd-button rd-open-button');
           openLink.href = href; openLink.dataset.rdFocus = `open:${record.id}`; openLink.setAttribute('aria-label', `Open ${record.id}`);
@@ -464,7 +563,7 @@
         renderDepartmentPreview(workflowSummary(data[0], summary.id));
       } else if (tab === 'history') {
         if (!Array.isArray(data[0]?.items)) throw new Error('The timeline returned an invalid response.');
-        const points = timelinePoints(data[0].items); if (!points.length) { content.append(node('p', 'No recorded changes are available for this PCN.', 'rd-preview-message')); return; }
+        const points = timelinePoints(data[0].items, summary); if (!points.length) { content.append(node('p', 'No recorded changes are available for this PCN.', 'rd-preview-message')); return; }
         const track = node('ol', undefined, 'rd-timeline');
         points.forEach(point => { const item = node('li'); const appearance = timelineTone(point); item.append(node('time', validDate(point.createdAt) ? new Date(point.createdAt).toLocaleString() : 'Time not recorded')); item.append(node('span', appearance.marker, `rd-timeline-point rd-tone-${appearance.tone}`)); item.append(node('strong', point.label)); item.append(node('span', point.person)); if (point.isBaseline) item.append(node('small', 'Earlier changes were not recorded.')); track.append(item); }); content.append(track);
       } else {
@@ -491,6 +590,7 @@
         selectedKey = key; points.forEach((point, pointKey) => point.setAttribute('aria-pressed', String(pointKey === key)));
         details.replaceChildren(node('h3', `${stage.label} \u00b7 ${stage.completed}/${stage.total} signed`));
         details.append(node('p', workflowStageCaption(stage)));
+        if (stage.state === 'current' && stage.deadline) details.append(node('p', deadlineLabel(stage.deadline), stage.deadline.overdue === true ? 'rd-overdue' : 'rd-department-due'));
         const table = node('table', undefined, 'rd-signatures'); const head = node('thead'); const headings = node('tr');
         ['Step', 'Status', 'Signed by', 'Date'].forEach(heading => headings.append(node('th', heading))); head.append(headings); table.append(head);
         const body = node('tbody');
@@ -509,6 +609,7 @@
         point.append(node('span', workflowStageCaption(stage), 'rd-department-caption'));
         point.append(node('span', stage.state === 'completed' ? '\u2713' : stage.state === 'current' ? '\u2022' : '\u25cb', 'rd-timeline-point'));
         point.append(node('strong', `${stage.label} \u00b7 ${stage.completed}/${stage.total} signed`)); points.set(stage.key, point); item.append(point); track.append(item);
+        if (stage.state === 'current' && stage.deadline) point.append(node('span', deadlineLabel(stage.deadline), stage.deadline.overdue === true ? 'rd-department-due rd-overdue' : 'rd-department-due'));
       });
       track.addEventListener('keydown', event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !snapshot.stages.length) return;
@@ -533,6 +634,8 @@
     function clear() {
       state = { ...state, records: [] }; closeRowMenus(); rowMenus = []; closePreview(); rows.replaceChildren(); count.textContent = '0'; cards.replaceChildren(); footer.replaceChildren();
       content.replaceChildren(); title.textContent = ''; testBadge.hidden = true;
+      overdueAlert.hidden = true; overdueAlert.textContent = '';
+      Object.entries(lifecycleButtons).forEach(([key, item]) => item.replaceChildren(node('span', `${lifecycleLabels[key]} documents`), node('strong', '0', 'rd-lifecycle-count')));
       ['status', 'risk', 'supplier', 'department'].forEach(key => updateOptions(refs[key], [], `All ${key === 'status' ? 'statuses' : `${key}s`}`, ''));
       chooser.open = false; viewEditor.open = false; toolbar.hidden = true;
     }
@@ -540,11 +643,11 @@
       setRecords(records) { if (!state.accessible) return; toolbar.hidden = false; state = { ...state, records: [...records] }; render(); }, clear,
       canRefresh: () => state.accessible && !dialog.open && !chooser.open && !viewEditor.open && !rowMenus.some(menu => menu.details.open) && !options.isBusy?.(),
       destroy() { document.removeEventListener?.('click', outsideRowMenu); state = { ...state, accessible: false }; clear(); toolbar.remove?.(); footer.remove?.(); dialog.remove?.(); },
-      getState: () => ({ filters: { ...state.filters }, page: state.page, preferences: { ...state.preferences }, preview: preview.record?.id || null }),
+      getState: () => ({ lifecycle: state.lifecycle, filters: { ...state.filters }, page: state.page, preferences: { ...state.preferences }, preview: preview.record?.id || null }),
     };
   }
 
-  window.PCN_RECORDS_DASHBOARD = { create, filterRecords, summaryCounts, documentLabel, pendingLabel, sortRecords, paginate, csvCell, exportCsv, readPreferences, timelinePoints, timelineTone, currentSummary, currentProgress, workflowSummary, workflowStageCaption };
+  window.PCN_RECORDS_DASHBOARD = { create, filterRecords, lifecycleRecords, lifecycleCounts, summaryCounts, documentLabel, pendingLabel, deadlineLabel, sortRecords, paginate, csvCell, exportCsv, readPreferences, timelinePoints, timelineTone, currentSummary, currentProgress, workflowSummary, workflowStageCaption };
   document.addEventListener('DOMContentLoaded', init);
 
   async function init() {

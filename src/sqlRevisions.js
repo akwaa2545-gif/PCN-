@@ -2,10 +2,11 @@ const sql = require('mssql');
 const { fieldChanges, snapshot } = require('./documentControl');
 const { ApiError } = require('./apiError');
 const { versionHex } = require('./sqlPcnHydration');
+const { isCode } = require('../pcn-types');
 
 class SqlRevisions {
   async statusTimings(source, codes) {
-    if (!Array.isArray(codes) || codes.some(code => typeof code !== 'string' || !/^PCN-\d{4}-\d{4}$/.test(code))) {
+    if (!Array.isArray(codes) || codes.some(code => !isCode(code))) {
       throw new ApiError(400, 'Invalid PCN ids');
     }
     const uniqueCodes = [...new Set(codes)];

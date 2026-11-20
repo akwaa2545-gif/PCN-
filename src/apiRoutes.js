@@ -7,7 +7,11 @@ const { normalizeUserId } = require('./employeeAccounts');
 const { buildChecks, buildAction } = require('./documentChecks');
 const { loadRecordOverview } = require('./recordOverview');
 const { handleDeveloperTools } = require('./developerTools');
+const { CODE_PATTERN } = require('../pcn-types');
 const { buildWorkflowSummary } = require('./workflowSummary');
+const { RULES, validateWorkflowSettings, readWorkflowSettings } = require('./workflowSettings');
+const { isEmployeeMode } = require('./authModes');
+const { validateNotificationPreferences } = require('./notificationPreferences');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -20,14 +24,19 @@ async function handleApi(req, res, url, context, requestId) {
   if (route === '/api/health' && method === 'GET') return send({status:'ok',service:'supplier-pcn-workflow',requestId});
   if (route === '/api/auth/config' && method === 'GET') return send({mode:authMode,employeeProvisioningConfigured:Boolean(employeeDirectory)});
   if (route === '/api/ready' && method === 'GET') {
-    try { await repository.readiness(); return send({status:'ready'}); }
+    try { await repository.readiness(); if (context.passwordReadiness) await context.passwordReadiness(); return send({status:'ready'}); }
     catch { throw new ApiError(503, 'Database is unavailable'); }
   }
   if (['/api/auth/login','/api/admin/login'].includes(route) && method === 'POST') {
     enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
     const body = await readJsonBody(req);
-    assertBodyKeys(body, authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
+    assertBodyKeys(body, authMode === 'employee-password' ? ['employeeCode','password','remember', ...(route === '/api/auth/login' ? ['identifyOnly'] : [])]
+      : authMode === 'employee-code' ? ['employeeCode','remember'] : ['username','password','remember']);
     const session = await authService.login(body, {ip:context.clientAddress || getClientAddress(req,{trustProxy:context.trustProxy})});
+    if (authMode === 'employee-password' && route === '/api/auth/login' && body.identifyOnly === true
+      && session.authenticated === false && session.passwordRequired === true) {
+      return send({authenticated:false,passwordRequired:true});
+    }
     if (route === '/api/admin/login' && !hasRole(session.user, 'admin')) {
       await authService.logout(session.token);
       throw new ApiError(403, 'Administrator access required');
@@ -35,7 +44,8 @@ async function handleApi(req, res, url, context, requestId) {
     setSessionCookie(res, session, cookieOptions);
     return send({authenticated:true,user:session.user,csrfToken:session.csrfToken,expiresAt:session.expiresAt});
   }
-  if (route === '/api/auth/change-password' && authMode !== 'password') throw new ApiError(403,'Employee-code sign-in does not use a password');
+  if (route === '/api/auth/change-password' && !['password','employee-password'].includes(authMode)) throw new ApiError(403,'Employee-code sign-in does not use a password');
+  if (route === '/api/auth/setup-password' && authMode !== 'employee-password') throw new ApiError(403,'Password setup is not enabled');
   const loggingOut = ['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST';
   const principal = await authService.session(token, {skipEmployeeLookup:loggingOut});
   if (['/api/auth/logout','/api/admin/logout'].includes(route) && method === 'POST') {
@@ -48,8 +58,24 @@ async function handleApi(req, res, url, context, requestId) {
   if (['/api/session','/api/admin/session'].includes(route) && method === 'GET') {
     return send(principal ? {authenticated:route === '/api/admin/session' ? hasRole(principal.user,'admin') : true,...principal} : {authenticated:false});
   }
-  const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password'});
+  const user = requirePrincipal(principal, {allowPasswordChange:route === '/api/auth/change-password',allowPasswordSetup:route === '/api/auth/setup-password'});
   if (user.isActive === false) throw new ApiError(403, 'Active account required');
+  if (route === '/api/auth/setup-password' || route === '/api/auth/change-password') {
+    if (method !== 'POST') throw new ApiError(405, 'Method not allowed');
+    enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
+    enforceCsrf(req, principal);
+    const body = await readJsonBody(req);
+    if (route === '/api/auth/setup-password') {
+      assertBodyKeys(body,['newPassword','confirmPassword']);
+      await authService.setupPassword(token,body);
+      clearSessionCookie(res,cookieOptions);
+      return send({authenticated:false,passwordSet:true});
+    }
+    assertBodyKeys(body,authMode === 'employee-password' ? ['currentPassword','newPassword','confirmPassword'] : ['currentPassword','newPassword']);
+    await authService.changePassword(token,body);
+    clearSessionCookie(res,cookieOptions);
+    return send({authenticated:false,passwordChanged:true});
+  }
   if (route.startsWith('/api/developer/')) return send(await handleDeveloperTools(method,url,context,user));
   if (route === '/api/profile') {
     if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
@@ -64,18 +90,13 @@ async function handleApi(req, res, url, context, requestId) {
     enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
     enforceCsrf(req, principal);
   }
-  if (route === '/api/auth/change-password' && method === 'POST') {
-    await authService.changePassword(token, await readJsonBody(req));
-    clearSessionCookie(res, cookieOptions);
-    return send({authenticated:false,passwordChanged:true});
-  }
   const actor = `user:${user.id}`;
   if (route === '/api/pcn-drafts') {
     if (method === 'GET') return send(await context.creationService.list(user));
     if (method === 'POST') return send(await context.creationService.create(await readJsonBody(req),actor,user),201);
     throw new ApiError(405,'Method not allowed');
   }
-  const draft = /^\/api\/pcn-drafts\/(PCN-\d{4}-\d{4})(?:\/(preflight))?$/.exec(route);
+  const draft = new RegExp(`^/api/pcn-drafts/(${CODE_PATTERN})(?:/(preflight))?$`).exec(route);
   if (draft) {
     const [,id,operation] = draft;
     if (!operation && method === 'GET') return send(await context.creationService.get(id,user));
@@ -86,6 +107,25 @@ async function handleApi(req, res, url, context, requestId) {
   const admin = () => { if (!hasRole(user,'admin')) throw new ApiError(403,'Administrator access required'); };
   if (route.startsWith('/api/admin/')) {
     admin();
+    if (route === '/api/admin/notification-preferences') {
+      if (!['GET','PUT'].includes(method)) throw new ApiError(405,'Method not allowed');
+      if (url.searchParams.size) throw new ApiError(400,'Notification settings request does not accept selectors');
+      if (method === 'GET') {
+        if (typeof repository.getNotificationPreferences !== 'function') throw new ApiError(503,'Notification settings are unavailable');
+        return send(await repository.getNotificationPreferences());
+      }
+      const input = validateNotificationPreferences(await readJsonBody(req));
+      if (typeof repository.saveNotificationPreferences !== 'function') throw new ApiError(503,'Notification settings are unavailable');
+      return send(await repository.saveNotificationPreferences(input,actor,user));
+    }
+    if (route === '/api/admin/workflow-settings') {
+      if (!['GET', 'PUT'].includes(method)) throw new ApiError(405, 'Method not allowed');
+      if (url.searchParams.size) throw new ApiError(400, 'Workflow settings request does not accept selectors');
+      if (method === 'GET') return send({ ...await readWorkflowSettings(repository), rules: RULES });
+      const input = validateWorkflowSettings(await readJsonBody(req));
+      if (typeof repository.saveWorkflowSettings !== 'function') throw new ApiError(503, 'Workflow settings are unavailable');
+      return send({ ...await repository.saveWorkflowSettings(input, actor, user), rules: RULES });
+    }
     if (route === '/api/admin/users' && method === 'GET') {
       const accounts = await authService.repository.listUsers();
       const presence = await authService.userPresence(accounts);
@@ -105,7 +145,7 @@ async function handleApi(req, res, url, context, requestId) {
     }
     if (route === '/api/admin/users' && method === 'POST') {
       const body = await readJsonBody(req);
-      if (Object.hasOwn(body,'employeeCode') || authMode === 'employee-code' || employeeDirectory) {
+      if (Object.hasOwn(body,'employeeCode') || isEmployeeMode(authMode) || employeeDirectory) {
         assertBodyKeys(body, ['employeeCode','roles','department','signingStep','mailSelection','developerPassword']);
         return send(await authService.createEmployee(body,employeeDirectory,actor,user),201);
       }
@@ -159,20 +199,20 @@ async function handleApi(req, res, url, context, requestId) {
   }
   if (route === '/api/pcns/overview') {
     if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
-    return send(await loadRecordOverview(context,user,{status:url.searchParams.get('status') || undefined}));
+    return send(await loadRecordOverview(context,user,{status:url.searchParams.get('status') || undefined},context.clock?.() || new Date()));
   }
   if (route === '/api/pcns') {
     if (method === 'GET') return send(await service.list({status:url.searchParams.get('status') || undefined},user));
     if (method === 'POST') return send(await service.create(await readJsonBody(req),actor,user),201);
   }
-  const match = /^\/api\/pcns\/(PCN-\d{4}-\d{4})(?:\/(.*))?$/.exec(route);
+  const match = new RegExp(`^/api/pcns/(${CODE_PATTERN})(?:/(.*))?$`).exec(route);
   if (!match) throw new ApiError(404,'API route not found');
   const [,code,subroute] = match;
   const record = await service.getById(code,user);
   if (subroute === 'workflow-summary') {
     if (method !== 'GET') throw new ApiError(405,'Method not allowed');
     if (url.searchParams.size) throw new ApiError(400,'Workflow summary request does not accept selectors');
-    return send(buildWorkflowSummary(record));
+    return send(buildWorkflowSummary(record,context.clock?.() || new Date(),await readWorkflowSettings(repository)));
   }
   if (subroute === 'template' && method === 'GET') return send(await context.creationService.template(code,user));
   if (subroute === 'receipt' && method === 'GET') return send(await context.creationService.receipt(code,url.searchParams.get('version'),user));
@@ -218,7 +258,7 @@ async function handleApi(req, res, url, context, requestId) {
     return send(await service.remove(code,actor,body.version,user));
   }
   if (subroute === 'progress' && method === 'GET') return send(await service.getProgress(code));
-  if (subroute === 'workflow' && method === 'GET') return send(buildWorkflow(record.riskLevel));
+  if (subroute === 'workflow' && method === 'GET') return send(buildWorkflow(record.riskLevel, record));
   if (subroute === 'audit' && method === 'GET') {
     if (!isInternal(user)) throw new ApiError(403,'Audit access requires an internal reviewer');
     return send(await repository.getAudit(code));
@@ -288,6 +328,6 @@ function assertDocumentEdit(record,user) {
 }
 function isViewerReadRoute(route) {
   if (['/api/pcns', '/api/pcns/overview', '/api/master-data'].includes(route)) return true;
-  return /^\/api\/pcns\/PCN-\d{4}-\d{4}(?:\/(?:progress|workflow|workflow-summary|checks|action|revisions(?:\/[1-9]\d*)?|documents(?:\/[0-9a-f-]{36}(?:\/preview)?)?))?$/i.test(route);
+  return new RegExp(`^/api/pcns/${CODE_PATTERN}(?:/(?:progress|workflow|workflow-summary|checks|action|revisions(?:/[1-9]\\d*)?|documents(?:/[0-9a-f-]{36}(?:/preview)?)?))?$`, 'i').test(route);
 }
 module.exports = { handleApi, requireVersion };

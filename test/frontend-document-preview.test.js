@@ -5,12 +5,13 @@ const vm=require('node:vm');
 const path=require('node:path');
 
 function fixture(options={}) {
-  const id='PCN-2026-0001',version='1234567890abcdef';
+  const id=options.id || 'PCN-2026-0001',version='1234567890abcdef';
   const calls=[],messages=[],notices=[],classes=new Set();
   const record={id,version,status:'draft',supplierName:'Preview supplier',internalReview:{},documentControl:{contentRevision:2}};
   const stampNodes={documentPrintIdentity:{textContent:''},documentPrintWatermark:{textContent:'',hidden:true}};
   const master={formDefinitions:{rawMaterial:{id:'rawMaterial',riskOptions:[]}},commonDocuments:[],workflowBase:[]};
   const window={location:{pathname:options.pathname || '/document-preview',search:options.search ?? `?id=${id}&version=${version}&request=1`,origin:'http://preview.test',assign:value=>calls.push(['redirect',value])},
+    PCN_TYPES:require('../pcn-types'),
     PCN_SESSION:{require:async()=>({user:{id:'owner',identityProvider:'employee-code',employeeCode:'0000001',roles:['admin']}}),mountProfile:()=>calls.push(['profile']),
       fetch:async(route,settings)=>{calls.push([route,settings]);if(route==='/api/master-data')return master;if(route==='/api/pcns')return [record];if(options.error)throw new Error(options.error);return {...record,...options.record};}},
     PCN_DOCUMENT_BRIDGE:{exportStamp:require('../document-bridge').exportStamp,mount:()=>{calls.push(['bridge']);return {loaded:()=>calls.push(['bridge-loaded'])};}},
@@ -38,6 +39,16 @@ test('Dedicated preview renders the exact saved version read-only without profil
   assert.deepEqual(f.calls.map(([name])=>name),['/api/master-data',`/api/pcns/${f.id}`]);
   assert.equal(f.messages.length,1);
   assert.deepEqual(JSON.parse(JSON.stringify(f.messages[0])),{origin:'http://preview.test',message:{type:'pcn-document-preview',state:'ready',id:f.id,version:f.version,request:'1'}});
+});
+
+test('TA and SC preview identities load their exact saved code, including lowercase links',async()=>{
+  for(const id of ['T-19112601','S-19112601']) {
+    const f=fixture({id,search:`?id=${id.toLowerCase()}&version=1234567890abcdef&request=1`});
+    await f.app.init();
+    assert.equal(f.window.rendered.record.id,id);
+    assert.equal(f.messages[0].message.state,'ready');
+    assert.equal(f.calls.some(([route])=>route===`/api/pcns/${id}`),true);
+  }
 });
 
 test('Preview rejects invalid or missing identifiers before loading any record or demo',async()=>{

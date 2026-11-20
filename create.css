@@ -303,9 +303,123 @@
   font-weight:500}
 .create-field small:not(:empty) {
   display:block}
+.create-field .create-field-help {
+  color:var(--muted);
+  font-weight:400}
 .create-field [aria-invalid=true] {
   border:2px solid #bb3838;
   background:#fffafa}
+.create-type-field {
+  min-width:0;
+  margin:0;
+  padding:0;
+  border:0}
+.create-type-field legend {
+  margin-bottom:9px;
+  padding:0;
+  color:var(--ink);
+  font-size:13px;
+  font-weight:650}
+.create-type-field legend span {
+  color:#a52626}
+.create-type-options {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px}
+.create-type-option {
+  position:relative;
+  min-width:0}
+.create-type-option>input {
+  position:absolute;
+  left:20px;
+  top:24px;
+  width:1px;
+  height:1px;
+  margin:0;
+  opacity:0}
+.create-type-card {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  min-height:104px;
+  padding:18px 20px;
+  border:2px solid #72899c;
+  border-radius:2px;
+  background:#fff;
+  color:var(--navy);
+  cursor:pointer;
+  transition:background-color 120ms,border-color 120ms}
+.create-type-copy {
+  display:flex;
+  flex-direction:column;
+  gap:5px}
+.create-type-label {
+  font-size:26px;
+  line-height:1.2;
+  font-weight:700;
+  letter-spacing:.02em}
+.create-type-selected {
+  visibility:hidden;
+  font-size:12px;
+  font-weight:600}
+.create-type-indicator {
+  display:grid;
+  place-items:center;
+  flex:none;
+  width:27px;
+  height:27px;
+  border:2px solid #72899c;
+  border-radius:50%;
+  background:#fff;
+  color:transparent}
+.create-type-indicator svg {
+  width:18px;
+  height:18px}
+.create-type-option:hover>input:not(:disabled)+.create-type-card {
+  border-color:var(--navy);
+  background:#f5f8fc}
+.create-type-option>input:checked+.create-type-card {
+  border-color:var(--navy);
+  background:#f0f5fb;
+  box-shadow:inset 0 -3px 0 var(--yellow)}
+.create-type-option>input:checked+.create-type-card .create-type-selected {
+  visibility:visible}
+.create-type-option>input:checked+.create-type-card .create-type-indicator {
+  border-color:var(--navy);
+  background:var(--navy);
+  color:#fff}
+.create-type-option>input:focus-visible+.create-type-card {
+  outline:3px solid var(--navy);
+  outline-offset:3px}
+.create-type-option>input:disabled+.create-type-card {
+  cursor:default}
+.create-type-option>input:disabled:not(:checked)+.create-type-card {
+  background:#f5f7f9;
+  color:var(--muted);
+  opacity:.65}
+.create-type-field[aria-invalid=true] .create-type-card {
+  border-color:#bb3838}
+.create-type-field small {
+  display:block;
+  margin-top:8px;
+  font-size:12px;
+  color:var(--muted);
+  font-weight:400}
+.create-type-field small[data-error] {
+  color:#ae2424;
+  font-weight:500}
+.create-type-field small:empty {
+  display:none}
+@media (prefers-reduced-motion:reduce) {
+  .create-type-card {transition:none}
+}
+@media (max-width:420px) {
+  .create-type-options {gap:10px}
+  .create-type-card {padding:16px 12px;gap:8px;min-height:96px}
+  .create-type-label {font-size:24px}
+  .create-type-indicator {width:24px;height:24px}
+}
 .create-readiness {
   border:1px solid var(--line);
   border-top:3px solid var(--yellow);

@@ -1,7 +1,10 @@
 (function () {
+  const types = window.PCN_TYPES;
+  const isPcnCode = value => types ? types.isCode(String(value || '').toUpperCase()) : /^PCN-\d{4}-\d{4}$/i.test(value || '');
   const documentPreview = window.location?.pathname === '/document-preview';
   let previewIdentity;
   const demoRequest = {
+    documentType: '',
     status: "submitted",
     changeForm: "rawMaterial",
     riskLevel: "RL2",
@@ -92,6 +95,7 @@
   let documentLoadGeneration = 0;
   let workflowMutationBusy = false;
   let remoteChangeNotice;
+  let printMediaRules = [];
 
   document.addEventListener("DOMContentLoaded", init);
 
@@ -146,7 +150,7 @@
     const id = params.get('id');
     const version = params.get('version');
     if (params.getAll('id').length !== 1 || params.getAll('version').length !== 1
-      || !/^PCN-\d{4}-\d{4}$/i.test(id || '') || !/^[a-f0-9]{16}$/i.test(version || '')) {
+      || !isPcnCode(id) || !/^[a-f0-9]{16}$/i.test(version || '')) {
       throw new Error('A valid PCN number and saved version are required to preview this document.');
     }
     return {id:id.toUpperCase(),version:version.toLowerCase()};
@@ -174,6 +178,7 @@
 
   function cacheElements() {
     [
+      "documentType",
       "changeForm",
       "riskLevel",
       "supplierName",
@@ -211,7 +216,11 @@
       "pcnUpdateSuccessCode",
       "pcnUnsavedDialog",
       "pcnKeepEditing",
-      "pcnLeaveWithoutSaving"
+      "pcnLeaveWithoutSaving",
+      "pcnClosedDialog",
+      "pcnClosedCode",
+      "pcnClosedContinue",
+      "pcnClosedRecords"
     ].forEach((id) => {
       els[id] = document.getElementById(id);
     });
@@ -250,6 +259,10 @@
         updateStateFromForm();
         renderAll();
       });
+    });
+    els.documentType?.addEventListener('change', () => {
+      if (state.activeRequest.id || state.viewOnly) { renderDocumentType(state.activeRequest); return; }
+      updateStateFromForm(); renderAll();
     });
 
     els.loadDemoButton.addEventListener("click", async () => {
@@ -393,6 +406,7 @@
   function getPcnIdFromPath() {
     const queryId = new URLSearchParams(window.location.search).get("id");
     const raw = String(queryId || decodeURIComponent(window.location.pathname)).replace(/^\/+/, "").trim();
+    if (isPcnCode(raw)) return raw.toUpperCase();
     const match = raw.match(/^P(?:CN|NC)-(\d{4})-(\d{3,4})$/i);
 
     if (!match) {
@@ -455,6 +469,7 @@
         els[key].value = value || "";
       }
     });
+    renderDocumentType(request);
 
     if (!els.changeForm.value) {
       els.changeForm.value = Object.keys(state.formDefinitions)[0] || "";
@@ -466,6 +481,21 @@
     state.pendingWorkflowNotifications = new Set();
     markSubmissionSaved();
     documentUI?.loaded();
+  }
+
+  function renderDocumentType(request) {
+    const type = types?.typeOf(request) || (['ta','sc'].includes(request.documentType) ? request.documentType : '');
+    if (els.documentType) {
+      els.documentType.value = type || '';
+      els.documentType.disabled = Boolean(request.id) || state.viewOnly || document.body?.classList.contains('is-saving');
+      const empty = els.documentType.querySelector('option[value=""]');
+      if (empty) empty.textContent = request.id ? 'Legacy PCN' : 'Choose TA or SC';
+    }
+    const label = types?.peLabel(request) || 'Prod.Eng/TET';
+    const heading = document.getElementById('productionEngineeringLabel');
+    if (heading) heading.textContent = label;
+    const route = document.getElementById('productionEngineeringRoute');
+    if (route) route.textContent = `ROUTE: GSC/TET (Receive info) -> ${label} (Review) -> QA Dept./TET (Approve) -> GSC&QA/TaPBU (Approve, if any) -> GSC/TET (Inform to supplier) -> QOD-206(qualification)`;
   }
 
   function getSubmissionSnapshot() {
@@ -578,6 +608,7 @@
     };
     state.activeRequest = {
       ...state.activeRequest,
+      ...(!state.activeRequest.id && els.documentType ? {documentType: els.documentType.value} : {}),
       changeForm: els.changeForm.value,
       riskLevel: els.riskLevel.value,
       selectedChange,
@@ -600,11 +631,13 @@
   }
 
   async function submitActiveRequest(mode) {
-    if (state.viewOnly) return;
+    if (state.viewOnly || state.activeRequest.status === 'closed') return;
     if (documentMutationBusy || document.body.classList.contains('is-saving')) return;
     hideUpdateSuccess();
     updateStateFromForm();
     const savedStatus = state.activeRequest.status;
+    const previouslySavedStatus = state.savedRecord?.status || savedStatus;
+    let closedRecord;
     const draftAllowed = !state.activeRequest.id || ['draft','supplier_action'].includes(savedStatus);
     if (mode === 'draft' && !draftAllowed) return;
     if (mode === 'draft') state.activeRequest = {...state.activeRequest,status:savedStatus === 'supplier_action' ? savedStatus : 'draft'};
@@ -616,6 +649,11 @@
       renderAll();
       return;
     }
+    if (!state.activeRequest.id && !['ta','sc'].includes(state.activeRequest.documentType)) {
+      showNotice('error', 'Choose a PCN type', 'Choose TA or SC before creating a PCN.');
+      els.documentType?.focus();
+      return;
+    }
 
     try {
       els.submitButton.disabled = true;
@@ -623,7 +661,7 @@
       setSaveOverlayVisible(true);
       els.submitButton.textContent = "Saving...";
       showNotice("info", "Saving PCN", "Please wait while the record is saved.");
-      const hasDatabaseId = /^PCN-\d{4}-\d{4}$/.test(String(state.activeRequest.id || ""));
+      const hasDatabaseId = isPcnCode(state.activeRequest.id);
       const path = hasDatabaseId ? `/api/pcns/${state.activeRequest.id}` : "/api/pcns";
       const method = hasDatabaseId ? "PATCH" : "POST";
       const submittedSnapshot = getSubmissionSnapshot();
@@ -646,13 +684,24 @@
         mailWarning = getWorkflowNotificationWarning(mailError);
       }
 
-      if (hasUnsavedChanges()) {
+      if (saved.status === 'closed') {
+        // The save response is authoritative even if a later list refresh fails.
+        state.activeRequest = saved;
+        loadRequestToForm(saved);
+        closedRecord = previouslySavedStatus !== 'closed' ? saved : null;
+        try {
+          state.pcns = await apiFetch('/api/pcns');
+        } catch (refreshError) {
+          showToast('warning', 'Records refresh unavailable', `The PCN is saved and closed. ${refreshError.message}`);
+        }
+      } else if (hasUnsavedChanges()) {
         state.pcns = await apiFetch('/api/pcns');
         syncSavedRecordKeepingEdits(saved);
       } else await refreshPcns(saved.id, {preserveEditsSince:submittedSnapshot});
       state.message = `${hasDatabaseId ? `Updated ${saved.id}.` : `Auto-generated PCN code ${saved.id}.`}${mailMessage}`;
-      showNotice("success", hasDatabaseId ? "PCN updated" : "PCN created", state.message);
-      if (hasDatabaseId) showUpdateSuccess(saved.id);
+      showNotice("success", closedRecord ? "PCN closed" : hasDatabaseId ? "PCN updated" : "PCN created",
+        closedRecord ? `${saved.id} is saved and closed. All required signatures are complete.` : state.message);
+      if (hasDatabaseId && !closedRecord) showUpdateSuccess(saved.id);
 
       if (mailWarning) {
         showToast("warning", "Workflow email not sent", mailWarning);
@@ -668,9 +717,44 @@
     }
 
     renderAll();
+    if (closedRecord) showClosedDialog(closedRecord.id);
+  }
+
+  function showClosedDialog(pcnId) {
+    const dialog = els.pcnClosedDialog;
+    if (!dialog || dialog.open) return;
+    hideUpdateSuccess();
+    els.pcnClosedCode.textContent = pcnId;
+    const previousFocus = document.activeElement;
+    const dismiss = () => dialog.close();
+    const cancel = event => { event.preventDefault(); dismiss(); };
+    const trapFocus = event => {
+      if (event.key !== 'Tab') return;
+      if (event.shiftKey && document.activeElement === els.pcnClosedContinue) {
+        event.preventDefault(); els.pcnClosedRecords.focus();
+      } else if (!event.shiftKey && document.activeElement === els.pcnClosedRecords) {
+        event.preventDefault(); els.pcnClosedContinue.focus();
+      }
+    };
+    const finish = () => {
+      els.pcnClosedContinue.removeEventListener('click', dismiss);
+      dialog.removeEventListener('cancel', cancel);
+      dialog.removeEventListener('keydown', trapFocus);
+      dialog.removeEventListener('close', finish);
+      const target = previousFocus?.isConnected && !previousFocus.disabled && !previousFocus.hidden
+        ? previousFocus : document.getElementById('formAdminLink');
+      target?.focus();
+    };
+    els.pcnClosedContinue.addEventListener('click', dismiss);
+    dialog.addEventListener('cancel', cancel);
+    dialog.addEventListener('keydown', trapFocus);
+    dialog.addEventListener('close', finish);
+    dialog.showModal();
+    els.pcnClosedContinue.focus();
   }
 
   function setSaveOverlayVisible(isVisible) {
+    if (els.documentType) els.documentType.disabled=isVisible || Boolean(state.activeRequest.id) || state.viewOnly;
     if (!els.pcnSaveOverlay) {
       return;
     }
@@ -708,6 +792,7 @@
 
     return {
       ...(request.version ? { version: request.version } : {}),
+      ...(['ta','sc'].includes(request.documentType) ? {documentType:request.documentType} : {}),
       status: request.status || "submitted",
       changeForm: request.changeForm,
       riskLevel: request.riskLevel,
@@ -770,11 +855,12 @@
     state.savedSubmissionSnapshot = JSON.stringify(baseline);
     state.loadedReview = structuredCloneSafe(savedReview);
     state.savedRecord = structuredCloneSafe(saved);
-    state.activeRequest = {...state.activeRequest,id:saved.id,version:saved.version,status:saved.status,
+    state.activeRequest = {...state.activeRequest,documentType:saved.documentType,id:saved.id,version:saved.version,status:saved.status,
       documentControl:saved.documentControl,internalReview:review};
   }
 
   function renderAll() {
+    renderDocumentType(state.activeRequest);
     renderChangeOptions();
     renderSummary();
     renderDocuments();
@@ -799,7 +885,7 @@
   }
 
   function canPollSavedRecord() {
-    return state.apiReady && /^PCN-\d{4}-\d{4}$/.test(String(state.activeRequest.id || '')) &&
+    return state.apiReady && isPcnCode(state.activeRequest.id) &&
       !documentMutationBusy && !workflowMutationBusy && !discardDialogPending &&
       !document.querySelector?.('dialog[open]') &&
       !document.body?.classList.contains('is-saving');
@@ -900,7 +986,7 @@
   async function loadDocumentMutation(result) {
     const beforeId=state.activeRequest.id;
     const beforeVersion=state.activeRequest.version;
-    const id = result.id && /^PCN-/.test(result.id) ? result.id : state.activeRequest.id;
+    const id = isPcnCode(result.id) ? result.id : state.activeRequest.id;
     const saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`);
     if(state.activeRequest.id!==beforeId || state.activeRequest.version!==beforeVersion) return;
     if (hasUnsavedChanges()) {
@@ -939,17 +1025,27 @@
     documentMutationBusy=value;
     const form=document.getElementById('pcnForm');
     if(form) form.inert=value;
-    els.submitButton.disabled=value || !state.apiReady;
+    els.submitButton.disabled=value || !state.apiReady || state.activeRequest.status === 'closed';
     const draft=document.getElementById('saveDraftButton');
     if(draft) draft.disabled=value || !state.apiReady;
   }
 
   function renderDocumentEditability() {
+    const closed = state.activeRequest.status === 'closed';
     const editable=!state.viewOnly && (!state.activeRequest.id || ['draft','supplier_action'].includes(state.activeRequest.status));
     document.querySelectorAll('#submissionView input:not([data-internal-field]), #submissionView select:not([data-internal-field]), #submissionView textarea:not([data-internal-field])')
       .forEach(control => {control.disabled=!editable;});
+    if (els.documentType) els.documentType.disabled=!editable || Boolean(state.activeRequest.id) || document.body.classList.contains('is-saving');
     const draft=document.getElementById('saveDraftButton');
     if(draft) {draft.hidden=!editable;draft.disabled=!state.apiReady || document.body.classList.contains('is-saving');}
+    if (closed) {
+      document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea, #workflowView input')
+        .forEach(control => {control.disabled=true;});
+      els.submitButton.disabled=true;
+      els.submitButton.textContent='PCN closed';
+      els.formActionTitle.textContent='Closed PCN';
+      els.formActionDescription.textContent='All required signatures are complete. This document is read-only.';
+    }
   }
 
   function applyViewOnly() {
@@ -1449,7 +1545,7 @@
   }
 
   async function advanceWorkflowStep(nextStatus) {
-    if (state.viewOnly || workflowMutationBusy) return;
+    if (state.viewOnly || state.activeRequest.status === 'closed' || workflowMutationBusy) return;
     if (!state.activeRequest.id || !nextStatus) {
       showNotice("warning", "Tracking unavailable", "Save the PCN before marking workflow steps complete.");
       return;
@@ -1722,15 +1818,22 @@
     });
     document.querySelectorAll('[data-internal-field]').forEach(control => {
       const field = control.dataset.internalField;
-      if (/^(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)(Name|Date)$/.test(field)) {
+      if (/^supplierSignoff\.(prepared|checked|approved)\./.test(field)) {
+        const rule = getSupplierHeaderLockRule();
+        control.disabled = Boolean(rule.unauthorized || (rule.locked && (!field.endsWith('.checked') || !control.checked)));
+        control.title = control.disabled ? rule.reason : '';
+        const label = control.closest('.header-signature-check');
+        if (label) { label.classList.toggle('is-locked', control.disabled); label.title = control.title; }
+      } else if (/^(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)(Name|Date)$/.test(field)) {
         control.disabled = true;
         control.title = 'Signer name and date are recorded when signing.';
       } else if (/^(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\./.test(field) && !parseApprovalField(field) && !field.endsWith('.comment')) {
         control.disabled = true;
         control.title = 'Historical signoff information is read-only.';
       } else if (/^qateFinal\./.test(field) && !field.startsWith('qateFinal.signoff.')) {
-        control.disabled = !canSignStep('qateFinal.signoff', 'approved');
-        control.title = control.disabled ? 'Requires the QA/TET Approved assignment.' : '';
+        const rule = getFinalJudgmentLockRule();
+        control.disabled = rule.locked;
+        control.title = rule.reason;
       }
     });
     renderHandwrittenSignatures();
@@ -1874,6 +1977,47 @@
     document.querySelectorAll('#submissionView .signoff-handwritten-name').forEach(fitSignatureName);
   }
 
+  function activatePrintLayout() {
+    if (printMediaRules.length) return;
+    // Native Edge/Chrome can fire beforeprint while the document still uses screen media.
+    printMediaRules = Array.from(document.styleSheets)
+      .filter(sheet => sheet.href && new URL(sheet.href).origin === window.location.origin)
+      .flatMap(sheet => Array.from(sheet.cssRules))
+      .filter(rule => rule.media?.mediaText === 'print');
+    printMediaRules.forEach(rule => { rule.media.mediaText = 'all'; });
+  }
+
+  function fitPrintedPage() {
+    const sheet = document.getElementById('submissionView');
+    if (!sheet) return;
+    activatePrintLayout();
+    // A4 portrait with the same 8 mm margins as @page; allow for rounding at the page edge.
+    const pixelsPerMillimeter = 96 / 25.4;
+    const width = (210 - 16) * pixelsPerMillimeter;
+    const height = (297 - 16) * pixelsPerMillimeter - 2;
+    let layoutWidth = 960;
+    for (let pass = 0; pass < 8; pass++) {
+      sheet.style.setProperty('--pcn-print-width', `${layoutWidth}px`);
+      sheet.style.setProperty('--pcn-print-scale', '1');
+      const bounds = sheet.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) { resetPrintedPage(); return; }
+      const scale = Math.floor(Math.min(1, width / bounds.width) * 10000) / 10000;
+      sheet.style.setProperty('--pcn-print-scale', String(scale));
+      const fitted = sheet.getBoundingClientRect();
+      if (fitted.height <= height) return;
+      // A wider document grid preserves the full paper width without stretching text or clipping rows.
+      layoutWidth = Math.ceil(layoutWidth * fitted.height / height) + 1;
+    }
+  }
+
+  function resetPrintedPage() {
+    printMediaRules.forEach(rule => { rule.media.mediaText = 'print'; });
+    printMediaRules = [];
+    const style = document.getElementById('submissionView')?.style;
+    style?.removeProperty('--pcn-print-scale');
+    style?.removeProperty('--pcn-print-width');
+  }
+
   function bindSignatureSizing() {
     if (typeof ResizeObserver !== 'undefined') {
       signoffResizeObserver = new ResizeObserver(entries => {
@@ -1884,7 +2028,8 @@
       });
     }
     window.addEventListener('resize', fitSignatureNames);
-    window.addEventListener('beforeprint', fitSignatureNames);
+    window.addEventListener('beforeprint', () => { activatePrintLayout(); fitSignatureNames(); fitPrintedPage(); });
+    window.addEventListener('afterprint', () => { resetPrintedPage(); fitSignatureNames(); });
     document.fonts?.ready.then(fitSignatureNames);
     document.fonts?.addEventListener('loadingdone', fitSignatureNames);
   }
@@ -1893,9 +2038,9 @@
     const departments = { 'signoff.gscTet': 'gscTet', 'signoff.prodEngTet': 'prodEngTet', 'signoff.qaTet': 'qaTet',
       'tapbu.gsc': 'gscTapbu', 'tapbu.qa': 'qaTapbu', 'qateFinal.signoff': 'qaTet' };
     const roles = (state.user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
-    const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
+    const departmentRoles = { gscTet: 'gsc', prodEngTet: 'productionengineering', prodEngTa: 'productionengineering', prodEngSc: 'productionengineering', qaTet: 'qa', gscTapbu: 'tapbu', qaTapbu: 'tapbu' };
     if (!Object.hasOwn(departments, group)) return false;
-    const department = departments[group];
+    const department = types?.departmentForStage(state.activeRequest, group) || departments[group];
     if (!department || !['approved', 'checked', 'prepared'].includes(action) || state.user?.isActive === false) return false;
     if (roles.some(role => ['admin', 'developer'].includes(role))) return true;
     return Boolean(state.user?.department === department && state.user?.signingStep === action &&
@@ -1909,6 +2054,12 @@
   }
 
   function getApprovalLockRule(field) {
+    if (/^supplierSignoff\.(prepared|checked|approved)\./.test(String(field))) {
+      return getSupplierHeaderLockRule();
+    }
+    if (String(field).startsWith('qateFinal.') && !String(field).startsWith('qateFinal.signoff.')) {
+      return getFinalJudgmentLockRule();
+    }
     const current = parseApprovalField(field);
 
     if (!current) {
@@ -1945,6 +2096,29 @@
     }
 
     return { locked: false, reason: "" };
+  }
+
+  function getFinalJudgmentLockRule() {
+    if (!canSignStep('qateFinal.signoff', 'approved')) {
+      return { locked: true, unauthorized: true, reason: 'Requires the QA/TET Approved assignment.' };
+    }
+    const priorGroup = getPriorApprovalGroups('qateFinal.signoff').find(group => !isApprovalGroupComplete(group));
+    return priorGroup
+      ? { locked: true, reason: `Complete all ${formatApprovalGroup(priorGroup)} signoff checks before QA/TET Final Judgment.` }
+      : { locked: false, reason: '' };
+  }
+
+  function getSupplierHeaderLockRule() {
+    const user = state.user;
+    const roles = (user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
+    const developer = roles.length === 1 && roles[0] === 'developer' && user.department === 'developer' && user.signingStep == null;
+    if (!user || user.isActive === false || (!developer && !roles.some(role => ['admin', 'reviewer', 'supplier'].includes(role)))) {
+      return { locked: true, unauthorized: true, reason: 'Your role does not permit the top-right approval signatures.' };
+    }
+    const missing = approvalRouteGroups().find(group => !isApprovalGroupComplete(group));
+    return missing
+      ? { locked: true, reason: `Complete all ${formatApprovalGroup(missing)} signatures before signing the top-right approval.` }
+      : { locked: false, reason: '' };
   }
 
   function getMissingPriorSignoffField(group, action) {
@@ -2038,7 +2212,7 @@
   function formatApprovalGroup(group) {
     const labels = {
       "signoff.gscTet": "GSC/TET",
-      "signoff.prodEngTet": "Prod.Eng/TET",
+      "signoff.prodEngTet": types?.peLabel(state.activeRequest) || "Prod.Eng/TET",
       "signoff.qaTet": "QA/TET",
       "tapbu.gsc": "GSC/TaPBU",
       "tapbu.qa": "QA/TaPBU",

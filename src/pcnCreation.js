@@ -26,7 +26,7 @@ class PcnCreationService {
     creator(user);
     const records = await this.repository.list({ status: 'draft', ownerUserId: user.id });
     return records.filter(record => String(record.ownerUserId) === String(user.id) && record.status === 'draft' && !hasSignatures(record)).map(record =>
-      Object.fromEntries(['id','version','supplierName','materialName','riskLevel','changeForm','updatedAt','isTestDocument'].filter(key => Object.hasOwn(record, key)).map(key => [key, record[key]])));
+      Object.fromEntries(['id','version','documentType','supplierName','materialName','riskLevel','changeForm','updatedAt','isTestDocument'].filter(key => Object.hasOwn(record, key)).map(key => [key, record[key]])));
   }
   async get(id, user) {
     creator(user); const record = await this.service.getById(id, user); owned(record, user);

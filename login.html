@@ -41,8 +41,8 @@
             <circle cx="64" cy="79" r="5" fill="#fff" />
             <path d="M62 82h4l-1 12h-2z" fill="#fff" />
           </svg>
-          <h1 class="employee-entry-title">Enter your Employee ID</h1>
-          <p id="employeeEntryHelp" class="employee-entry-help">Enter your 7-digit Employee ID to sign in automatically.</p>
+          <h1 class="employee-entry-title" id="employeeEntryTitle">Enter your Employee ID</h1>
+          <p id="employeeEntryHelp" class="employee-entry-help">Enter your 7-digit Employee ID to continue.</p>
           <label class="visually-hidden" for="employeeCode">Employee ID</label>
           <div class="employee-pin-entry">
             <div class="employee-pin-slots" aria-hidden="true">
@@ -56,11 +56,80 @@
             </div>
             <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeEntryHelp employeeAuthMessage" required />
           </div>
+          <div class="employee-password-field" id="employeePasswordField" hidden>
+            <div class="employee-password-heading">
+              <label for="employeePassword">Password</label>
+              <button id="employeePasswordToggle" class="employee-password-toggle" type="button" aria-label="Show password" aria-controls="employeePassword" aria-pressed="false" disabled><span id="employeePasswordToggleText">Show</span></button>
+            </div>
+            <div class="employee-password-control">
+              <input id="employeePassword" class="password-circle-input" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" aria-describedby="employeePasswordHelp employeeAuthMessage" disabled />
+              <div class="employee-password-circles" aria-hidden="true">
+                <span id="employeePasswordDigit1"></span>
+                <span id="employeePasswordDigit2"></span>
+                <span id="employeePasswordDigit3"></span>
+                <span id="employeePasswordDigit4"></span>
+                <span id="employeePasswordDigit5"></span>
+                <span id="employeePasswordDigit6"></span>
+                <span id="employeePasswordDigit7"></span>
+                <span id="employeePasswordDigit8"></span>
+              </div>
+            </div>
+            <p id="employeePasswordHelp">Sign-in starts automatically after 8 letters or numbers.</p>
+            <div class="employee-signin-options">
+              <label class="employee-remember"><input id="employeeRemember" name="remember" type="checkbox" aria-describedby="employeeRememberHelp" disabled /><span>Remember me</span></label>
+              <span id="employeeRememberHelp">Stay signed in for 30 days</span>
+            </div>
+          </div>
           <p id="employeeAuthMessage" role="alert"></p>
         </div>
         <button class="primary-button auth-submit" type="submit">
-          <span>Sign in</span>
+          <span>Continue</span>
         </button>
+      </form>
+      <form id="passwordSetupForm" hidden>
+        <div class="employee-password-field">
+          <div class="employee-password-heading">
+            <label for="setupPassword">New password</label>
+            <button id="setupPasswordToggle" class="employee-password-toggle" type="button" aria-label="Show new password" aria-controls="setupPassword" aria-pressed="false"><span id="setupPasswordToggleText">Show</span></button>
+          </div>
+          <div class="employee-password-control">
+            <input id="setupPassword" class="password-circle-input" name="newPassword" type="password" autocomplete="new-password" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" required aria-describedby="setupPasswordHelp authMessage" />
+            <div class="employee-password-circles" aria-hidden="true">
+              <span id="setupPasswordDigit1"></span>
+              <span id="setupPasswordDigit2"></span>
+              <span id="setupPasswordDigit3"></span>
+              <span id="setupPasswordDigit4"></span>
+              <span id="setupPasswordDigit5"></span>
+              <span id="setupPasswordDigit6"></span>
+              <span id="setupPasswordDigit7"></span>
+              <span id="setupPasswordDigit8"></span>
+            </div>
+          </div>
+          <p id="setupPasswordHelp">Use exactly 8 letters or numbers. All letters, all numbers or a mix are allowed.</p>
+        </div>
+        <div class="employee-password-field">
+          <div class="employee-password-heading">
+            <label for="setupConfirmPassword">Confirm password</label>
+            <button id="setupConfirmPasswordToggle" class="employee-password-toggle" type="button" aria-label="Show confirm password" aria-controls="setupConfirmPassword" aria-pressed="false"><span id="setupConfirmPasswordToggleText">Show</span></button>
+          </div>
+          <div class="employee-password-control">
+            <input id="setupConfirmPassword" class="password-circle-input" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" required aria-describedby="setupPasswordHelp authMessage" />
+            <div class="employee-password-circles" aria-hidden="true">
+              <span id="setupConfirmPasswordDigit1"></span>
+              <span id="setupConfirmPasswordDigit2"></span>
+              <span id="setupConfirmPasswordDigit3"></span>
+              <span id="setupConfirmPasswordDigit4"></span>
+              <span id="setupConfirmPasswordDigit5"></span>
+              <span id="setupConfirmPasswordDigit6"></span>
+              <span id="setupConfirmPasswordDigit7"></span>
+              <span id="setupConfirmPasswordDigit8"></span>
+            </div>
+          </div>
+        </div>
+        <div class="auth-actions">
+          <button class="primary-button" type="submit">Set password</button>
+          <button class="ghost-button" id="setupSignOutButton" type="button">Cancel and sign out</button>
+        </div>
       </form>
       <form id="loginForm" hidden>
         <div class="auth-field">

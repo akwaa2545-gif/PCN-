@@ -77,17 +77,26 @@ test('supplier API stamps, preserves and clears saved signer identity with exist
   const admin = await api.login('admin');
   const other = await api.login('other');
   const gsc = await api.login('gsc');
-  const created = await api.request('/api/pcns', { method: 'POST', session: owner, body: {
+  const early = await api.request('/api/pcns', { method: 'POST', session: owner, body: {
     ...unsignedPayload, status: 'draft', internalReview: { supplierSignoff: {
       approved: { checked: true, name: 'Forged', date: '2026-10-01' }
     } }
   } });
+  assert.equal(early.status, 400, 'supplier header signing is blocked before Final Judgment');
+  const created = await api.request('/api/pcns', { method: 'POST', session: owner,
+    body: { ...unsignedPayload, status: 'draft', internalReview: {} } });
   assert.equal(created.status, 201);
-  let record = created.body.data;
-  assert.equal(record.internalReview.supplierSignoff.approved.name, 'Alice Supplier');
+  const done = { prepared: true, checked: true, approved: true };
+  let record = await api.repository.seedHistoricalReview(created.body.data.id, {
+    signoff: { gscTet: done, prodEngTet: done, qaTet: done }, tapbu: { need: true, gsc: done, qa: done },
+    qateFinal: { signoff: done }
+  });
   const patch = (session, internalReview) => api.request(`/api/pcns/${record.id}`, {
     method: 'PATCH', session, body: { version: record.version, internalReview }
   });
+  const initial = await patch(owner, { supplierSignoff: { approved: { checked: true, name: 'Forged', date: '2026-10-01' } } });
+  assert.equal(initial.status, 200, initial.text); record = initial.body.data;
+  assert.equal(record.internalReview.supplierSignoff.approved.name, 'Alice Supplier');
   const updated = await patch(admin, { supplierSignoff: { approved: { checked: true } } });
   assert.equal(updated.status, 200);
   record = updated.body.data;

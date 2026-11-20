@@ -29,6 +29,51 @@ function transaction(settings = configured, failInsert = false) {
 const service = () => new NotificationService(null, { mailUrl: 'https://mail.example.test/send', publicOrigin: 'https://pcn.example.test' });
 const writes = tx => tx.calls.filter(call => call.query?.includes('INSERT pcn.NotificationJobs'));
 
+test('typed PE handoffs address their own team and worker cancels an obsolete legacy-team target', async () => {
+  const settings = { schemaVersion: 2, groups: mailGroups.map(group => ({ ...group,
+    emails: `${group.departmentKey || 'supplier'}@example.test`, recipients: [] })) };
+  for (const [documentType, id, department] of [['ta', 'T-19112601', 'prodEngTa'], ['sc', 'S-19112601', 'prodEngSc']]) {
+    const before = { ...base, id, documentType, internalReview: { signoff: { gscTet: { prepared: true, checked: true } } } };
+    const after = { ...before, internalReview: { signoff: { gscTet: done } } };
+    const prepared = await service().prepare(transaction(settings), before, after);
+    assert.equal(prepared.plan.payload.to, `${department}@example.test`);
+    assert.equal(prepared.record.mailRoutingState.groupKey, `department.${department}.prepared`);
+    for (const obsolete of [false, true]) {
+      const payload = obsolete ? { ...prepared.plan.payload, actionSnapshot: { ...prepared.plan.payload.actionSnapshot,
+        groupKey: 'department.prodEngTet.prepared' } } : prepared.plan.payload;
+      const state = obsolete ? { ...prepared.record.mailRoutingState, groupKey: 'department.prodEngTet.prepared' } : prepared.record.mailRoutingState;
+      const job = { Id: 'job', PcnId: id, Action: 'prepared', EventKey: `${id}:${state.activationId}:handoff`, PayloadJson: JSON.stringify(payload) };
+      const row = { PcnCode: id, Status: after.status, RiskLevel: after.riskLevel,
+        LegacyExtrasJson: JSON.stringify({ ...prepared.record, mailRoutingState: state }), ReviewJson: JSON.stringify(after.internalReview) };
+      const request = () => ({ input() { return this; }, async query(query) {
+        if (query.includes('SELECT TOP(1)')) return { recordset: [job] };
+        if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
+        if (query.includes('FROM pcn.PcnRequests')) return { recordset: [row] };
+        return { recordset: [] };
+      } });
+      const pool = { transaction: () => ({ begin: async () => {}, commit: async () => {}, rollback: async () => {}, request }) };
+      const claimed = await new NotificationWorker(pool).claim('claim-token');
+      assert.equal(claimed.cancelled, obsolete);
+      if (!obsolete) assert.equal(claimed.payload.to, `${department}@example.test`);
+    }
+  }
+});
+
+test('typed PE missing team lists never falls back to legacy or the other team', async () => {
+  const settings = { schemaVersion: 2, groups: [{ key: 'department.prodEngTet.prepared', emails: 'legacy@example.test' },
+    { key: 'department.prodEngSc.prepared', emails: 'sc@example.test' }] };
+  const before = { ...base, id: 'T-19112601', documentType: 'ta', internalReview: { signoff: { gscTet: { prepared: true, checked: true } } } };
+  const after = { ...before, internalReview: { signoff: { gscTet: done } } };
+  const prepared = await service().prepare(transaction(settings), before, after);
+  assert.equal(prepared.plan.queued, false);
+  assert.equal(prepared.plan.reason, 'recipient_not_configured');
+  assert.equal(prepared.record.mailRoutingState.groupKey, 'department.prodEngTa.prepared');
+  const oldSettings = await service().prepare(transaction({ groups: [{ key: 'signoff.prodEngTet', emails: 'legacy@example.test' }] }), before, after);
+  assert.equal(oldSettings.record.mailRoutingPolicyVersion, 2);
+  assert.equal(oldSettings.plan.queued, false);
+  assert.equal(oldSettings.plan.reason, 'notification_configuration_invalid');
+});
+
 test('submitted creation targets GSC Prepared; draft creation generates no handoff', async () => {
   const notifications = service();
   const tx = transaction();
@@ -370,7 +415,7 @@ test('job key uses activation identity and original Power Automate payload contr
   await service().persisted(tx, prepared.record, prepared.plan);
   const write = writes(tx)[0];
   assert.equal(write.inputs.eventKey, `${base.id}:${prepared.record.mailRoutingState.activationId}:handoff`);
-  assert.deepEqual(Object.keys(JSON.parse(write.inputs.payload)).sort(), ['actionSnapshot', 'message', 'senderName', 'subject', 'to']);
+  assert.deepEqual(Object.keys(JSON.parse(write.inputs.payload)).sort(), ['actionSnapshot', 'message', 'notificationPreferenceSnapshot', 'senderName', 'subject', 'to']);
   assert.doesNotMatch(write.query, /BEGIN TRANSACTION|COMMIT/);
 });
 

@@ -1,8 +1,10 @@
 const { ApiError } = require('./apiError');
+const { departmentForStage } = require('../pcn-types');
 
 const actions = Object.freeze(['prepared', 'checked', 'approved']);
 const departments = Object.freeze([
   { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
+  { key: 'prodEngTa', label: 'Prod.Eng/TA' }, { key: 'prodEngSc', label: 'Prod.Eng/SC' },
   { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' },
   { key: 'qaTapbu', label: 'QA/TaPBU' }
 ].map(Object.freeze));
@@ -11,7 +13,7 @@ const stageDepartments = Object.freeze({
   'tapbu.gsc': 'gscTapbu', 'tapbu.qa': 'qaTapbu', 'qateFinal.signoff': 'qaTet'
 });
 const departmentRoles = Object.freeze({
-  gscTet: 'gsc', prodEngTet: 'productionengineering', qaTet: 'qa',
+  gscTet: 'gsc', prodEngTet: 'productionengineering', prodEngTa: 'productionengineering', prodEngSc: 'productionengineering', qaTet: 'qa',
   gscTapbu: 'tapbu', qaTapbu: 'tapbu'
 });
 const rolesOf = user => (Array.isArray(user?.roles) ? user.roles : []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
@@ -45,12 +47,12 @@ function canSign(user, department, action) {
   try { validateSigningAssignment(user); return true; } catch { return false; }
 }
 
-function signaturePath(path) {
-  for (const [stage, department] of Object.entries(stageDepartments)) {
+function signaturePath(path, record = {}) {
+  for (const stage of Object.keys(stageDepartments)) {
     if (!path.startsWith(`${stage}.`)) continue;
     const field = path.slice(stage.length + 1);
     const action = actions.find(value => [value, `${value}Name`, `${value}Date`].includes(field));
-    if (action) return { department, action, stage, field };
+    if (action) return { department: departmentForStage(record, stage), action, stage, field };
   }
   return null;
 }

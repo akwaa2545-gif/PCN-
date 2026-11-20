@@ -15,14 +15,15 @@
   </header>
   <div class="developer-status" id="developerStatus" role="status" aria-live="polite">Checking Developer access…</div>
   <main id="developerMain" class="developer-main" hidden>
-    <header class="developer-heading"><div><span class="developer-badge">Developer</span><h1>Developer Tools</h1><p>Inspect document workflow and recorded changes.</p></div><button id="refreshDeveloper" type="button" class="developer-button developer-button-primary">Refresh</button></header>
-    <section class="developer-picker" aria-labelledby="documentPickerTitle">
+    <header class="developer-heading"><div><span class="developer-badge">Developer</span><h1>Developer Tools</h1><p>Inspect PCNs and manage portal settings.</p></div><button id="refreshDeveloper" type="button" class="developer-button developer-button-primary">Refresh</button></header>
+    <section id="developerPcnPicker" class="developer-picker" aria-labelledby="documentPickerTitle">
       <h2 id="documentPickerTitle">Select a PCN</h2>
       <div class="developer-picker-fields"><label>Find a document<input type="search" id="pcnSearch" placeholder="PCN number, supplier or material" /></label><label>PCN document<select id="pcnSelect"><option value="">Select a PCN</option></select></label></div>
     </section>
-    <div class="developer-tabs" role="tablist" aria-label="Developer inspection">
+    <div class="developer-tabs" role="tablist" aria-label="Developer tools">
       <button id="workflowTab" type="button" role="tab" aria-controls="workflowPanel" aria-selected="true">Workflow</button>
       <button id="transactionsTab" type="button" role="tab" aria-controls="transactionsPanel" aria-selected="false" tabindex="-1">Document Transactions</button>
+      <button id="adminToolsTab" type="button" role="tab" aria-controls="adminToolsPanel" aria-selected="false" tabindex="-1">Admin tools</button>
     </div>
     <section id="workflowPanel" role="tabpanel" aria-labelledby="workflowTab" class="developer-panel">
       <h2>Workflow inspector</h2><p id="workflowEmpty">Select a PCN to inspect its workflow.</p>
@@ -35,7 +36,28 @@
       <div class="developer-table-scroll" tabindex="0" role="region" aria-label="PCN change history"><table class="developer-table"><colgroup><col class="developer-col-time" /><col class="developer-col-actor" /><col class="developer-col-revision" /><col class="developer-col-field" /><col class="developer-col-value" /><col class="developer-col-value" /></colgroup><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Changed by</th><th scope="col">Revision</th><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody id="transactionRows"><tr><td colspan="6">Select a PCN to view recorded changes.</td></tr></tbody></table></div>
       <div class="developer-pagination"><p id="transactionCount" role="status" aria-live="polite">0 changes</p><div><button id="transactionPrevious" type="button" class="developer-button" disabled>Previous</button><button id="transactionNext" type="button" class="developer-button" disabled>Next</button></div></div>
     </section>
+    <section id="adminToolsPanel" role="tabpanel" aria-labelledby="adminToolsTab" class="developer-panel" hidden>
+      <h2>Admin tools</h2>
+      <p>Manage department review limits, notification recipients, and user access.</p>
+      <div class="developer-admin-tools">
+        <a class="developer-admin-tool" href="/system-settings" aria-labelledby="developerSettingsTitle">
+          <h3 id="developerSettingsTitle">System settings</h3>
+          <p>Configure department review limits and pending days.</p>
+          <span>Open settings <span aria-hidden="true">&rarr;</span></span>
+        </a>
+        <a class="developer-admin-tool" href="/admin#mail-routing" aria-labelledby="developerMailTitle">
+          <h3 id="developerMailTitle">Mail Routing</h3>
+          <p>Manage recipients for department notifications.</p>
+          <span>Manage routing <span aria-hidden="true">&rarr;</span></span>
+        </a>
+        <a class="developer-admin-tool" href="/admin#users" aria-labelledby="developerUsersTitle">
+          <h3 id="developerUsersTitle">User access</h3>
+          <p>Manage user accounts, roles, and department access.</p>
+          <span>Manage users <span aria-hidden="true">&rarr;</span></span>
+        </a>
+      </div>
+    </section>
   </main>
-  <script src="/session-client.js"></script><script src="/developer.js"></script>
+  <script src="/session-client.js"></script><script src="/pcn-types.js"></script><script src="/developer.js"></script>
 </body>
 </html>

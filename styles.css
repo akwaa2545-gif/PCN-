@@ -3221,7 +3221,7 @@ body.pcn-page .workflow-step.is-completed {
   }
 }
 
-@media (max-width: 720px) {
+@media screen and (max-width: 720px) {
   .topbar,
   .app-notice,
   .section-heading,
@@ -3719,7 +3719,7 @@ body.pcn-page .workflow-step.is-completed {
   grid-template-columns: minmax(0, 1.55fr) minmax(150px, 0.45fr);
 }
 
-@media (max-width: 860px) {
+@media screen and (max-width: 860px) {
   .pcn-header-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -3740,7 +3740,7 @@ body.pcn-page .workflow-step.is-completed {
   }
 }
 
-@media (max-width: 560px) {
+@media screen and (max-width: 560px) {
   .pcn-title-bar {
     font-size: 15px;
   }
@@ -4867,7 +4867,7 @@ body.pcn-page .workflow-step.is-completed,
   }
 }
 
-@media (max-width: 860px) {
+@media screen and (max-width: 860px) {
   .pcn-header-body,
   .supplier-detail-grid,
   .supplier-sheet .supplier-detail-grid,
@@ -4890,7 +4890,7 @@ body.pcn-page .workflow-step.is-completed,
   }
 }
 
-@media (max-width: 720px) {
+@media screen and (max-width: 720px) {
   .topbar,
   body.admin-page .topbar,
   body.pcn-page .topbar {
@@ -6292,7 +6292,7 @@ body.pcn-page #submissionView .qate-signoff-check.is-locked input[type="checkbox
   box-shadow: inset 0 0 0 1px #ffffff;
 }
 
-@media (max-width: 860px) {
+@media screen and (max-width: 860px) {
   body.pcn-page #submissionView .pcn-header-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6313,7 +6313,7 @@ body.pcn-page #submissionView .qate-signoff-check.is-locked input[type="checkbox
   }
 }
 
-@media (max-width: 720px) {
+@media screen and (max-width: 720px) {
   body.pcn-page #submissionView .supplier-sheet {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6349,7 +6349,7 @@ body.pcn-page #submissionView .qate-signoff-check.is-locked input[type="checkbox
   }
 }
 
-@media (max-width: 560px) {
+@media screen and (max-width: 560px) {
   body.pcn-page #submissionView .pcn-title-bar {
     font-size: 15px;
   }
@@ -8890,6 +8890,7 @@ body.pcn-page .form-action-dock #submitButton {
   font-size: 14px;
 }
 body.pcn-page .form-action-dock #submitButton:disabled { cursor: not-allowed; opacity: 0.55; box-shadow: none; }
+body.pcn-page .form-action-dock #saveDraftButton[hidden] { display: none; }
 body.pcn-page.is-saving #submitButton::before {
   border-color: rgba(25, 44, 70, 0.28);
   border-top-color: #192c46;
@@ -9488,25 +9489,57 @@ body.pcn-page .document-recovery-offer button { border:1px solid #bac8d8; border
 body.pcn-page #documentRecoveryRestore { background:#00407f; color:white; border-color:#00407f; }
 body.pcn-page .document-recovery-offer button:focus-visible { outline:2px solid #e5a000; outline-offset:2px; }
 @media print {
-  @page { size:A4 portrait; margin:12mm 8mm 15mm; @bottom-right { content:'Page ' counter(page) ' of ' counter(pages); font:9pt Arial; } }
-  body.pcn-page .document-print-header { display:block!important; color:black; font:10pt Arial; text-align:right; padding-bottom:6mm; }
-  body.pcn-page .document-print-watermark:not([hidden]) { display:block!important; position:fixed; top:42%; left:15%; width:70%; z-index:0; color:#888; opacity:.16; transform:rotate(-25deg); text-align:center; font:bold 55pt Arial; pointer-events:none; }
+  @page { size:A4 portrait; margin:8mm; @bottom-right { content:'Page ' counter(page) ' of ' counter(pages); font:8pt Arial; } }
+  body.pcn-page .document-print-header { display:block!important; min-height:18px; color:black; font:11px/14px Arial; text-align:right; padding:0 0 4px!important; }
+  body.pcn-page .document-print-watermark:not([hidden]) { display:block!important; position:absolute; top:45%; left:10%; width:80%; z-index:0; color:#888; opacity:.16; transform:rotate(-25deg); text-align:center; font:bold 55pt Arial; pointer-events:none; }
   body.pcn-page .document-recovery-offer, body.pcn-page #saveDraftButton { display:none!important; }
-  body.pcn-page { min-width:0!important; background:white!important; margin:0!important; padding:0!important; }
+  body.pcn-page { min-width:0!important; min-height:0!important; background:white!important; margin:0!important; padding:0!important; }
   body.pcn-page :is(.topbar,.summary-panel,.tabs,.form-action-dock,.app-feedback-area,.pcn-create-intro,.submission-skeleton,.pcn-save-overlay,.app-notice,.app-toast-stack,.signature-tooltip,.pcn-update-success,.pcn-unsaved-dialog) { display:none!important; }
-  body.pcn-page .app-shell { padding:0!important; margin:0!important; }
-  body.pcn-page .workspace-normal { display:block!important; padding:0!important; margin:0!important; }
-  body.pcn-page .form-panel { display:block!important; border:0!important; padding:0!important; margin:0!important; width:100%!important; box-shadow:none!important; }
+  body.pcn-page .app-shell { min-height:0!important; background:white!important; padding:0!important; margin:0!important; }
+  body.pcn-page .workspace-normal { display:block!important; min-height:0!important; max-width:none!important; padding:0!important; margin:0!important; }
+  body.pcn-page .form-panel { display:block!important; min-height:0!important; overflow:visible!important; border:0!important; padding:0!important; margin:0!important; width:100%!important; box-shadow:none!important; animation:none!important; }
   body.pcn-page .view { display:none!important; }
-  body.pcn-page #submissionView { display:block!important; width:100%!important; padding:0!important; margin:0!important; overflow:visible!important; }
+  /* Measure one desktop sheet, then fit its complete contents into A4's 8 mm margins. */
+  body.pcn-page #submissionView { display:block!important; position:relative; width:var(--pcn-print-width,960px)!important; max-width:none!important; min-height:0!important; padding:0!important; margin:0!important; overflow:visible!important; zoom:var(--pcn-print-scale, .7); break-inside:avoid; }
   body.pcn-page #submissionView .pcn-form { display:block!important; margin:0!important; padding:0!important; }
-  body.pcn-page #submissionView .supplier-sheet { min-width:0!important; width:100%!important; margin:0!important; }
+  body.pcn-page #submissionView .supplier-sheet { display:grid!important; grid-template-columns:36px minmax(0,1fr)!important; min-width:0!important; width:100%!important; margin:0!important; }
+  body.pcn-page #submissionView :is(.supplier-left-rail,.approval-section-rail,.approval-route-spacer) { display:grid!important; }
+  body.pcn-page #submissionView :is(.approval-section,.approval-route-row) { grid-template-columns:36px minmax(0,1fr)!important; }
+  body.pcn-page #submissionView :is(.option-header,.option-row) { display:grid!important; grid-template-columns:58px minmax(250px,1.2fr) minmax(150px,.7fr) minmax(150px,.7fr)!important; }
+  body.pcn-page #submissionView :is(.option-content-cell,.option-condition-cell) { grid-column:auto!important; border-top:0!important; }
+  body.pcn-page #submissionView .option-condition-label { display:none!important; }
   body.pcn-page #submissionView :is(.option-row,.pcn-header-body,.approval-meta-row,.approval-review-grid,.signoff-grid,.tapbu-grid,.signoff-box,.qate-final-grid) { break-inside:avoid; }
   body.pcn-page #submissionView .pcn-header-body { grid-template-columns:minmax(0,1fr) minmax(280px,36%)!important; }
   body.pcn-page #submissionView .pcn-header-info { border-right:1px solid black!important; border-bottom:0!important; }
+  body.pcn-page #submissionView .pcn-title-bar { font-size:20px!important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body.pcn-page #submissionView .header-controls { grid-template-columns:minmax(145px,190px) minmax(90px,130px) auto!important; }
+  body.pcn-page #submissionView .pcn-header-signatures { grid-template-columns:repeat(3,minmax(0,1fr))!important; }
+  body.pcn-page #submissionView .header-signature-cell { border-right:1px solid black!important; border-bottom:0!important; }
+  body.pcn-page #submissionView .header-signature-cell:last-child { border-right:0!important; }
   body.pcn-page #submissionView :is(.header-line,.header-line-indent) { grid-template-columns:172px minmax(0,1fr)!important; }
   body.pcn-page #submissionView .detail-identification { grid-column:span 2!important; }
   body.pcn-page #submissionView :is(input,select,textarea) { -webkit-print-color-adjust:exact; print-color-adjust:exact; opacity:1!important; background-color:transparent!important; }
+  body.pcn-page #submissionView textarea { resize:none!important; }
+  body.pcn-page #submissionView .header-line { min-height:20px; }
+  body.pcn-page #submissionView .header-signature-cell { grid-template-rows:22px minmax(48px,1fr) 18px; }
+  body.pcn-page #submissionView :is(.header-signature-check,.qate-signoff-check).handwritten-signoff { min-height:48px; }
+  body.pcn-page #submissionView .option-row { min-height:22px; }
+  body.pcn-page #submissionView .option-content-cell { padding:2px 4px; }
+  body.pcn-page #submissionView .option-condition-cell textarea { padding:2px 4px; }
+  body.pcn-page #submissionView .option-change-textarea { min-height:16px; }
+  body.pcn-page #submissionView .detail-reason { min-height:44px; }
+  body.pcn-page #submissionView :is(.detail-desired,.detail-identification) { min-height:42px; }
+  body.pcn-page #submissionView :is(.detail-sample,.detail-location,.detail-price) { min-height:50px; }
+  body.pcn-page #submissionView .approval-box { min-height:130px; padding:3px 4px; }
+  body.pcn-page #submissionView :is(.signoff-box,.tapbu-comment) { min-height:60px; }
+  body.pcn-page #submissionView .handwritten-signoff { min-height:40px; }
+  body.pcn-page #submissionView :is(.approval-route-band,.approval-route-band-bottom) { min-height:18px; padding:2px 4px; }
+  body.pcn-page #submissionView .qate-final-grid { min-height:100px; }
+  body.pcn-page #submissionView .qate-signoff-head { min-height:22px; padding:2px 4px; }
+  body.pcn-page #submissionView .qate-signoff-box { min-height:48px; }
+  body.pcn-page #submissionView .qate-date-cell { min-height:18px; }
+  body.pcn-page #submissionView .qate-final-main :is(h3,p) { margin-top:3px; margin-bottom:3px; }
+  body.pcn-page #submissionView .qate-judgment-row { gap:3px 12px; }
 }
 @media screen and (max-width:900px) {
   body.pcn-page .workspace-normal { display:flex; flex-direction:column; min-width:0; }
@@ -9557,7 +9590,7 @@ body.pcn-page .app-notice.has-missing-items {
 .document-test-badge { margin:0 0 10px; }
 .document-test-badge[hidden] { display:none; }
 .queue-test-badge { margin:4px 0; padding:2px 6px; border-width:1px; font-size:10px; }
-@media print { body.pcn-page .document-test-badge:not([hidden]) { display:block!important; padding:3mm; border:2px solid #743a00; color:#743a00; background:#fff0c2; text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+@media print { body.pcn-page .document-test-badge:not([hidden]) { display:block!important; margin:0 0 4px; padding:3px; border:2px solid #743a00; color:#743a00; background:#fff0c2; font-size:11px; text-align:center; -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 
 /* The embedded preview uses the same official sheet and hides application controls. */
 body.pcn-page.document-preview-only {
@@ -9716,5 +9749,69 @@ body.pcn-page.document-preview-only #submissionView .supplier-sheet {
   body.admin-page .topbar-actions { gap: 6px; }
   body.admin-page .topbar-actions :is(.ghost-button, .ghost-link) { min-height: 36px; padding-inline: 10px; font-size: 12px; }
   body.admin-page .topbar-actions .account-trigger { width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; }
-  body.admin-page .topbar-actions .account-avatar { width: 40px; height: 40px; }
+  body.admin-page .topbar-actions .account-trigger .account-avatar { width: 40px; height: 40px; }
 }
+
+/* Saved completion feedback uses the same blue, gold and flat panels as Records. */
+.pcn-closed-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #c3cde0; border-top: 5px solid #edb700; color: #122546; background: #fff; }
+.pcn-closed-dialog::backdrop { background: rgb(12 24 50 / .52); }
+.pcn-closed-heading { display: flex; align-items: center; gap: 16px; padding: 26px 28px 22px; border-bottom: 1px solid #e1e6f0; }
+.pcn-closed-heading p { margin: 0 0 5px; color: #566481; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.pcn-closed-heading h2 { margin: 0; font-size: 26px; color: #2c3582; }
+.pcn-closed-icon { display: grid; place-items: center; flex: 0 0 48px; height: 48px; background: #eef1fa; color: #2c3582; }
+.pcn-closed-icon svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 2.5; }
+.pcn-closed-body { padding: 24px 28px; line-height: 1.55; }
+.pcn-closed-body strong { display: block; font-size: 19px; }
+.pcn-closed-body p { margin: 12px 0 0; color: #566481; }
+.pcn-closed-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; padding: 18px 28px; border-top: 1px solid #e1e6f0; }
+.pcn-closed-actions :is(button, a) { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; padding: 10px 14px; border: 1px solid #bec9de; border-radius: 0; color: #293482; background: #fff; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+.pcn-closed-actions a { background: #edb700; border-color: #d2a100; color: #15254a; }
+.pcn-closed-actions :is(button, a):focus-visible { outline: 3px solid #293482; outline-offset: 3px; }
+@media (max-width: 520px) {
+  .pcn-closed-heading, .pcn-closed-body, .pcn-closed-actions { padding: 20px; }
+  .pcn-closed-actions :is(button, a) { width: 100%; }
+}
+@media print { .pcn-closed-dialog { display: none !important; } }
+
+/* Keep document identity alongside the supplier details in the workbook. */
+body.pcn-page #documentTypeField select { width: auto; min-width: 110px; height: 22px; padding: 0 4px; border: 1px solid #9aaac3; border-radius: 0; background: #fff; color: inherit; font: inherit; font-weight: inherit; }
+body.pcn-page #documentTypeField select:disabled { opacity: 1; color: inherit; border-color: transparent; appearance: none; -webkit-text-fill-color: currentColor; }
+@media print { body.pcn-page #documentTypeField select { border: 0; appearance: none; } }
+
+/* Self-service password controls share the profile menu's blue and gold theme. */
+.account-panel-footer .account-change-password {
+  width:100%; margin:0 0 8px; min-height:42px; padding:8px 16px;
+  border:1px solid #063f7b; background:#063f7b; color:#fff; font:inherit; font-weight:600; cursor:pointer;
+}
+.account-panel-footer .account-change-password:disabled { opacity:.65; cursor:wait; }
+.account-change-password:focus-visible { outline:3px solid #063f7b; outline-offset:3px; }
+.account-password-dialog {
+  box-sizing:border-box; width:min(500px,calc(100vw - 32px)); max-width:none;
+  max-height:calc(100dvh - 32px); overflow-y:auto; overscroll-behavior:contain;
+  margin:auto; padding:24px; border:1px solid #b9c9d9; border-top:4px solid #edb700;
+  background:#fff; color:#173550; font:inherit; box-shadow:0 18px 64px rgb(12 30 54 / .22);
+}
+.account-password-dialog::backdrop { background:rgb(12 24 50 / .52); }
+.account-password-dialog h2 { margin:0; font-size:24px; line-height:1.3; }
+.account-password-help { margin:10px 0 20px; color:#587087; font-size:14px; line-height:1.5; }
+.account-password-field { display:grid; gap:7px; margin:0 0 16px; font-size:14px; font-weight:600; }
+.account-password-field input {
+  box-sizing:border-box; width:100%; min-height:44px; padding:10px 12px;
+  border:1px solid #72899c; border-radius:0; background:#fff; color:#173550; font:inherit; font-weight:400;
+}
+.account-password-field input:focus-visible { outline:3px solid #063f7b; outline-offset:2px; }
+.account-password-message { margin:0 0 14px; color:#a12626; font-size:13px; line-height:1.5; }
+.account-password-message:empty { display:none; }
+.account-password-actions { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:10px; }
+.account-password-actions button {
+  min-height:44px; padding:10px 16px; border:1px solid #72899c; border-radius:0;
+  background:#fff; color:#063f7b; font:inherit; font-weight:600; cursor:pointer;
+}
+.account-password-actions .account-password-submit { border-color:#c59600; background:#edb700; color:#173550; }
+.account-password-actions button:focus-visible { outline:3px solid #063f7b; outline-offset:3px; }
+.account-password-actions button:disabled, .account-password-field input:disabled { opacity:.65; cursor:wait; }
+@media (max-width:480px) {
+  .account-password-dialog { padding:20px; }
+  .account-password-actions button { width:100%; }
+}
+@media print { .account-password-dialog { display:none !important; } }

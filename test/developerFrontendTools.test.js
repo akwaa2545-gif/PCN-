@@ -15,6 +15,9 @@ test('Developer tools require an active exclusive Developer assignment', () => {
 
 test('PCN deep links accept one canonical ID only', () => {
   assert.equal(tools.requestedPcn('?pcn=PCN-2026-0002'), 'PCN-2026-0002');
+  assert.equal(tools.requestedPcn('?pcn=T-19112601'), 'T-19112601');
+  assert.equal(tools.requestedPcn('?pcn=S-19112602'), 'S-19112602');
+  assert.equal(tools.requestedPcn('?pcn=T-31022601'), '');
   for (const query of ['?pcn=bad', '?pcn=PCN-2026-00002', '?pcn=PCN-2026-0002&pcn=PCN-2026-0003', '', '?pcn=%3Cscript%3E']) assert.equal(tools.requestedPcn(query), '');
 });
 
@@ -66,6 +69,43 @@ function page(fetch, user = { isActive: true, roles: ['developer'], department: 
   return { root, calls, get: document.getElementById };
 }
 const record = id => ({ record: { id, supplierName: 'Supplier', status: 'Draft' }, workflow: { stages: [] }, transactions: { items: [] } });
+
+test('Admin tools opens without selecting a PCN or making additional requests', async () => {
+  const fixture = page(() => ({ items: [] }));
+  const controller = await tools.mount(fixture.root);
+  const requests = [...fixture.calls];
+  assert.equal(typeof fixture.get('adminToolsTab').events.click, 'function');
+  fixture.get('adminToolsTab').events.click();
+  assert.equal(fixture.get('adminToolsTab').attributes['aria-selected'], 'true');
+  assert.equal(fixture.get('adminToolsPanel').hidden, false);
+  assert.equal(fixture.get('workflowPanel').hidden, true);
+  assert.equal(fixture.get('transactionsPanel').hidden, true);
+  assert.equal(fixture.get('developerPcnPicker').hidden, true);
+  assert.equal(fixture.get('refreshDeveloper').hidden, true);
+  assert.equal(controller.state.selected, '');
+  assert.deepEqual(fixture.calls, requests);
+});
+
+test('three Developer tabs support arrow wrapping, Home and End with one focus target', async () => {
+  const fixture = page(() => ({ items: [] }));
+  await tools.mount(fixture.root);
+  for (const [from, key, target] of [
+    ['workflow', 'ArrowLeft', 'adminTools'], ['adminTools', 'ArrowRight', 'workflow'],
+    ['workflow', 'ArrowRight', 'transactions'], ['transactions', 'ArrowRight', 'adminTools'],
+    ['adminTools', 'Home', 'workflow'], ['workflow', 'End', 'adminTools']
+  ]) {
+    let prevented = false;
+    fixture.get(`${from}Tab`).events.keydown({ key, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
+    for (const name of ['workflow', 'transactions', 'adminTools']) {
+      assert.equal(fixture.get(`${name}Tab`).tabIndex, name === target ? 0 : -1);
+      assert.equal(fixture.get(`${name}Panel`).hidden, name !== target);
+    }
+    assert.equal(fixture.get(`${target}Tab`).focused, true);
+    assert.equal(fixture.get('developerPcnPicker').hidden, target === 'adminTools');
+    assert.equal(fixture.get('refreshDeveloper').hidden, target === 'adminTools');
+  }
+});
 
 test('unauthorized and malformed Developer sessions never fetch document data', async () => {
   for (const user of [null, { isActive: true, roles: ['admin'], department: 'it' }, { isActive: true, roles: ['developer', 'admin'], department: 'developer' }]) {

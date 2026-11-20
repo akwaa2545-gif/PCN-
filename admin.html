@@ -22,6 +22,7 @@
           <button class="ghost-button admin-nav-button" id="adminRecordsButton" type="button">PCN Records</button>
           <button class="ghost-button admin-nav-button" id="adminMailRoutingButton" type="button" hidden>Mail Routing</button>
           <button class="ghost-button admin-nav-button" id="adminUsersButton" type="button" hidden>Users</button>
+          <a class="ghost-link" id="adminSystemSettingsLink" href="/system-settings" hidden>System Settings</a>
           <a class="ghost-link" id="adminDeveloperLink" href="/developer" hidden>Developer Tools</a>
           <div class="create-start-dropdown" id="createStartDropdown">
             <a class="ghost-link create-start-link" href="/create">Create PCN</a>
@@ -223,7 +224,7 @@
             <div class="users-filters" role="group" aria-label="Filter users">
               <label for="usersSearchFilter">Search users<input id="usersSearchFilter" type="search" maxlength="200" autocomplete="off" placeholder="Name, employee code or email" /></label>
               <label for="usersRoleFilter">PCN role<select id="usersRoleFilter"><option value="">All roles</option><option value="unassigned">Unassigned</option><option value="admin">Administrator</option><option value="developer">Developer</option><option value="prepared">Prepared</option><option value="checked">Checked</option><option value="approved">Approved</option><option value="legacy">No signing assignment</option></select></label>
-              <label for="usersDepartmentFilter">PCN department<select id="usersDepartmentFilter"><option value="">All departments</option><option value="unassigned">Unassigned</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
+              <label for="usersDepartmentFilter">PCN department<select id="usersDepartmentFilter"><option value="">All departments</option><option value="unassigned">Unassigned</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="prodEngTa">Prod.Eng/TA</option><option value="prodEngSc">Prod.Eng/SC</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
               <label for="usersStatusFilter">Account status<select id="usersStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
               <button id="usersClearFiltersButton" class="ghost-button" type="button">Clear filters</button>
             </div>
@@ -293,7 +294,7 @@
           <div id="employeeAssignments" class="employee-assignments">
             <h4 class="employee-assignments-title">Access settings</h4>
             <label for="employeeRole">PCN role<select id="employeeRole" required aria-describedby="employeeRoleHelp employeeRoutePreview"><option value="">Select role</option><option value="admin">Administrator</option><option value="developer">Developer</option><option value="prepared">Prepared</option><option value="checked">Checked</option><option value="approved">Approved</option></select></label>
-            <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
+            <label for="employeeDepartment">PCN department<select id="employeeDepartment" required><option value="">Select department</option><option value="gscTet">GSC/TET</option><option value="prodEngTet">Prod.Eng/TET</option><option value="prodEngTa">Prod.Eng/TA</option><option value="prodEngSc">Prod.Eng/SC</option><option value="qaTet">QA/TET</option><option value="gscTapbu">GSC/TaPBU</option><option value="qaTapbu">QA/TaPBU</option><option value="it">IT</option><option value="developer">Developer</option><option value="other">Other</option></select></label>
             <label id="employeeDeveloperPasswordField" for="employeeDeveloperPassword" hidden>Developer password<input id="employeeDeveloperPassword" type="password" autocomplete="off" maxlength="128" aria-describedby="employeeRoutePreview employeeDialogMessage" disabled /></label>
 
             <label id="employeeActiveLabel" for="employeeActive" class="employee-active-label" hidden><input id="employeeActive" type="checkbox" /> Active account</label>
@@ -338,6 +339,7 @@
         <button class="primary-button" id="notificationRecipientConfirmButton" type="button" disabled>Add recipient</button>
       </div>
     </dialog>
+    <script src="/pcn-types.js"></script>
     <script src="/session-client.js"></script>
     <script src="/records.js"></script>
     <script src="/admin.js"></script>

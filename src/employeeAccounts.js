@@ -2,6 +2,7 @@ const { ApiError } = require('./apiError');
 const { validateSigningAssignment } = require('./signingPermissions');
 const employeeDepartments = Object.freeze([
   { key: 'gscTet', label: 'GSC/TET' }, { key: 'prodEngTet', label: 'Prod.Eng/TET' },
+  { key: 'prodEngTa', label: 'Prod.Eng/TA' }, { key: 'prodEngSc', label: 'Prod.Eng/SC' },
   { key: 'qaTet', label: 'QA/TET' }, { key: 'gscTapbu', label: 'GSC/TaPBU' },
   { key: 'qaTapbu', label: 'QA/TaPBU' }, { key: 'it', label: 'IT' }, { key: 'other', label: 'Other' },
   { key: 'developer', label: 'Developer' }

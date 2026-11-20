@@ -97,6 +97,13 @@ body.records-page .access-pending { border-color: var(--portal-line); border-top
 
 /* Shared record workspace, used by read-only Records and the Portal. */
 .rd-controls { padding: 18px 20px; border-block: 1px solid #d9e2ec; background: #fff; color: #173454; }
+.rd-lifecycle-tabs { display: flex; gap: 0; border-bottom: 1px solid #c3cdd5; margin: 0 0 16px; }
+.rd-lifecycle-tab { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 10px 20px; border: 1px solid transparent; border-bottom: 3px solid transparent; border-radius: 0; background: #fff; color: #475774; font: inherit; font-weight: 700; cursor: pointer; }
+.rd-lifecycle-tab:hover { background: #eef1f8; color: #29317f; }
+.rd-lifecycle-tab[aria-selected="true"] { border-color: #29317f; border-bottom-color: #e8b800; background: #29317f; color: #fff; }
+.rd-lifecycle-count { display: inline-block; min-width: 26px; padding: 2px 6px; background: #eef1f8; color: #29317f; text-align: center; font-size: 12px; }
+.rd-lifecycle-tab[aria-selected="true"] .rd-lifecycle-count { background: #fff; color: #29317f; }
+@media (max-width: 600px) { .rd-lifecycle-tab { flex: 1; min-width: 0; padding: 10px 8px; gap: 8px; font-size: 13px; } }
 .rd-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .rd-summary-card { display: flex; align-items: center; gap: 12px; min-height: 76px; padding: 14px 16px; border: 1px solid #d4dfeb; border-left: 4px solid #416489; background: #f6f8fb; color: #143d68; text-align: left; font: inherit; cursor: pointer; }
 .rd-summary-card strong { font-size: 26px; line-height: 1; }
@@ -146,7 +153,10 @@ body.admin-page .rd-sort:hover { color: #ffe27b; background: transparent; }
 .rd-status-approved, .rd-status-closed, .rd-doc-ready { border-color: #b3d1bb; color: #235e37; background: #eef7f0; }
 .rd-status-rejected { border-color: #e8b3b2; color: #8e2624; background: #fff0ef; }
 .rd-doc-missing { border-color: #e9cd83; color: #775500; background: #fff7df; }
-.rd-overdue { color: #a92f2b; font-weight: 700; }
+.rd-overdue, body.admin-page .admin-table td.rd-overdue, .rd-workflow-details > p.rd-overdue, .pcn-department-point .rd-overdue, .pcn-timeline-details .rd-overdue { color: #a92f2b; font-weight: 700; }
+.rd-deadline-overdue, .rd-overdue-alert { border: 1px solid #e8b3b2; color: #8e2624; background: #fff0ef; font-weight: 700; }
+.rd-overdue-alert { margin: 16px 0 0; padding: 12px 14px; line-height: 1.5; }
+.rd-department-due { display: block; font-size: 12px; line-height: 1.5; }
 .rd-code-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table),
 body.admin-page :is(.admin-table, .users-table, .rd-signatures, .pcn-timeline-change-table) * { font-family: var(--pcn-table-font) !important; font-weight: 600 !important; }
@@ -187,6 +197,10 @@ body.admin-page .rd-more-panel .danger-button { display: inline-flex; align-item
   .rd-controls ~ .admin-table-wrap tr:nth-child(even) .rd-row-actions { background: #f5f7fa; }
   .rd-controls ~ .admin-table-wrap tr.is-selected .rd-row-actions { background: #eaf2fa; }
 }
+/* Cover every overdue cell, including sticky code/actions and striped rows. */
+body.admin-page .rd-controls ~ .admin-table-wrap tr.rd-row-overdue > td { background: #fff0ef; border-color: #e8b3b2; color: #8e2624; }
+body.admin-page .rd-controls ~ .admin-table-wrap tr.rd-row-overdue:is(:hover, :focus-visible, .is-selected) > td { background: #ffe3e1; }
+body.admin-page .rd-controls ~ .admin-table-wrap tr.rd-row-overdue > td[data-column="id"] { box-shadow: inset 4px 0 0 #a92f2b, 1px 0 0 #e8b3b2; }
 .rd-preview { width: min(1020px, calc(100vw - 36px)); max-width: calc(100vw - 36px); max-height: min(850px, calc(100dvh - 36px)); padding: 0; border: 1px solid #cbd6e2; border-top: 4px solid #004583; color: #183958; background: #fff; font: inherit; }
 .rd-preview::backdrop { background: rgba(20, 38, 57, .6); }
 .rd-preview[open] { display: flex; flex-direction: column; overflow: hidden; }

@@ -13,6 +13,7 @@ const {buildWorkflowNotificationMessage,buildPcnUpdateNotificationMessage} = req
 const masterData = require('../src/masterData');
 
 async function completeSubmissionFields(page) {
+  if (await page.locator('#documentType').isEnabled()) await page.locator('#documentType').selectOption('ta');
   await page.locator('#reason').fill(unsignedPayload.reason);
   await page.locator('#desiredStart').fill(unsignedPayload.desiredStart);
   await page.locator('input[name="sampleSubmittedChoice"][value="no"]').check();
@@ -27,7 +28,7 @@ async function verifyPcnEmailLinks(browser, errors) {
   repository.getMasterData=async()=>({...masterData,versionId:1});
   const service=new PcnService(repository,()=>new Date('2026-10-07T00:00:00.000Z'));
   const record=await service.create({...unsignedPayload,supplierName:'Direct link private fixture'},'isolated-fixture',{id:'0000001-id',roles:['supplier']});
-  assert.equal(record.id,'PCN-2026-0001');
+  assert.equal(record.id,'T-07102601');
   const passwordAuth=fakeAuthService({additionalUsers:[
     {username:'0000001',employeeCode:'0000001',roles:['supplier'],identityProvider:'employee-code'},
     {username:'0000002',employeeCode:'0000002',roles:['supplier'],identityProvider:'employee-code'}
@@ -62,7 +63,7 @@ async function verifyPcnEmailLinks(browser, errors) {
     tracingStarted=true;
     const notification=new NotificationService(null,{publicOrigin:origin});
     const pcnUrl=notification.pcnLink(record.id);
-    assert.equal(pcnUrl,`${origin}/form.html?id=PCN-2026-0001`);
+    assert.equal(pcnUrl,`${origin}/form.html?id=${record.id}`);
     const details={pcnUrl,completedGroup:'Supplier submission',nextGroup:'GSC/TET Prepared',nextDepartment:'GSC/TET',nextRole:'Prepared',updateSummary:'Supplier details updated'};
     const messages=[buildWorkflowNotificationMessage(record,details),buildPcnUpdateNotificationMessage(record,details)];
     const links=messages.map(message=>message.match(/<a href="([^"]+)"/)[1]);
@@ -74,7 +75,7 @@ async function verifyPcnEmailLinks(browser, errors) {
     };
     const loaded=async()=>{
       await page.locator('#appNoticeTitle').filter({hasText:'PCN loaded'}).waitFor();
-      assert.match(await page.locator('#appNoticeMessage').textContent(),/Loaded PCN-2026-0001/);
+      assert((await page.locator('#appNoticeMessage').textContent()).includes(`Loaded ${record.id}`));
       assert.equal(await page.locator('#supplierName').inputValue(),record.supplierName);
       assert.equal(await page.locator('#submitButton').isDisabled(),false);
     };
@@ -83,7 +84,7 @@ async function verifyPcnEmailLinks(browser, errors) {
       await page.locator('.account-sign-out').click();
       await page.waitForURL(`${origin}/login`);
     };
-    await page.goto(`${origin}/login?returnTo=${encodeURIComponent('/form.html?id=PCN-2026-0001')}`);
+    await page.goto(`${origin}/login?returnTo=${encodeURIComponent(`/form.html?id=${record.id}`)}`);
     await login('0000001');
     await loaded();
     await page.goto(links[1]);
@@ -93,8 +94,8 @@ async function verifyPcnEmailLinks(browser, errors) {
     const signedOut=await page.request.get(`${origin}/api/pcns/${record.id}`);
     assert.equal(signedOut.status(),401,'Sign out removes access to the protected PCN API');
     await page.goto(links[0]);
-    await page.waitForURL(`${origin}/login?returnTo=${encodeURIComponent('/form.html?id=PCN-2026-0001')}`);
-    assert.equal(new URL(page.url()).searchParams.get('returnTo'),'/form.html?id=PCN-2026-0001');
+    await page.waitForURL(`${origin}/login?returnTo=${encodeURIComponent(`/form.html?id=${record.id}`)}`);
+    assert.equal(new URL(page.url()).searchParams.get('returnTo'),`/form.html?id=${record.id}`);
     await login('0000001');
     await loaded();
     assert.deepEqual(logins[1],{employeeCode:'0000001'});
@@ -177,7 +178,7 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
       assert.equal(pathname,writes===0?'/api/pcns':`/api/pcns/${record.id}`,'Split responses never trigger a legacy notification POST');
       const payload=request.postDataJSON();
       if(writes>0) assert.equal(payload.version,record.version,'Refresh supplies the current version before each write');
-      const id='PCN-2026-9001';
+      const id='T-19112690';
       const next={...record,...payload,id,version:String(writes+1).padStart(16,'0'),mailRoutingPolicyVersion:2};
       record=writes===0?{...next,internalReview:{...next.internalReview,signoff:{...next.internalReview.signoff,
         gscTet:{...next.internalReview.signoff.gscTet,approved:false,checked:false,prepared:false}}}}:next;
@@ -187,6 +188,7 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
     });
     await page.goto('http://127.0.0.1:3099/form.html');
     await page.locator('#submitButton:not([disabled])').waitFor();
+    await page.locator('#documentType').selectOption('ta');
     const formViewport = page.viewportSize();
     await page.setViewportSize({width:320,height:700});
     const submitVisibleAtEnd = await page.evaluate(() => {
@@ -453,6 +455,12 @@ async function verifyHandwrittenSignoffs(browser) {
     await page.evaluate(()=>window.scrollBy(0,100));
     await tooltip.waitFor({state:'hidden'});
     await context.clearCookies();
+    const beforeSupplierReview = (await repository.findById(record.id)).internalReview;
+    const completed = {prepared:true,checked:true,approved:true};
+    // Header signing requires completed departmental and Final Judgment signatures.
+    await repository.seedHistoricalReview(record.id,{...beforeSupplierReview,
+      signoff:{gscTet:{...beforeSupplierReview.signoff.gscTet,...completed},prodEngTet:completed,qaTet:completed},
+      tapbu:{noNeed:true},qateFinal:{signoff:completed}});
     await login(author.username);
     const supplierPrepared = page.locator('[data-internal-field="supplierSignoff.prepared.checked"]');
     await supplierPrepared.check();
@@ -472,6 +480,8 @@ async function verifyHandwrittenSignoffs(browser) {
     await assertNameFits(supplierPrepared.locator('..'),longSupplierName,'Very long supplier name after reload');
     await page.setViewportSize({width:1440,height:1100});
     await page.locator('.pcn-header-signatures').screenshot({path:path.resolve('test-results/handwritten-supplier-signoff.png')});
+    const supplierSignedReview = (await repository.findById(record.id)).internalReview;
+    await repository.seedHistoricalReview(record.id,{...beforeSupplierReview,supplierSignoff:supplierSignedReview.supplierSignoff});
     await context.clearCookies();
     await login('pen-admin');
     assert.equal(await prepared.isDisabled(),false,'Administrators can sign without a department or signing-step assignment');
@@ -479,9 +489,12 @@ async function verifyHandwrittenSignoffs(browser) {
     assert.equal(await adminChecked.isDisabled(),false,'An administrator can continue a completed prior signoff');
     assert.equal(await page.locator('[data-internal-field="signoff.prodEngTet.approved"]').isDisabled(),true,'Administrators still follow preceding-department prerequisites');
     await page.locator('[data-internal-field="tapbu.need"]').check();
-    const signoffControls = page.locator('.handwritten-signoff input[type="checkbox"]');
+    const signoffControls = page.locator('.handwritten-signoff input[type="checkbox"]:not([data-internal-field^="supplierSignoff."])');
     for (let index=0;index<await signoffControls.count();index++) {
       const control = signoffControls.nth(index);
+      if (!await control.isChecked()) await control.check();
+    }
+    for (const control of await page.locator('.pcn-header-signatures .handwritten-signoff input[type="checkbox"]').all()) {
       if (!await control.isChecked()) await control.check();
     }
     const shortFit=await assertNameFits(adminChecked.locator('..'),'Morgan','Short administrator name');
@@ -522,7 +535,7 @@ async function verifyUnsavedDocumentWarning(browser) {
   const repository = memoryRepository();
   repository.getMasterData = async () => ({...masterData,versionId:1});
   const service = new PcnService(repository);
-  const author = {id:'unsaved-author-id',username:'unsaved-author',displayName:'Taylor Supplier',roles:['supplier']};
+  const author = {id:'unsaved-author-id',username:'unsaved-author',displayName:'Taylor Preparer',roles:['reviewer'],department:'gscTet',signingStep:'prepared'};
   const record = await service.create({...unsignedPayload,status:'draft'},'isolated-fixture',author);
   const authService = fakeAuthService({additionalUsers:[author]});
   const server = http.createServer();
@@ -620,7 +633,7 @@ async function verifyUnsavedDocumentWarning(browser) {
     await page.locator('#reason').fill(originalReason);
     assert.equal(await unloadBlocked(),false,'Reverting an edit removes the warning');
 
-    const supplierSignature = page.locator('[data-internal-field="supplierSignoff.prepared.checked"]');
+    const supplierSignature = page.locator('[data-internal-field="signoff.gscTet.prepared"]');
     await supplierSignature.check();
     assert.equal(await unloadBlocked(),true,'A newly checked signature is an unsaved document change');
     await supplierSignature.uncheck();
@@ -860,8 +873,8 @@ async function main() {
     assert.equal(emails.length,0,'Empty lists do not create recipient input fields');
     assert(emails.every(email=>email===''));
     assert.equal(await page.locator('#notificationReloadButton').isVisible(),false,'Reload is offered only after a conflict');
-    assert.equal(await page.locator('.notification-department').count(),5);
-    for(const department of ['gscTet','prodEngTet','qaTet','gscTapbu','qaTapbu']) {
+    assert.equal(await page.locator('.notification-department').count(),7);
+    for(const department of ['gscTet','prodEngTet','prodEngTa','prodEngSc','qaTet','gscTapbu','qaTapbu']) {
       assert.deepEqual(await page.locator(`[data-department="${department}"] [data-notification-group]`).evaluateAll(groups=>groups.map(group=>group.dataset.notificationGroup)),['prepared','checked','approved'].map(action=>`department.${department}.${action}`));
     }
     assert.equal(await page.locator('[data-department=qaTet] .notification-department-header h3').textContent(),'QA/TET');
@@ -878,10 +891,10 @@ async function main() {
     assert.equal(await page.getByRole('button',{name:'Check status',exact:true}).count(),1);
     assert.equal(await page.locator('#notificationHealthPanel dl, #notificationHealthPanel p').count(),0,'Mail service has a compact status without metrics or delivery text');
     assert.equal(await page.locator('#notificationHealthStatus').getAttribute('aria-atomic'),'true');
-    assert.equal(await page.locator('[data-recipient-count]').filter({hasText:'0 recipients'}).count(),16);
+    assert.equal(await page.locator('[data-recipient-count]').filter({hasText:'0 recipients'}).count(),22);
     await page.locator('#notificationSaveButton').click();
     await page.locator('#mailRoutingMessage').filter({hasText:'Mail routing saved.'}).waitFor();
-    assert.equal((await repository.getNotificationSettings()).groups.length,16,'Empty groups can be saved without input fields');
+    assert.equal((await repository.getNotificationSettings()).groups.length,22,'Empty groups can be saved without input fields');
     assert.equal(await page.locator('[data-recipient-email]').count(),0);
     const approvedList=page.locator('#notificationGroups [data-notification-group="department.gscTet.approved"]');
     const approvedAdd=page.locator('[data-department="gscTet"] .notification-department-add');
@@ -1088,7 +1101,7 @@ async function main() {
     assert.deepEqual(savedRouting.recipients,[{email:'reviewer@example.test',displayName:'Browser Reviewer',jobTitle:'Quality Reviewer',department:'Supplier Quality',photo:directoryPhoto}]);
     const storedSettings=await repository.getNotificationSettings();
     assert.equal(storedSettings.schemaVersion,2);
-    assert.equal(storedSettings.groups.length,16);
+    assert.equal(storedSettings.groups.length,22);
     assert.equal(storedSettings.groups.find(group=>group.key==='department.gscTet.checked').emails,'legacy@example.test');
     assert.equal(storedSettings.legacyGroups.find(group=>group.key==='signoff.gscTet').emails,'legacy@example.test');
     const preparedList=page.locator('#notificationGroups [data-notification-group="department.gscTet.prepared"]');
@@ -1549,7 +1562,7 @@ async function main() {
     await viewerPage.close();
     assert.deepEqual(outbound,[],'The complete browser suite performs no outbound email');
     assert.deepEqual(errors,[],'All browser journeys complete without page errors');
-    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','five-departments-fifteen-step-lists','separate-supplier-list','qa-initial-final-shared-lists','empty-lists-without-fields','popup-department-and-step','popup-cancel-and-escape-no-changes','popup-one-field','static-contact-rows','last-remove-restores-add','typing-and-selection-no-extra-fields','natural-directory-height','pending-escape-cancels-lookup','blurred-lookup-does-not-reopen','popup-internal-search-status','duplicate-recipient-rejected','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','directory-selection-required','forced-confirm-cannot-bypass','input-event-clears-selection','failed-no-match-unconfigured-lookup','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','popup-focus-and-mobile-layout','admin-users-role-gate','employee-source-isolated-from-mail','typed-code-cannot-provision','employee-no-match-and-error','employee-selection-and-read-only-code','employee-input-invalidates-selection','selected-employee-create-fixed-assignments','five-pcn-role-options-no-duplicate-select','administrator-demotion-confirm-cancel','unchanged-multiple-role-and-signing-preserved','legacy-requester-no-implicit-signing','english-name-mail-lookup','duplicate-name-explicit-confirmation','single-step-requires-verified-mail','free-text-email-cannot-save','mail-input-invalidates-selection','managed-users-routing-readonly','manual-save-excludes-managed-mail','user-edit-step-active-version','user-conflict-keeps-draft','user-edit-cancel-no-write','maintenance-mode-explicit-employee-link','explicit-employee-link-preserves-assignments','cancel-employee-selection-no-write','unconfigured-source-blocks-provisioning','users-responsive-layout','unknown-auth-mode-retry','employee-session-service-failure-closed','employee-stale-session-recovery','employee-only-sign-in-no-password','employee-login-leading-zero-and-csrf','split-update-queued-action-blocked','split-signature-save-both-queued','split-update-blocked-action-queued','split-workflow-checkbox-feedback-after-refresh','split-queue-feedback-no-delivery-claims','split-policy2-no-legacy-notification-post','no-page-errors'],storage:'isolated_test_adapters'}));
+    console.log(JSON.stringify({browser:'passed',checks:['forced-password-change','relogin','seven-departments-twenty-two-notification-lists','separate-supplier-list','qa-initial-final-shared-lists','empty-lists-without-fields','popup-department-and-step','popup-cancel-and-escape-no-changes','popup-one-field','static-contact-rows','last-remove-restores-add','typing-and-selection-no-extra-fields','natural-directory-height','pending-escape-cancels-lookup','blurred-lookup-does-not-reopen','popup-internal-search-status','duplicate-recipient-rejected','read-only-legacy-contacts','explicit-deduplicated-legacy-copy','versioned-routing-save','routing-conflict-preserves-draft','confirmed-reload-discards-draft','directory-selection-required','forced-confirm-cannot-bypass','input-event-clears-selection','failed-no-match-unconfigured-lookup','original-directory-request-and-response-envelopes','keyboard-directory-selection','directory-profile-photo-selection-and-save','directory-profile-persists-on-reload','compact-mail-configuration-status','worker-and-queue-attention-status','keyboard-health-refresh','safe-health-errors','health-failure-preserves-pcns','no-outbound-email','blank-new-supplier-form','supplier-create','saved-pcn-reload','responsive-routing-layout','popup-focus-and-mobile-layout','admin-users-role-gate','employee-source-isolated-from-mail','typed-code-cannot-provision','employee-no-match-and-error','employee-selection-and-read-only-code','employee-input-invalidates-selection','selected-employee-create-fixed-assignments','five-pcn-role-options-no-duplicate-select','administrator-demotion-confirm-cancel','unchanged-multiple-role-and-signing-preserved','legacy-requester-no-implicit-signing','english-name-mail-lookup','duplicate-name-explicit-confirmation','single-step-requires-verified-mail','free-text-email-cannot-save','mail-input-invalidates-selection','managed-users-routing-readonly','manual-save-excludes-managed-mail','user-edit-step-active-version','user-conflict-keeps-draft','user-edit-cancel-no-write','maintenance-mode-explicit-employee-link','explicit-employee-link-preserves-assignments','cancel-employee-selection-no-write','unconfigured-source-blocks-provisioning','users-responsive-layout','unknown-auth-mode-retry','employee-session-service-failure-closed','employee-stale-session-recovery','employee-only-sign-in-no-password','employee-login-leading-zero-and-csrf','split-update-queued-action-blocked','split-signature-save-both-queued','split-update-blocked-action-queued','split-workflow-checkbox-feedback-after-refresh','split-queue-feedback-no-delivery-claims','split-policy2-no-legacy-notification-post','no-page-errors'],storage:'isolated_test_adapters'}));
   } catch(error) {
     console.error(JSON.stringify({smokeFailurePhase:phase,error:error.stack || error.message}));
     throw error;

@@ -7,7 +7,7 @@
   let heartbeatSuspended = false;
   let logoutPending = false;
   const sessionDocument = window.document || (typeof document !== 'undefined' ? document : null);
-  const heartbeatVisible = () => session.authenticated === true && !logoutPending && !heartbeatSuspended
+  const heartbeatVisible = () => session.authenticated === true && !session.user?.passwordSetupRequired && !session.user?.mustChangePassword && !logoutPending && !heartbeatSuspended
     && sessionDocument?.visibilityState !== 'hidden' && window.navigator?.onLine !== false;
   function clearHeartbeat() {
     if (heartbeatTimer !== null) window.clearTimeout?.(heartbeatTimer);
@@ -87,12 +87,12 @@
       error.code = body.code || body.error?.code;
       const authRoute = url.pathname === '/api/session' || url.pathname.startsWith('/api/auth/');
       if (response.status === 401 && currentResponse && !authRoute) redirectToLogin();
-      if (error.code === 'PASSWORD_CHANGE_REQUIRED' && currentResponse && !authRoute) redirectToLogin(true);
+      if (['PASSWORD_CHANGE_REQUIRED', 'PASSWORD_SETUP_REQUIRED'].includes(error.code) && currentResponse && !authRoute) redirectToLogin(true);
       throw error;
     }
     if (requestGeneration === sessionGeneration && body.data && Object.prototype.hasOwnProperty.call(body.data, 'authenticated')) {
       if (body.data.authenticated === true) {
-        if (url.pathname === '/api/auth/login') logoutPending = false;
+        if (url.pathname === '/api/auth/login') { sessionGeneration++; logoutPending = false; }
         session = { ...body.data, csrfToken: body.data.csrfToken || '' };
         scheduleHeartbeat();
       } else clearAuthentication();
@@ -114,7 +114,7 @@
       redirectToLogin();
       return null;
     }
-    if (current.user?.mustChangePassword) {
+    if (current.user?.mustChangePassword || current.user?.passwordSetupRequired) {
       redirectToLogin(true);
       return null;
     }
@@ -150,6 +150,7 @@
   function mountProfile(user, onLogoutError) {
     const container = document.getElementById('accountMenu');
     if (!container || !user) return;
+    if (user.passwordSetupRequired || user.mustChangePassword) { container.replaceChildren(); return; }
     const username = String(user.displayName || user.fullName || user.username || 'User').trim();
     const fullName = String(user.displayName || user.fullName || '').trim();
     const email = String(user.email || user.mailProfile?.email || '').trim();
@@ -159,7 +160,7 @@
       qa: 'QA/TET', tapbu: 'TaPBU'
     };
     const departmentNames = {
-      gscTet: 'GSC/TET', prodEngTet: 'Prod. Eng./TET', qaTet: 'QA/TET',
+      gscTet: 'GSC/TET', prodEngTet: 'Prod. Eng./TET', prodEngTa: 'Prod.Eng/TA', prodEngSc: 'Prod.Eng/SC', qaTet: 'QA/TET',
       gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU', it: 'IT', other: 'Other', developer: 'Developer'
     };
     const roles = (Array.isArray(user.roles) ? user.roles : []).map(role => roleNames[String(role).toLowerCase()] || String(role));
@@ -237,6 +238,8 @@
     addDetail('Department', departmentText);
     panel.prepend(heading);
     const footer = element('div', 'account-panel-footer');
+    const changePassword = user.canChangePassword === true ? element('button', 'account-change-password', 'Change password') : null;
+    if (changePassword) { changePassword.type = 'button'; footer.append(changePassword); }
     footer.append(signOut);
     panel.append(details, footer);
     container.replaceChildren(trigger, panel);
@@ -286,6 +289,7 @@
       trigger.setAttribute('aria-expanded', 'false');
       if (returnFocus) trigger.focus();
     };
+    if (changePassword) mountPasswordDialog({ container, trigger, changePassword, closeProfile: close });
     trigger.addEventListener('click', () => {
       const opening = panel.hidden;
       setVisible(panel, opening);
@@ -304,6 +308,87 @@
         signOut.disabled = false;
         if (onLogoutError) onLogoutError(error);
       }
+    });
+  }
+
+  function mountPasswordDialog({ container, trigger, changePassword, closeProfile }) {
+    const node = (tag, className, text) => {
+      const element = document.createElement(tag);
+      element.className = className;
+      if (text !== undefined) element.textContent = text;
+      return element;
+    };
+    const dialog = node('dialog', 'account-password-dialog');
+    dialog.id = 'accountPasswordDialog';
+    dialog.setAttribute('aria-labelledby', 'accountPasswordTitle');
+    dialog.setAttribute('aria-describedby', 'accountPasswordHelp');
+    const heading = node('h2', '', 'Change password'); heading.id = 'accountPasswordTitle';
+    const help = node('p', 'account-password-help', 'Use exactly 8 letters or numbers. Numbers only, letters only, or a mix are allowed.');
+    help.id = 'accountPasswordHelp';
+    const form = node('form', 'account-password-form'); form.id = 'accountPasswordForm';
+    const field = (id, label, autocomplete, exactLength = false) => {
+      const wrapper = node('label', 'account-password-field', label);
+      wrapper.setAttribute('for', id);
+      const input = node('input', ''); input.id = id; input.type = 'password'; input.required = true;
+      input.autocomplete = autocomplete; input.maxLength = exactLength ? 8 : 128;
+      if (exactLength) { input.minLength = 8; input.pattern = '[A-Za-z0-9]{8}'; input.setAttribute('aria-describedby', help.id); }
+      wrapper.append(input); form.append(wrapper); return input;
+    };
+    const current = field('accountCurrentPassword', 'Current password', 'current-password');
+    const next = field('accountNewPassword', 'New password', 'new-password', true);
+    const confirmation = field('accountConfirmPassword', 'Confirm new password', 'new-password', true);
+    const message = node('p', 'account-password-message'); message.id = 'accountPasswordMessage'; message.setAttribute('role', 'alert');
+    const actions = node('div', 'account-password-actions');
+    const cancel = node('button', 'account-password-cancel', 'Cancel'); cancel.id = 'accountPasswordCancel'; cancel.type = 'button';
+    const submit = node('button', 'account-password-submit', 'Change password'); submit.id = 'accountPasswordSubmit'; submit.type = 'submit';
+    actions.append(cancel, submit); form.append(message, actions); dialog.append(heading, help, form); container.append(dialog);
+    let pending = false, dialogGeneration = 0;
+    const reset = () => { form.reset(); message.textContent = ''; };
+    const setPending = value => {
+      pending = value; changePassword.disabled = value; submit.disabled = value;
+      current.disabled = value; next.disabled = value; confirmation.disabled = value;
+      form.setAttribute('aria-busy', String(value));
+    };
+    dialog.addEventListener('close', () => {
+      dialogGeneration++; reset();
+      if (container.contains(dialog)) trigger.focus();
+    });
+    dialog.addEventListener('cancel', event => { event.preventDefault(); dialog.close(); });
+    cancel.addEventListener('click', () => dialog.close());
+    changePassword.addEventListener('click', () => {
+      if (pending || !container.contains(dialog)) return;
+      dialogGeneration++; reset(); closeProfile(); dialog.showModal(); current.focus();
+    });
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (pending || !dialog.open || !container.contains(dialog)) return;
+      message.textContent = '';
+      if (!current.value) { message.textContent = 'Enter your current password.'; current.focus(); return; }
+      if (!/^[A-Za-z0-9]{8}$/.test(next.value)) { message.textContent = 'Use exactly 8 letters or numbers for your new password.'; next.focus(); return; }
+      if (next.value !== confirmation.value) { message.textContent = 'The new passwords do not match.'; confirmation.focus(); return; }
+      if (current.value === next.value) { message.textContent = 'Choose a different password.'; next.focus(); return; }
+      const generation = dialogGeneration, authentication = sessionGeneration;
+      const destination = safeReturnTo(window.location.pathname + window.location.search + window.location.hash);
+      const body = JSON.stringify({ currentPassword: current.value, newPassword: next.value, confirmPassword: confirmation.value });
+      setPending(true);
+      try {
+        const result = await apiFetch('/api/auth/change-password', { method: 'POST', body });
+        if (result?.passwordChanged !== true || result?.authenticated !== false) throw new Error('Password change could not be confirmed. Sign in again before retrying.');
+        // A successful change clears this session. Never redirect a newly mounted profile
+        // or a different sign-in because an earlier password request completed late.
+        if (!container.contains(dialog) || sessionGeneration !== authentication + 1 || session.authenticated) return;
+        reset(); if (dialog.open) dialog.close();
+        window.location.assign(`/login?passwordChanged=1&returnTo=${encodeURIComponent(destination)}`);
+      } catch (error) {
+        if (container.contains(dialog) && sessionGeneration === authentication + 1 && !session.authenticated) {
+          reset(); if (dialog.open) dialog.close();
+          window.location.assign(`/login?returnTo=${encodeURIComponent(destination)}`);
+          return;
+        }
+        if (container.contains(dialog) && dialog.open && dialogGeneration === generation && sessionGeneration === authentication) {
+          current.value = ''; message.textContent = error.message || 'Password change failed. Try again.'; current.focus();
+        }
+      } finally { if (container.contains(dialog)) setPending(false); }
     });
   }
 

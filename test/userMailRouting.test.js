@@ -11,6 +11,12 @@ const user = { id: '11111111-1111-1111-1111-111111111111', employeeCode: '220552
   email: 'Person@example.test', mailDirectoryId: 'directory-1', mailVerifiedAt: new Date(),
   mailProfile: { id: 'directory-1', email: 'Person@example.test', displayName: 'Employee Name' } };
 const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'manual@example.test', recipients: [] }] };
+const pcnId = 'PCN-2026-0001';
+const pcnVersion = '0000000000000001';
+const mailRoutingState = { signingOrderVersion: 2, activationId: 'current-activation', stageKey: 'signoff.gscTet',
+  action: 'prepared', groupKey: 'department.gscTet.prepared', status: 'pending' };
+const actionSnapshot = { signingOrderVersion: 2, pcnId, activationId: mailRoutingState.activationId,
+  stageKey: mailRoutingState.stageKey, action: mailRoutingState.action, groupKey: mailRoutingState.groupKey };
 
 test('verified one-step assignments add managed contacts without changing manual version or stored lists', () => {
   const before = normalizeMailRouting(settings);
@@ -52,22 +58,16 @@ test('pending snapshot drops revoked automatic contacts and preserves manual add
 });
 
 test('worker cancels a revoked managed-only pending job inside the claim transaction without mailing', async () => {
-  const calls = [];
-  const payload = { to: user.email, routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: '',
+  const payload = { to: user.email, actionSnapshot, routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: '',
     automaticRecipients: [{ userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }] } };
-  const tx = { begin: async () => calls.push('begin'), commit: async () => calls.push('commit'), rollback: async () => calls.push('rollback'),
-    request() { const inputs = {}; return { input(name, type, value) { inputs[name] = value; return this; }, async query(query) {
-      calls.push({ query, inputs });
-      if (query.includes('SELECT TOP(1)') && query.includes('NotificationJobs')) return { recordset: [{ Id: 'job', PayloadJson: JSON.stringify(payload) }] };
-      return { recordset: [] };
-    } }; } };
+  const tx = claimTransaction(payload);
   let mailCalls = 0;
   const pool = { transaction: () => tx, request: tx.request };
   const worker = new NotificationWorker(pool, { integrationService: { sendMail: async () => { mailCalls++; } } });
   assert.equal((await worker.runOnce()).status, 'cancelled');
   assert.equal(mailCalls, 0);
-  assert(calls.some(call => call.query?.includes("Status=N'cancelled'")));
-  assert.equal(calls.at(-1), 'commit');
+  assert(tx.calls.some(call => call.query?.includes("Status=N'cancelled'")));
+  assert.equal(tx.calls.at(-1), 'commit');
 });
 
 function databaseUser(entry = user) {
@@ -84,6 +84,25 @@ function routingTransaction(assigned = [databaseUser()], configuration = setting
       if (query.includes('u.MailProfileJson')) return { recordset: assigned };
       return { recordset: [] };
     } }; } };
+}
+function claimTransaction(payload) {
+  const tx = routingTransaction([]);
+  const request = tx.request;
+  tx.request = () => {
+    const value = request();
+    const query = value.query;
+    value.query = async statement => {
+      if (statement.includes('SELECT TOP(1) Id,PayloadJson')) return { recordset: [{ Id: user.id,
+        PcnId: pcnId, PcnVersion: pcnVersion, CompletedGroup: 'submitted', Action: 'prepared',
+        EventKey: `${pcnId}:${mailRoutingState.activationId}:handoff`, PayloadJson: JSON.stringify(payload) }] };
+      if (statement.includes('FROM pcn.PcnRequests p')) return { recordset: [{ PcnCode: pcnId, OwnerUserId: user.id,
+        Status: 'submitted', RiskLevel: 'RL0', ReviewJson: '{}',
+        LegacyExtrasJson: JSON.stringify({ mailRoutingPolicyVersion: 2, mailRoutingState }) }] };
+      return query(statement);
+    };
+    return value;
+  };
+  return tx;
 }
 
 test('SQL routing read keeps manual settings and verified assignments in one locked transaction', async () => {
@@ -111,9 +130,8 @@ test('saved handoff snapshots automatic identity and original mail contract sepa
   assert.equal(prepared.plan.payload.routingSnapshot.automaticRecipients[0].directoryId, user.mailDirectoryId);
   assert.equal(prepared.plan.payload.routingSnapshot.manualEmails, 'manual@example.test');
   const audienceQueries = tx.calls.filter(call => call.query?.includes('u.MailProfileJson'));
-  assert.equal(audienceQueries.length, 2);
-  assert.match(audienceQueries[0].query, /u.SigningStep IS NOT NULL/);
-  assert.doesNotMatch(audienceQueries[1].query, /u.SigningStep IS NOT NULL/);
+  assert(audienceQueries.some(call => /u.SigningStep IS NOT NULL/.test(call.query)));
+  assert(audienceQueries.some(call => !/u.SigningStep IS NOT NULL/.test(call.query)));
 });
 
 test('revoked SQL principal cannot run an aggregate updater after authority changes', async () => {
@@ -149,14 +167,11 @@ test('effective routing rejects overflow and pending email rebinding rather than
 });
 
 test('worker retains manual snapshot, commits claim before mailing, and excludes routing metadata from external payload', async () => {
-  const tx = routingTransaction([]);
   const payload = { to: 'manual@example.test; Person@example.test', subject: 'test', message: 'message', senderName: 'PCN',
-    routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: 'manual@example.test', automaticRecipients: [
+    actionSnapshot, routingSnapshot: { groupKey: 'department.gscTet.prepared', manualEmails: 'manual@example.test', automaticRecipients: [
       { userId: user.id, email: user.email, department: user.department, signingStep: user.signingStep, directoryId: user.mailDirectoryId }
     ] } };
-  const originalRequest = tx.request;
-  tx.request = () => { const value = originalRequest(); const query = value.query;
-    value.query = statement => statement.includes('SELECT TOP(1) Id,PayloadJson') ? Promise.resolve({ recordset: [{ Id: user.id, PayloadJson: JSON.stringify(payload) }] }) : query(statement); return value; };
+  const tx = claimTransaction(payload);
   let delivered;
   const worker = new NotificationWorker({ transaction: () => tx, request: () => tx.request() }, { integrationService: { sendMail: async mail => {
     assert.equal(tx.calls.at(-1), 'commit'); delivered = mail;

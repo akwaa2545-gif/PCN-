@@ -3,10 +3,13 @@ const sql = require('mssql');
 const { ApiError } = require('./apiError');
 const { emailList } = require('./integrationService');
 const { buildWorkflowNotificationMessage, buildPcnUpdateNotificationMessage } = require('./notificationTemplate');
-const { meaningfulUpdate, notificationDepartmentKeys, notificationRecipient, batchRecipients } = require('./notificationUpdates');
-const { actions, departments, legacyDefinitions, normalizeMailRouting, resolveNextMailTarget } = require('./mailRouting');
+const { meaningfulUpdate, notificationDepartmentKeys, notificationRecipient } = require('./notificationUpdates');
+const { actions, departments, legacyDefinitions, normalizeMailRouting, resolveNextMailTarget, settingsVersion } = require('./mailRouting');
 const { routeGroups } = require('./workflowAccess');
-const { lockUserMailRouting, readUserMailAssignments, readGeneralNotificationUsers, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
+const { lockUserMailRouting, readUserMailAssignments, assertCurrentUser } = require('./userMailRouting');
+const { isCode, typeOf, peLabel } = require('../pcn-types');
+const { classifyNotification } = require('./notificationPreferences');
+const { readNotificationSettings, readPreferenceUsers, defaultRoutingRecipients, preferenceBatches, batchEventKey } = require('./notificationPreferenceRuntime');
 
 const groups = [
   ['signoff.gscTet', 'GSC/TET'], ['signoff.prodEngTet', 'Prod.Eng/TET'],
@@ -30,44 +33,55 @@ class NotificationService {
   }
 
   async prepare(tx, before, proposed) {
+    await lockUserMailRouting(tx);
+    const settings = await readNotificationSettings(tx);
     const updateSummary = meaningfulUpdate(before, proposed).join('; ');
-    const prepared = await this.prepareAction(tx, before, proposed, updateSummary);
+    const prepared = await this.prepareAction(tx, before, proposed, updateSummary, settings);
     if (!prepared.plan || prepared.record.mailRoutingPolicyVersion !== 2) return prepared;
-    const update = await this.prepareUpdate(tx, prepared.record, prepared.plan, updateSummary, before);
+    const update = await this.prepareUpdate(tx, prepared.record, prepared.plan, updateSummary, before, settings);
     return { ...prepared, plan: { ...prepared.plan, update } };
   }
 
-  async prepareUpdate(tx, record, actionPlan, updateSummary, before) {
+  async prepareUpdate(tx, record, actionPlan, updateSummary, before, settings) {
     if (!updateSummary) return { queued: false, jobCount: 0, reason: 'no_change' };
     const configured = this.mailConfigurationStatus ? this.mailConfigurationStatus() === 'configured' : Boolean(this.mailUrl);
     if (!configured) return { queued: false, jobCount: 0, reason: 'mail_not_configured' };
-    const excluded = new Set(actionPlan.queued ? actionPlan.payload.to.split(';').map(email => email.trim().toLowerCase()) : []);
+    if (settings === undefined) { await lockUserMailRouting(tx); settings = await readNotificationSettings(tx); }
+    const excluded = new Set(actionPlan.queued ? (actionPlan.batches || [actionPlan.payload])
+      .flatMap(payload => payload.to.split(';').map(email => email.trim().toLowerCase())) : []);
     const departmentKeys = notificationDepartmentKeys(before, record);
-    const users = await readGeneralNotificationUsers(tx);
-    const audience = users.map(user => notificationRecipient(user, record, departmentKeys)).filter(recipient => recipient && !excluded.has(recipient.email.toLowerCase()));
-    const batches = batchRecipients(audience);
-    if (!batches.length) return { queued: false, jobCount: 0, reason: 'no_verified_recipients' };
+    const users = await readPreferenceUsers(tx, settings);
+    const audience = users.map(user => notificationRecipient(user, record, departmentKeys)).filter(Boolean);
     try {
       const message = buildPcnUpdateNotificationMessage(record, { pcnUrl: this.pcnLink(record.id), updateSummary, status: record.status });
-      return { queued: true, jobCount: batches.length, batches: batches.map(recipients => ({
-        to: emailList(recipients.map(recipient => recipient.email).join('; ')), subject: notificationSubject(record, `[PCN Update] ${record.id} - ${record.status}`),
+      const selected = preferenceBatches(settings, classifyNotification(before, record), { record, users, defaultRecipients: audience }, {
+        subject: notificationSubject(record, `[PCN Update] ${record.id} - ${record.status}`),
         message, senderName: 'Supplier PCN Workflow', notificationKind: 'pcn_update', updateSnapshot: {
-          pcnId: record.id, audiencePolicyVersion: 1, departmentKeys, recipients }
-      })) };
+          pcnId: record.id, audiencePolicyVersion: 1, departmentKeys }
+      });
+      if (!selected.enabled) return { queued: false, jobCount: 0, reason: selected.reason };
+      const batches = selected.batches.flatMap(payload => {
+        const recipients = payload.notificationPreferenceSnapshot.recipients.filter(recipient => !excluded.has(recipient.email.toLowerCase()));
+        return recipients.length ? [{ ...payload, to: emailList(recipients.map(recipient => recipient.email).join('; ')),
+          notificationPreferenceSnapshot: { ...payload.notificationPreferenceSnapshot, recipients },
+          updateSnapshot: { ...payload.updateSnapshot, recipients } }] : [];
+      }).map((payload, batchIndex) => ({ ...payload,
+        notificationPreferenceSnapshot: { ...payload.notificationPreferenceSnapshot, batchIndex } }));
+      return batches.length ? { queued: true, jobCount: batches.length, batches }
+        : { queued: false, jobCount: 0, reason: 'no_verified_recipients' };
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
       return { queued: false, jobCount: 0, reason: 'notification_configuration_invalid' };
     }
   }
 
-  async prepareAction(tx, before, proposed, updateSummary) {
-    await lockUserMailRouting(tx);
-    const rows = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH (HOLDLOCK) WHERE Id=1');
-    const settings = rows.recordset[0] ? JSON.parse(rows.recordset[0].SettingsJson) : {};
-    const policy = settings.schemaVersion === 2 ? 2 : before?.mailRoutingPolicyVersion || 1;
+  async prepareAction(tx, before, proposed, updateSummary, settings) {
+    if (settings === undefined) { await lockUserMailRouting(tx); settings = await readNotificationSettings(tx); }
+    const policy = settings.schemaVersion === 2 || typeOf(proposed) ? 2 : before?.mailRoutingPolicyVersion || 1;
     const adoptingCurrentRouting = Boolean(before && (before.mailRoutingPolicyVersion || 1) !== 2 && policy === 2);
     const policyRecord = { ...proposed, mailRoutingPolicyVersion: policy };
-    if (settings.schemaVersion !== 2 || policy !== 2) return { record: policyRecord };
+    if (policy !== 2 || (settings.schemaVersion !== 2 && !Object.hasOwn(settings, 'notificationPreferences'))) return { record: policyRecord,
+      ...(typeOf(proposed) ? { plan: { queued: false, reason: 'notification_configuration_invalid' } } : {}) };
     proposed = policyRecord;
     const prior = before?.mailRoutingState;
     const adoptingSigningOrder = Boolean(before && prior?.signingOrderVersion !== 2);
@@ -93,7 +107,7 @@ class NotificationService {
     }
     if (prior?.activationId && (priorKey !== nextKey || changes.invalidated || handoff || prerequisiteInvalidated)) {
       await tx.request().input('eventKey', sql.NVarChar(200), `${proposed.id}:${prior.activationId}:handoff`)
-        .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Pending signoff changed before sending' WHERE EventKey=@eventKey AND Status=N'pending'");
+        .query("UPDATE pcn.NotificationJobs SET Status=N'cancelled',LastError=N'Pending signoff changed before sending' WHERE (EventKey=@eventKey OR EventKey LIKE @eventKey+N':batch:%') AND Status=N'pending'");
     }
     if (prerequisiteInvalidated && !handoff) {
       return { record: { ...proposed, mailRoutingState: { ...prior, status: 'blocked', reason: target.blockedReason } },
@@ -108,7 +122,7 @@ class NotificationService {
     }
     const assignments = await readUserMailAssignments(tx);
     let effective;
-    try { effective = normalizeMailRouting(applyUserMailRouting(settings, assignments)); }
+    try { effective = { ...normalizeMailRouting(settings), routingVersion: settingsVersion({ settings, assignments }) }; }
     catch (error) {
       if (!(error instanceof ApiError)) throw error;
       return { record: { ...proposed, mailRoutingState: { signingOrderVersion: 2, activationId: crypto.randomUUID(), stageKey: target.stageKey,
@@ -117,26 +131,32 @@ class NotificationService {
     }
     const group = effective.groups.find(entry => entry.key === target.groupKey);
     const configured = this.mailConfigurationStatus ? this.mailConfigurationStatus() === 'configured' : Boolean(this.mailUrl);
-    const reason = target.blockedReason || (!group?.effectiveEmails.trim() ? 'recipient_not_configured' : !configured ? 'mail_not_configured' : null);
+    const reason = target.blockedReason || (!configured ? 'mail_not_configured' : null);
     const state = { signingOrderVersion: 2, activationId: crypto.randomUUID(), stageKey: target.stageKey, action: target.action,
       groupKey: target.groupKey, routingVersion: effective.routingVersion, status: reason ? 'blocked' : 'pending', ...(reason ? { reason } : {}) };
     const record = { ...proposed, mailRoutingState: state };
     const summary = { queued: false, ...(reason ? { reason } : {}), nextGroupKey: target.groupKey, nextLabel: target.label };
     if (reason) return { record, plan: summary };
     const completed = submitted ? 'Supplier submission' : prerequisiteResolved ? 'TaPBU approval requirement selected'
-      : changes.completed.length ? describeCompletion(changes.completed.at(-1)) : 'Current workflow routing activated';
+      : changes.completed.length ? describeCompletion(changes.completed.at(-1), record) : 'Current workflow routing activated';
     try {
-      const payload = { to: emailList(group.effectiveEmails), subject: notificationSubject(record, `[Action Required] ${record.id} - ${target.label}`),
+      const payload = { subject: notificationSubject(record, `[Action Required] ${record.id} - ${target.label}`),
         message: buildWorkflowNotificationMessage(record, { completedGroup: completed, nextGroup: target.label,
           nextDepartment: departments.find(department => department.key === target.departmentKey)?.label,
           nextRole: target.action ? target.action[0].toUpperCase() + target.action.slice(1) : undefined,
           updateSummary, pcnUrl: this.pcnLink(record.id) }),
         senderName: 'Supplier PCN Workflow', actionSnapshot: { signingOrderVersion: 2, pcnId: record.id,
           activationId: state.activationId, stageKey: target.stageKey, action: target.action, groupKey: target.groupKey } };
-      if (group.automaticRecipients.length) payload.routingSnapshot = { groupKey: group.key, manualEmails: group.emails,
-        automaticRecipients: group.automaticRecipients.map(recipient => ({ userId: recipient.userId, email: recipient.email,
-          department: target.departmentKey, signingStep: target.action, directoryId: recipient.id })) };
-      return { record, plan: { ...summary, queued: true, payload,
+      const defaults = defaultRoutingRecipients(settings, assignments, target.groupKey);
+      const automatic = defaults.filter(recipient => typeof recipient !== 'string');
+      if (automatic.length) payload.routingSnapshot = { groupKey: group.key, manualEmails: group.emails,
+        automaticRecipients: automatic };
+      const users = await readPreferenceUsers(tx, settings);
+      const selected = preferenceBatches(settings, 'actionRequired', { record, users,
+        defaultRecipients: defaults }, payload);
+      if (!selected.batches.length) return { record: { ...record, mailRoutingState: { ...state, status: 'blocked', reason: selected.reason } },
+        plan: { ...summary, reason: selected.reason } };
+      return { record, plan: { ...summary, queued: true, payload: selected.batches[0], batches: selected.batches,
         completedStage: submitted ? 'supplier_submission' : prerequisiteResolved ? 'tapbu_requirement'
           : changes.completed.at(-1)?.stageKey || 'routing_activation' } };
     } catch (error) {
@@ -169,7 +189,7 @@ class NotificationService {
   }
 
   assertSavedVersion(record) {
-    if (!/^PCN-\d{4}-\d{4}$/.test(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
+    if (!isCode(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
   }
 
   async insertJob(tx, record, eventKey, completedStage, action, payload) {
@@ -190,15 +210,18 @@ class NotificationService {
       ...(plan.nextGroupKey ? { nextGroupKey: plan.nextGroupKey, nextLabel: plan.nextLabel } : {}) };
     this.assertSavedVersion(record);
     const state = record.mailRoutingState;
-    const result = await this.insertJob(tx, record, `${record.id}:${state.activationId}:handoff`, plan.completedStage,
-      state.action || 'notification', plan.payload);
+    const batches = plan.batches || [plan.payload];
+    const results = [];
+    for (const [index, payload] of batches.entries()) results.push(await this.insertJob(tx, record,
+      batchEventKey(`${record.id}:${state.activationId}:handoff`, index), plan.completedStage, state.action || 'notification', payload));
+    const result = results[0];
     return { queued: true, jobId: result.Id, status: result.Status, nextGroupKey: state.groupKey, nextLabel: plan.nextLabel };
   }
 
   async workflow(record, input = {}, user = {}) {
     if (input.to || input.pcnUrl) throw new ApiError(400, 'Notification recipient and link are configured by the server');
     // A stale browser must not duplicate a handoff already recorded by the save transaction.
-    if (record.mailRoutingPolicyVersion === 2) return { queued: false, reason: 'handled_on_save' };
+    if (record.mailRoutingPolicyVersion === 2 || typeOf(record)) return { queued: false, reason: 'handled_on_save' };
     const completedKey = input.completedGroupKey || groups.find(([key, label]) => input.completedGroup === key || input.completedGroup === label)?.[0];
     const effectiveGroups = [...routeGroups(record.riskLevel, record.internalReview), 'supplierNotification'];
     const route = groups.filter(([key]) => effectiveGroups.includes(key));
@@ -224,33 +247,31 @@ class NotificationService {
   }
 
   async queueLegacy(tx, record, user, { completedKey, nextGroupKey, nextLabel, completedLabel }) {
+    if (typeOf(record)) throw new ApiError(400, 'Typed PCNs require signing-step notification routing');
     const settingsRows = await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH(HOLDLOCK) WHERE Id=1');
     const settings = settingsRows.recordset[0] ? JSON.parse(settingsRows.recordset[0].SettingsJson) : {};
     const recipients = settings.schemaVersion === 2 ? settings.legacyGroups : settings.groups;
     const configured = (recipients || []).find((group) => group.key === nextGroupKey)?.emails;
-    if (!configured) return { queued: false, reason: 'recipient_not_configured', nextGroupKey };
-    const to = emailList(configured);
+    if (!configured && !Object.hasOwn(settings, 'notificationPreferences')) return { queued: false, reason: 'recipient_not_configured', nextGroupKey };
     if (!this.mailUrl) return { queued: false, reason: 'mail_not_configured', nextGroupKey };
-    if (!/^PCN-\d{4}-\d{4}$/.test(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
-    const payload = { to, subject: notificationSubject(record, `[PCN] ${record.id} - ${completedLabel} completed`),
+    if (!isCode(record.id) || !/^[0-9a-f]{16}$/i.test(record.version || '')) throw new ApiError(409, 'Saved PCN version is required');
+    const payload = { subject: notificationSubject(record, `[PCN] ${record.id} - ${completedLabel} completed`),
       message: buildWorkflowNotificationMessage(record, { completedGroup: completedLabel, nextGroup: nextLabel, pcnUrl: this.pcnLink(record.id) }),
-      senderName: typeof user.displayName === 'string' ? user.displayName.slice(0, 120) : 'Supplier PCN Workflow' };
+      senderName: typeof user.displayName === 'string' ? user.displayName.slice(0, 120) : 'Supplier PCN Workflow',
+      legacyRoutingSnapshot: { nextGroupKey } };
     const eventKey = `${record.id}:${record.version}:${completedKey}:completed`;
     if (user.id) {
       const current = await tx.request().input('code', sql.NVarChar(32), record.id)
         .query('SELECT RowVersion FROM pcn.PcnRequests WITH(HOLDLOCK) WHERE PcnCode=@code AND DeletedAt IS NULL');
       if (Buffer.from(current.recordset[0]?.RowVersion || []).toString('hex') !== record.version) throw new ApiError(409, 'PCN changed before notification; reload');
     }
-    const result = await tx.request()
-      .input('id', sql.UniqueIdentifier, crypto.randomUUID()).input('eventKey', sql.NVarChar(200), eventKey)
-      .input('pcnId', sql.NVarChar(32), record.id).input('version', sql.NVarChar(16), record.version)
-      .input('completedGroup', sql.NVarChar(50), completedKey).input('action', sql.NVarChar(30), 'completed')
-      .input('to', sql.NVarChar(1000), to).input('payload', sql.NVarChar(sql.MAX), JSON.stringify(payload))
-      .query(`IF NOT EXISTS (SELECT 1 FROM pcn.NotificationJobs WITH (UPDLOCK, HOLDLOCK) WHERE EventKey=@eventKey)
-          INSERT pcn.NotificationJobs(Id,EventKey,PcnId,PcnVersion,CompletedGroup,Action,Recipient,PayloadJson)
-          VALUES(@id,@eventKey,@pcnId,@version,@completedGroup,@action,@to,@payload);
-        SELECT Id,Status FROM pcn.NotificationJobs WHERE EventKey=@eventKey;`);
-    return { queued: true, jobId: result.recordset[0].Id, status: result.recordset[0].Status, nextGroupKey };
+    const users = await readPreferenceUsers(tx, settings);
+    const selected = preferenceBatches(settings, 'actionRequired', { record, users, defaultRecipients: configured || '' }, payload);
+    if (!selected.batches.length) return { queued: false, reason: selected.reason, nextGroupKey };
+    const results = [];
+    for (const [index, batch] of selected.batches.entries()) results.push(await this.insertJob(tx, record,
+      batchEventKey(eventKey, index), completedKey, 'completed', batch));
+    return { queued: true, jobId: results[0].Id, status: results[0].Status, nextGroupKey };
   }
 }
 
@@ -263,8 +284,9 @@ function signoffChanges(before, after) {
   };
 }
 
-function describeCompletion(field) {
-  const label = legacyDefinitions.find(group => group.key === field.stageKey)?.label || field.stageKey;
+function describeCompletion(field, record) {
+  const label = field.stageKey === 'signoff.prodEngTet' ? peLabel(record)
+    : legacyDefinitions.find(group => group.key === field.stageKey)?.label || field.stageKey;
   return `${label} ${field.action[0].toUpperCase()}${field.action.slice(1)} completed`;
 }
 

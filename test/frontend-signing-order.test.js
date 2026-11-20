@@ -9,7 +9,7 @@ const groups = ['signoff.gscTet', 'signoff.prodEngTet', 'signoff.qaTet', 'tapbu.
 const read = file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
 
 function workbook(controls = []) {
-  const window = {};
+  const window = { PCN_TYPES: require('../pcn-types') };
   const source = read('app.js').replace(/\}\)\(\);\s*$/, 'window.TEST = { state, els, getApprovalLockRule, approvalSignoffFields, updateApprovalCheckLocks };})();');
   const document = {
     addEventListener() {},
@@ -43,6 +43,20 @@ test('workbook and print columns keep Prepared, Checked, Approved with their own
   assert.deepEqual([...html.matchAll(/data-internal-field="qateFinal\.signoff\.(prepared|checked|approved)Date"/g)].map(match => match[1]), actions);
 });
 
+test('typed PCNs use their own Prod.Eng group while retaining the common signature block', () => {
+  for (const documentType of ['ta', 'sc']) {
+    const controls = actions.map(action => control(`signoff.gscTet.${action}`, true));
+    const api = workbook(controls);
+    api.state.activeRequest = { documentType };
+    api.state.user = { roles: ['productionengineering'], department: documentType === 'ta' ? 'prodEngTa' : 'prodEngSc', signingStep: 'prepared', isActive: true };
+    assert.equal(api.getApprovalLockRule('signoff.prodEngTet.prepared').locked, false);
+    api.state.user = { ...api.state.user, department: documentType === 'ta' ? 'prodEngSc' : 'prodEngTa' };
+    assert.equal(api.getApprovalLockRule('signoff.prodEngTet.prepared').locked, true);
+    api.state.user = { ...api.state.user, department: 'prodEngTet' };
+    assert.equal(api.getApprovalLockRule('signoff.prodEngTet.prepared').locked, true);
+  }
+});
+
 test('browser locks each department in Prepared then Checked then Approved sequence', () => {
   for (const [index, group] of groups.entries()) {
     const controls = groups.flatMap((key, groupIndex) => actions.map(action => control(`${key}.${action}`, groupIndex < index)));
@@ -70,9 +84,80 @@ test('final judgment fields belong to QA/TET Approved while Administrator and De
     [{ roles: ['qa'], department: 'qaTet', signingStep: 'approved' }, true],
     [{ roles: ['admin'] }, true], [{ roles: ['developer'], department: 'developer' }, true]
   ]) {
-    const controls = ['approve', 'reject', 'reason', 'completedDate'].map(field => control(`qateFinal.${field}`));
+    const controls = groups.slice(0, -1).flatMap(group => actions.map(action => control(`${group}.${action}`, true)));
+    const judgment = ['approve', 'reject', 'qod206Number', 'completedDate'].map(field => control(`qateFinal.${field}`));
+    controls.push(...judgment, control('tapbu.need', true));
     const api = workbook(controls); api.state.user = user; api.updateApprovalCheckLocks();
-    assert.ok(controls.every(item => item.disabled === !allowed), JSON.stringify(user));
+    assert.ok(judgment.every(item => item.disabled === !allowed), JSON.stringify(user));
+  }
+});
+
+test('Final Judgment decisions and signatures wait for every required earlier review signature', () => {
+  for (const user of [{ roles: ['admin'] }, { roles: ['qa'], department: 'qaTet', signingStep: 'approved' }]) {
+    for (const group of groups.slice(0, -1)) {
+      for (const action of actions) {
+        const controls = groups.slice(0, -1).flatMap(stage => actions.map(step => control(`${stage}.${step}`, true)));
+        controls.push(control('tapbu.need', true));
+        const judgment = ['approve', 'reject', 'qod206Number', 'completedDate'].map(field => control(`qateFinal.${field}`));
+        controls.push(...judgment);
+        controls.find(item => item.dataset.internalField === `${group}.${action}`).checked = false;
+        const api = workbook(controls); api.state.user = user; api.updateApprovalCheckLocks();
+        assert.ok(judgment.every(item => item.disabled), `${group}.${action} is unfinished`);
+        assert.equal(api.getApprovalLockRule('qateFinal.approve').locked, true);
+        assert.match(judgment[0].title, /Complete all .*signoff checks/);
+        if (user.roles.includes('admin')) assert.equal(api.getApprovalLockRule('qateFinal.signoff.prepared').locked, true);
+        controls.find(item => item.dataset.internalField === `${group}.${action}`).checked = true;
+        api.updateApprovalCheckLocks();
+        assert.ok(judgment.every(item => !item.disabled), 'unlock after last missing signature');
+      }
+    }
+  }
+});
+
+test('Final Judgment ignores TaPBU signatures only for RL0 or explicit No need', () => {
+  for (const [risk, noNeed] of [['RL0', false], ['RL2', true], ['RL2', false]]) {
+    const controls = groups.slice(0, 3).flatMap(group => actions.map(action => control(`${group}.${action}`, true)));
+    const judgment = control('qateFinal.approve');
+    controls.push(control('tapbu.noNeed', noNeed), judgment);
+    const api = workbook(controls); api.els.riskLevel.value = risk; api.state.user = { roles: ['admin'] };
+    api.updateApprovalCheckLocks();
+    assert.equal(judgment.disabled, risk !== 'RL0' && !noNeed);
+  }
+});
+
+test('top-right header signatures and dates wait for all Final Judgment signatures', () => {
+  for (const missing of groups.flatMap(group => actions.map(action => `${group}.${action}`))) {
+    const controls = groups.flatMap(group => actions.map(action => control(`${group}.${action}`, true)));
+    controls.push(control('tapbu.need', true));
+    const header = actions.flatMap(action => [control(`supplierSignoff.${action}.checked`), control(`supplierSignoff.${action}.date`)]);
+    controls.push(...header);
+    const api = workbook(controls); api.state.user = { roles: ['admin'] };
+    controls.find(item => item.dataset.internalField === missing).checked = false;
+    api.updateApprovalCheckLocks();
+    assert.ok(header.every(item => item.disabled), `${missing} blocks top-right signatures and dates`);
+    assert.equal(api.getApprovalLockRule('supplierSignoff.prepared.checked').locked, true);
+    assert.match(header[0].title, /before signing the top-right approval/);
+    controls.find(item => item.dataset.internalField === missing).checked = true;
+    api.updateApprovalCheckLocks();
+    assert.ok(header.every(item => !item.disabled), 'complete route unlocks header fields');
+  }
+});
+
+test('header unlock respects existing signing roles and skipped TaPBU reviews', () => {
+  for (const [user, permitted] of [
+    [{ roles: ['admin'] }, true], [{ roles: ['reviewer'] }, true], [{ roles: ['supplier'] }, true],
+    [{ roles: ['developer'], department: 'developer', signingStep: null }, true],
+    [{ roles: ['qa'], department: 'qaTet', signingStep: 'approved' }, false],
+    [{ roles: ['developer', 'qa'], department: 'developer' }, false], [{ roles: ['admin'], isActive: false }, false]
+  ]) {
+    for (const [risk, noNeed] of [['RL0', false], ['RL2', true], ['RL2', false]]) {
+      const controls = [...groups.slice(0, 3), 'qateFinal.signoff'].flatMap(group => actions.map(action => control(`${group}.${action}`, true)));
+      const header = control('supplierSignoff.prepared.checked');
+      controls.push(control('tapbu.noNeed', noNeed), header);
+      const api = workbook(controls); api.state.user = user; api.els.riskLevel.value = risk;
+      api.updateApprovalCheckLocks();
+      assert.equal(header.disabled, !permitted || (risk !== 'RL0' && !noNeed));
+    }
   }
 });
 

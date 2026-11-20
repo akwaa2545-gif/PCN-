@@ -51,9 +51,14 @@ function enforceCsrf(req, principal) {
   if (supplied.length !== wanted.length || !crypto.timingSafeEqual(supplied, wanted)) throw new ApiError(403, 'Invalid CSRF token');
 }
 
-function requirePrincipal(principal, { roles = [], allowPasswordChange = false } = {}) {
+function requirePrincipal(principal, { roles = [], allowPasswordChange = false, allowPasswordSetup = false } = {}) {
   if (!principal?.user) throw new ApiError(401, 'Sign in required');
-  if (principal.user.mustChangePassword && !allowPasswordChange) {
+  if (principal.user.passwordSetupRequired && !allowPasswordSetup) {
+    const error = new ApiError(403, 'Set your password before accessing PCN data');
+    error.code = 'PASSWORD_SETUP_REQUIRED';
+    throw error;
+  }
+  if (principal.user.mustChangePassword && !allowPasswordChange && !(allowPasswordSetup && principal.user.passwordSetupRequired)) {
     const error = new ApiError(403, 'Change your password before accessing PCN data');
     error.code = 'PASSWORD_CHANGE_REQUIRED';
     throw error;

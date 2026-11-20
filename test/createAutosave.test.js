@@ -4,9 +4,56 @@ const {create}=require('../create-autosave');
 const vm=require('node:vm');
 const fs=require('node:fs');
 
+test('untyped new drafts do not autosave or allocate a code until TA/SC is selected',async()=>{
+  const f=fixture({canCreate:document=>['ta','sc'].includes(document.documentType)});
+  f.saver.markDirty();await f.time.advance(20000);
+  assert.equal(f.writes.length,0);
+  await assert.rejects(f.saver.flush({force:true}),/TA or SC/);
+  f.set({supplierName:'A',documentType:'ta'});f.saver.markDirty();await f.time.advance(1500);
+  assert.equal(f.writes.length,1);
+  f.saver.stop();
+});
+
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function clock(){let now=0,next=0;const jobs=new Map();return {now:()=>now,setTimeout:(fn,delay)=>{jobs.set(++next,{fn,at:now+delay});return next;},clearTimeout:id=>jobs.delete(id),async advance(ms){now+=ms;for(const [id,job]of jobs)if(job.at<=now){jobs.delete(id);job.fn();}await tick();}};}
 function fixture(overrides={}){const time=clock();let document={supplierName:'A'};const writes=[],saved=[],statuses=[];let version=0;const saver=create({read:()=>document,serialize:({supplierName})=>({supplierName,status:'draft'}),write:async(payload,meta)=>{writes.push({payload,meta});return {record:{...payload,id:'PCN-1',version:++version,status:'draft'}};},onSaved:value=>saved.push(value),onStatus:value=>statuses.push(value),clientDraftKey:'stable-uuid',...time,...overrides});return {saver,time,writes,saved,statuses,set:value=>{document=value;}};}
+
+test('new typed drafts stay local through type changes until an explicit first save',async()=>{
+  const f=fixture({manualCreate:true,serialize:({supplierName,documentType})=>({supplierName,documentType})});
+  for(const documentType of ['ta','sc','ta']) {
+    f.set({supplierName:'Editable draft',documentType});f.saver.markDirty();await f.time.advance(20000);
+    assert.equal(f.writes.length,0);assert.equal(f.saver.getState().dirty,true);
+  }
+  await assert.rejects(f.saver.flush({force:true}),/Save draft first/);
+  let operation=false;
+  await assert.rejects(f.saver.exclusive(async()=>{operation=true;}),/Save draft first/);
+  assert.equal(operation,false);assert.equal(f.writes.length,0);
+  await f.saver.flush({force:true,allowCreate:true});
+  assert.equal(f.writes.length,1);assert.equal(f.writes[0].payload.documentType,'ta');
+  f.set({supplierName:'Changed after save',documentType:'ta'});f.saver.markDirty();await f.time.advance(10000);
+  assert.equal(f.writes.length,2);assert.equal(f.writes[1].meta.id,'PCN-1');f.saver.stop();
+});
+
+test('manual first-save failures retain retry authorization and the same draft identity',async()=>{
+  let calls=0;const keys=[];
+  const f=fixture({manualCreate:true,write:async(payload,meta)=>{
+    calls++;keys.push(meta.clientDraftKey);
+    if(calls===1)throw Object.assign(new Error('Lost save response'),{status:503});
+    return {record:{...payload,id:'PCN-1',version:1,status:'draft'}};
+  }});
+  f.saver.markDirty();await assert.rejects(f.saver.flush({force:true,allowCreate:true}));
+  assert.equal(f.saver.getState().creationAttempted,true,'An uncertain first save must hold the chosen type for retry');
+  f.set({supplierName:'Retained edits'});f.saver.markDirty();await f.time.advance(20000);assert.equal(calls,1);
+  await f.saver.retry();assert.equal(calls,2);assert.deepEqual(keys,['stable-uuid','stable-uuid']);f.saver.stop();
+});
+
+test('a failed untyped Save draft never enables background creation after selecting a type',async()=>{
+  const f=fixture({manualCreate:true,canCreate:document=>['ta','sc'].includes(document.documentType)});
+  f.saver.markDirty();await assert.rejects(f.saver.flush({force:true,allowCreate:true}),/Choose TA or SC/);
+  assert.equal(f.saver.getState().creationAttempted,false,'Validation before POST must keep type selection editable');
+  f.set({supplierName:'A',documentType:'sc'});f.saver.markDirty();await f.time.advance(20000);
+  assert.equal(f.writes.length,0);f.saver.stop();
+});
 
 test('autosave does not write on open, debounces, reuses draft id and throttles automatic saves',async()=>{
   const f=fixture();await f.time.advance(20000);assert.equal(f.writes.length,0);
@@ -25,6 +72,17 @@ test('single flight preserves edits during save and reports the snapshot actuall
   f.saver.stop();
 });
 
+test('a stopped in-flight saver cannot adopt its old identity into a replacement document',async()=>{
+  let release,adopted=0;
+  const f=fixture({onIdentity:()=>{adopted++;},write:async payload=>{
+    await new Promise(resolve=>{release=resolve;});
+    return {record:{...payload,id:'T-19112601',documentType:'ta',version:1,status:'draft'}};
+  }});
+  f.saver.markDirty();const saving=f.saver.flush({force:true});await tick();
+  f.saver.stop();release();await saving;
+  assert.equal(adopted,0);assert.equal(f.saved.length,0);
+});
+
 test('test document creation flag travels as metadata while content serializer excludes it',async()=>{
   const f=fixture({serialize:({supplierName})=>({supplierName,status:'draft'})});
   f.set({supplierName:'TEST supplier',isTestDocument:true});f.saver.markDirty();await f.saver.flush({force:true});
@@ -38,6 +96,20 @@ test('idempotently reused POST adopts canonical baseline and PATCHes differing l
   f.saver.markDirty();await f.saver.flush({force:true});
   assert.equal(writes.length,2);assert.equal(writes[1].meta.id,'PCN-1');assert.equal(writes[1].meta.version,5);assert.equal(writes[1].payload.supplierName,'A');
   assert.equal(f.saver.getState().dirty,false);assert.equal(f.saved.at(-1).record.version,6);f.saver.stop();
+});
+
+test('canonical identity is applied before replaying edits after a lost creation response',async()=>{
+  let document={documentType:'sc',supplierName:'Local correction'};
+  const writes=[];
+  const saver=create({read:()=>document,serialize:value=>({documentType:value.documentType,supplierName:value.supplierName}),
+    onIdentity:record=>{document={...document,documentType:record.documentType};},
+    write:async(payload,meta)=>{writes.push({payload,meta});return writes.length===1?
+      {record:{id:'T-19112601',documentType:'ta',supplierName:'Original',version:1,status:'draft'},reused:true}:
+      {record:{...payload,id:'T-19112601',version:2,status:'draft'}};}});
+  saver.markDirty();await saver.flush({force:true});
+  assert.equal(writes.length,2);assert.equal(writes[1].payload.documentType,'ta');
+  assert.equal(writes[1].payload.supplierName,'Local correction');
+  assert.equal(saver.getState().dirty,false);saver.stop();
 });
 
 test('conflict and network failures pause until explicit retry and retain create UUID',async()=>{

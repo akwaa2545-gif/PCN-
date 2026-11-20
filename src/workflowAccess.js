@@ -1,7 +1,8 @@
 const { ApiError } = require('./apiError');
 const { actions, stageDepartments, signaturePath, canSign, isDeveloperAssignment } = require('./signingPermissions');
+const { departmentForStage } = require('../pcn-types');
 
-const writable = new Set(['status','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName','desiredStart','sampleSubmitted','sampleSubmittedDate','currentCondition','newCondition','changeRows','reason','identification','sampleLocation','priceLevel','internalReview','version']);
+const writable = new Set(['status','documentType','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName','desiredStart','sampleSubmitted','sampleSubmittedDate','currentCondition','newCondition','changeRows','reason','identification','sampleLocation','priceLevel','internalReview','version']);
 const rolesOf = user => (user?.roles || []).map(role => String(role).replace(/[^a-z]/gi, '').toLowerCase());
 const hasRole = (user, ...roles) => roles.some(role => {
   const requested = role.replace(/[^a-z]/gi, '').toLowerCase();
@@ -34,22 +35,26 @@ const isEmpty = value => value === false || value === '' || value === null || va
 const routeGroups = (risk, review = {}) => ['signoff.gscTet','signoff.prodEngTet','signoff.qaTet',...(risk === 'RL0' || review.tapbu?.noNeed === true ? [] : ['tapbu.gsc','tapbu.qa']),'qateFinal.signoff'];
 const complete = (review, group) => actions.every(action => at(review, `${group}.${action}`) === true);
 
-function canEditReview(user, path) {
-  const signature = signaturePath(path);
+function canEditReview(user, path, record = {}) {
+  if (!user || user.isActive === false) return false;
+  const signature = signaturePath(path, record);
   if (signature) return canSign(user, signature.department, signature.action);
   const stage = Object.keys(stageDepartments).find(value => path === value || path.startsWith(`${value}.`));
   if (stage && path !== `${stage}.comment`) return false;
+  if (path.startsWith('signoff.prodEngTet.')) {
+    return hasRole(user, 'admin') || user.department === departmentForStage(record, 'signoff.prodEngTet')
+      && hasRole(user, 'productionengineering', 'reviewer');
+  }
   if (path.startsWith('qateFinal.')) return canSign(user, 'qaTet', 'approved');
   if (hasRole(user, 'admin', 'reviewer')) return true;
   if (path.startsWith('supplierSignoff.')) return hasRole(user, 'supplier');
   if (/^signoff\.gscTet\./.test(path) || /^(materialCodeDescription|docs\.|tapbu\.(need|noNeed|comment))/.test(path)) return hasRole(user, 'gsc');
-  if (/^signoff\.prodEngTet\./.test(path)) return hasRole(user, 'productionengineering');
   if (/^(decision\.|qateFinal\.|signoff\.qaTet\.)/.test(path)) return hasRole(user, 'qa');
   if (/^tapbu\.(gsc|qa)\./.test(path)) return hasRole(user, 'tapbu');
   return false;
 }
 
-function assertReviewUpdate(before = {}, after = {}, user, risk) {
+function assertReviewUpdate(before = {}, after = {}, user, risk, record = {}) {
   for (const path of ['supplierSignoff', ...actions.map(action => `supplierSignoff.${action}`), 'signoff', 'tapbu', 'qateFinal', ...Object.keys(stageDepartments)]) {
     const value = at(after, path);
     if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) {
@@ -63,12 +68,13 @@ function assertReviewUpdate(before = {}, after = {}, user, risk) {
       const path = `supplierSignoff.${action}.${field}`;
       const previous = at(before, path);
       const value = at(after, path);
-      if (JSON.stringify(previous) !== JSON.stringify(value) && !(isEmpty(previous) && isEmpty(value)) && !canEditReview(user, path)) {
+      if (JSON.stringify(previous) !== JSON.stringify(value) && !(isEmpty(previous) && isEmpty(value)) && !canEditReview(user, path, record)) {
         throw new ApiError(403, 'This review field requires an authorized department');
       }
     }
   }
-  for (const [stage, department] of Object.entries(stageDepartments)) {
+  for (const stage of Object.keys(stageDepartments)) {
+    const department = departmentForStage(record, stage);
     for (const action of actions) {
       for (const suffix of ['', 'Name', 'Date']) {
         const previous = at(before, `${stage}.${action}${suffix}`);
@@ -82,8 +88,8 @@ function assertReviewUpdate(before = {}, after = {}, user, risk) {
   for (const [path, value] of flatten(after)) {
     const previous = at(before, path);
     if (path === 'pcnCode' || JSON.stringify(previous) === JSON.stringify(value) || (previous === undefined && isEmpty(value))) continue;
-    if (!canEditReview(user, path)) throw new ApiError(403, 'This review field requires an authorized department');
-    const signature = signaturePath(path);
+    if (!canEditReview(user, path, record)) throw new ApiError(403, 'This review field requires an authorized department');
+    const signature = signaturePath(path, record);
     if (signature && signature.field === signature.action && typeof value !== 'boolean') throw new ApiError(400, 'Signoff checks must be boolean');
     if (['qateFinal.approve', 'qateFinal.reject'].includes(path) && typeof value !== 'boolean') throw new ApiError(400, 'Final judgment checks must be boolean');
   }
@@ -92,6 +98,24 @@ function assertReviewUpdate(before = {}, after = {}, user, risk) {
   if (after.qateFinal?.approve && after.qateFinal?.reject) throw new ApiError(400, 'Final judgment choices conflict');
   if (after.decision?.rejected && (after.decision?.agreed || after.decision?.agreedAfterQualification)) throw new ApiError(400, 'Review decision choices conflict');
   const groups = routeGroups(risk, after);
+  const headerValues = actions.flatMap(action => ['checked', 'name', 'date'].map(field => [`${action}.${field}`, at(after.supplierSignoff, `${action}.${field}`)])).filter(([, value]) => !isEmpty(value));
+  if (headerValues.length) {
+    const changed = headerValues.some(([path, value]) => JSON.stringify(at(before.supplierSignoff, path)) !== JSON.stringify(value));
+    const requiredGroups = [...new Set([...groups, ...(!changed ? routeGroups(risk, before) : [])])];
+    // Preserve historical header signatures without allowing completed route evidence to be removed.
+    if (requiredGroups.some(group => actions.some(action => at(after, `${group}.${action}`) !== true && (changed || at(before, `${group}.${action}`) === true)))) {
+      throw new ApiError(400, 'Complete all final judgment signoffs before header signoff');
+    }
+  }
+  const judgmentValues = flatten(after.qateFinal || {}).filter(([path, value]) => path !== 'signoff' && !path.startsWith('signoff.') && !isEmpty(value));
+  if (judgmentValues.length) {
+    const changed = judgmentValues.some(([path, value]) => JSON.stringify(at(before.qateFinal, path)) !== JSON.stringify(value));
+    const requiredGroups = [...new Set([...groups.slice(0, -1), ...(!changed ? routeGroups(risk, before).slice(0, -1) : [])])];
+    // Unchanged historical judgments keep their gaps, but cannot lose completed prerequisites.
+    if (requiredGroups.some(group => actions.some(action => at(after, `${group}.${action}`) !== true && (changed || at(before, `${group}.${action}`) === true)))) {
+      throw new ApiError(400, 'Complete all preceding signoffs before final judgment');
+    }
+  }
   if (after.tapbu?.noNeed === true && ['tapbu.gsc','tapbu.qa'].some(group => actions.some(action => at(after, `${group}.${action}`) === true))) throw new ApiError(400, 'No-need cannot include TaPBU signoffs');
   for (let index = 0; index < groups.length; index++) {
     const group = groups[index];
@@ -123,6 +147,7 @@ function assertStatusPermission(record, nextStatus, user) {
     if (nextStatus === 'approved' && !record.internalReview?.qateFinal?.approve) throw new ApiError(400, 'Record the approval judgment first');
     if (nextStatus === 'rejected' && !record.internalReview?.qateFinal?.reject) throw new ApiError(400, 'Record the rejection judgment first');
     if (nextStatus === 'closed' && !record.internalReview?.qateFinal?.approve && !record.internalReview?.qateFinal?.reject) throw new ApiError(400, 'Record the final judgment before closure');
+    if (nextStatus === 'closed' && !actions.every(action => review.supplierSignoff?.[action]?.checked === true)) throw new ApiError(400, 'Complete all header signoffs before closure');
   }
 }
 

@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const { routeGroups } = require('./workflowAccess');
 const { getUserMailAssignments, managedRecipient, mergedEmails } = require('./userMailRouting');
 const { actions, departments, stageDepartments } = require('./signingPermissions');
+const { departmentForStage } = require('../pcn-types');
 const mailGroups = Object.freeze([...departments.flatMap(department => actions.map(action => Object.freeze({
   key: `department.${department.key}.${action}`, label: `${department.label} ${action[0].toUpperCase()}${action.slice(1)}`,
   departmentKey: department.key, action
@@ -66,7 +67,7 @@ function resolveNextMailTarget(record) {
     const step = stageKey.split('.').reduce((entry, key) => entry?.[key], review);
     const action = actions.find(key => step?.[key] !== true);
     if (!action) continue;
-    const departmentKey = stageDepartments[stageKey];
+    const departmentKey = departmentForStage(record, stageKey);
     const group = mailGroups.find(entry => entry.departmentKey === departmentKey && entry.action === action);
     return { stageKey, departmentKey, action, groupKey: group.key,
       label: stageKey === 'qateFinal.signoff' ? `QA/TET Final Judgment ${action[0].toUpperCase()}${action.slice(1)}` : group.label,

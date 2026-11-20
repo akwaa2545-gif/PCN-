@@ -15,6 +15,8 @@
   const textPresent = value => typeof value === 'string' && value.trim().length > 0;
 
   function buildChecks(record = {}, attachments = []) {
+    const type = ['ta','sc'].includes(record.documentType) ? record.documentType : null;
+    const typeChecks = !record.id || type ? [{key:'documentType',label:'PCN type (TA or SC)',field:'documentType',complete:Boolean(type),blocking:true}] : [];
     const fields = [
       ['supplierName', 'Supplier name'], ['materialName', 'Material / chemical name'],
       ['selectedChange', 'Change description'], ['reason', 'Reason for change'],
@@ -35,7 +37,7 @@
         && (file.scanStatus || file.ScanStatus) === 'clean'
         && [item.key,item.label].includes(file.requirementName || file.RequirementName))
     }));
-    const items = [...core, ...sample, ...required];
+    const items = [...typeChecks, ...core, ...sample, ...required];
     return { items, ready: items.every(item => !item.blocking || item.complete) };
   }
   return Object.freeze({ documentRequirements, buildChecks });

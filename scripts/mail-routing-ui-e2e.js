@@ -9,7 +9,7 @@ const { memoryRepository, fakeAuthService } = require('../test/helpers/apiHarnes
 const { mailGroups } = require('../src/mailRouting');
 const expect = browserExpect.configure({ timeout: 10000 });
 const report = { storage: 'isolated_api_fixtures_only', checks: [], errors: [], external: [], forbidden: [], unexpected: [], saves: [] };
-const departments = ['gscTet', 'prodEngTet', 'qaTet', 'gscTapbu', 'qaTapbu'];
+const departments = ['gscTet', 'prodEngTet', 'prodEngTa', 'prodEngSc', 'qaTet', 'gscTapbu', 'qaTapbu'];
 const profile = (name, email) => ({ displayName: name, email, jobTitle: 'Fixture engineer', department: 'Fixture department', photo: '' });
 
 async function main() {
@@ -86,15 +86,15 @@ async function main() {
       await popup.locator('.directory-suggestion[role="option"]').filter({ hasText: query }).click();
       await expect(confirm).toBeEnabled();
     };
-    await expect(page.locator('.notification-department')).toHaveCount(5);
-    await expect(page.locator('#notificationGroups [data-notification-group]')).toHaveCount(16);
+    await expect(page.locator('.notification-department')).toHaveCount(7);
+    await expect(page.locator('#notificationGroups [data-notification-group]')).toHaveCount(22);
     for (const key of departments) {
       await expect(department(key).locator('.notification-department-header .notification-department-add')).toHaveCount(1);
       await expect(department(key).locator('[data-notification-group] .notification-add-button')).toHaveCount(0);
       await expect(department(key).locator('[data-notification-group]')).toHaveCount(3);
     }
-    await expect(page.locator('#notificationGroups .notification-department-add')).toHaveCount(5);
-    report.checks.push('Five department headers each have one Assign user action; all fifteen signing lists and the separate supplier list remain mounted');
+    await expect(page.locator('#notificationGroups .notification-department-add')).toHaveCount(7);
+    report.checks.push('Seven department headers each have one Assign user action; all twenty-one signing lists and the separate supplier list remain mounted');
 
     await open('gscTet'); await expect(role).toHaveValue(''); await expect(role).toBeFocused();
     await expect(input).toBeDisabled(); await expect(confirm).toBeDisabled();
@@ -152,7 +152,7 @@ async function main() {
     await expect(managedRow).toContainText('From Users');
     await expect(group('department.gscTet.checked').locator('[data-recipient-email]')).toHaveValue('checker@example.test');
     assert.equal(await department('prodEngTet').evaluate(card => card.getBoundingClientRect().height <= card.querySelector('header').getBoundingClientRect().height + 2), true, 'Collapsed card remains compact beside an expanded department');
-    report.checks.push('Collapsing every department preserves the exact manual drafts and mounted list nodes; Save Mail sends all sixteen versioned lists and excludes managed assignments; collapsed state survives saving');
+    report.checks.push('Collapsing every department preserves the exact manual drafts and mounted list nodes; Save Mail sends all twenty-two versioned lists and excludes managed assignments; collapsed state survives saving');
 
     await page.screenshot({ path: path.resolve('test-results/mail-routing-ui-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });

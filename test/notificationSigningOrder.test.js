@@ -8,6 +8,9 @@ const state = { signingOrderVersion: 2, activationId: 'current-activation', stag
 const actionSnapshot = { signingOrderVersion: 2, pcnId, activationId: state.activationId,
   stageKey: state.stageKey, action: state.action, groupKey: state.groupKey };
 const mail = { to: 'prepared@example.test', subject: 'GSC/TET Prepared', message: 'Complete Prepared', senderName: 'PCN' };
+const settings = { schemaVersion: 2, groups: [
+  { key: state.groupKey, emails: mail.to }, { key: 'supplierNotification', emails: mail.to }
+] };
 function poolFor(payload, options = {}) {
   const calls = [];
   const record = options.record === null ? null : { PcnCode: pcnId, Status: 'gsc_review', RiskLevel: 'RL0',
@@ -21,6 +24,7 @@ function poolFor(payload, options = {}) {
         if (query.includes('SELECT TOP(1)')) return { recordset: [{ Id: 'job-id', PcnId: pcnId,
           Action: options.action || 'prepared', EventKey: `${pcnId}:${options.activationId || state.activationId}:handoff`,
           PayloadJson: JSON.stringify(payload) }] };
+        if (query.includes('SELECT SettingsJson')) return { recordset: [{ SettingsJson: JSON.stringify(settings) }] };
         if (query.includes('pcn.PcnRequests')) return { recordset: record ? [record] : [] };
         return { recordset: [] };
       } };
