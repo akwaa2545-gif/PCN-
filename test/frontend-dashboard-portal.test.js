@@ -5,9 +5,10 @@ const vm = require('node:vm');
 
 function portal(fetch) {
   const calls = [];
-  const controller = { updates: [], clears: 0, ready: true,
+  const controller = { updates: [], clears: 0, ready: true, loadingCalls: [], loading:false,
     setRecords(records) { this.updates.push(records); },
-    clear() { this.clears++; }, canRefresh() { return this.ready; }, getState() { return {}; } };
+    setLoading(value, options) { this.loading = value; this.loadingCalls.push({value,options}); },
+    clear() { this.clears++; this.loading = false; }, canRefresh() { return this.ready; }, getState() { return {}; } };
   const window = { location: { hash: '#records' }, renders: 0,
     PCN_SESSION: { fetch: async url => { calls.push(url); return fetch(url); } },
     PCN_RECORDS_DASHBOARD: { create(options) { window.options = options; return controller; } } };
@@ -59,6 +60,40 @@ test('Portal dashboard uses batched authorized overview and preserves row select
   assert.equal(adminActions.length, 2);
   assert.equal(adminActions[1].dataset.rdOverflow, 'true');
   adminActions[1].events.click(); assert.equal(page.window.removeAction, items[0]);
+});
+
+test('Portal manual loading finishes on success or retryable errors while quiet polls do not present a loader', async () => {
+  let resolve;
+  const items = [{ id:'PCN-1', status:'submitted' }];
+  let failed = false;
+  const page = portal(() => failed ? Promise.reject(new Error('Temporary failure')) : new Promise(done => { resolve = done; }));
+  const pending = page.loadPcns();
+  assert.equal(page.controller.loading, true);
+  assert.equal(page.state.recordsLoaded, false);
+  resolve({items}); await pending;
+  assert.equal(page.controller.loading, false);
+  assert.equal(page.state.recordsLoaded, true);
+  failed = true; await page.loadPcns();
+  assert.equal(page.state.pcns, items);
+  assert.equal(page.controller.clears, 0);
+  assert.equal(page.controller.loading, false);
+  assert.equal(page.controller.loadingCalls.at(-1).options.error, true);
+  const calls = page.controller.loadingCalls.length;
+  await assert.rejects(page.refreshQuietly(), /Temporary failure/);
+  assert.equal(page.controller.loadingCalls.length, calls);
+});
+
+test('Portal quiet polling recovers a failed first load even when the recovered overview is empty', async () => {
+  for (const items of [[], [{id:'PCN-RECOVERED'}]]) {
+    let failure = true;
+    const page = portal(async () => { if (failure) throw new Error('Temporary failure'); return {items}; });
+    await page.loadPcns(); assert.equal(page.state.recordsLoaded, false);
+    failure = false; await page.refreshQuietly();
+    assert.equal(page.state.recordsLoaded, true);
+    assert.equal(page.state.pcns, items);
+    assert.equal(page.controller.updates.at(-1), items);
+    assert.doesNotMatch(page.state.message, /Temporary failure/);
+  }
 });
 
 test('preview opening invalidates an in-flight overview even if it closes before the response returns', async () => {

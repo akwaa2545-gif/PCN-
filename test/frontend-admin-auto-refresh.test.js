@@ -20,7 +20,7 @@ test('quiet records poll keeps selection and filters, renders changes only and u
   const calls = [];
   const record = { id: 'PCN1', status: 'draft' };
   const page = portal(async url => { calls.push(url); return url.endsWith('/progress') ? { status: 'new' } : [record]; });
-  page.state.pcns = [record]; page.state.selected = record; page.state.progress = { status: 'new' };
+  page.state.pcns = [record]; page.state.recordsLoaded = true; page.state.selected = record; page.state.progress = { status: 'new' };
   page.state.filters.search = 'keep';
   await page.refreshQuietly();
   assert.equal(page.window.renders, 0);

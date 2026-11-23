@@ -50,6 +50,8 @@ async function main() {
         const host = page.locator(username === 'admin' ? '#pcnAdminView' : '#recordsWorkspace');
         const rows = host.locator('tr[data-pcn-id]'), type = host.locator('#rdFilter-documentType');
         await expect(rows).toHaveCount(3);
+        const filters = host.locator('#rdFiltersToggle');
+        if (await filters.getAttribute('aria-expanded') !== 'true') await filters.click();
         await expect(type.locator('option')).toHaveCount(4);
         await type.selectOption('ta'); await expect(rows).toHaveCount(1);
         await expect(rows.first()).toHaveAttribute('data-pcn-id', seeded[0].id);

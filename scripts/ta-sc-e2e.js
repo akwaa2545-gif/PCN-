@@ -302,6 +302,9 @@ async function main() {
     }
     await page.goto(`${origin}/admin`);
     const rows = page.locator('#adminPcnRows');
+    const filters = page.locator('#rdFiltersToggle');
+    await expect(filters).toBeVisible();
+    if (await filters.getAttribute('aria-expanded') !== 'true') await filters.click();
     const filter = page.getByRole('combobox', { name: 'PCN type', exact: true });
     await expect(filter).toBeVisible();
     assert.deepEqual(await filter.locator('option').evaluateAll(options => options.map(option => option.value)), ['', 'ta', 'sc', 'legacy']);

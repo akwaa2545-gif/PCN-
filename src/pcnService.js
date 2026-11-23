@@ -3,6 +3,7 @@ const { assertRecordAccess, assertWritablePayload, assertReviewUpdate, assertSta
 const { applyDocumentControl } = require('./documentControl');
 const { applyReviewTiming } = require('./reviewTiming');
 const { applyAutomaticClosure } = require('./automaticClosure');
+const { firstSubmissionPrepared } = require('./firstSubmissionPrepared');
 const { normalizeType, typeOf, isCode } = require('../pcn-types');
 const { isDeepStrictEqual } = require('node:util');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
@@ -106,10 +107,8 @@ class PcnService {
       comments: [],
       ...data
     };
-    record.internalReview = {
-      ...(user ? applySignatureIdentity({}, record.internalReview || {}, user, now) : record.internalReview || {}),
-      pcnCode: ''
-    };
+    record.internalReview = submissionReview(null, record, user, now);
+    record.internalReview = { ...record.internalReview, pcnCode:'' };
 
     if (record.status !== 'draft') require('./documentChecks').assertCompletion(record, []);
 
@@ -172,7 +171,7 @@ class PcnService {
           changeType: formDefinitions[data.changeForm].changeHeading,
           route: buildWorkflow(data.riskLevel, current).map((step) => step.owner),
           internalReview: {
-            ...(user ? applySignatureIdentity(current.internalReview || {}, data.internalReview || {}, user, now) : data.internalReview || {}),
+            ...submissionReview(current, { ...data, status:nextStatus }, user, now),
             pcnCode: current.id
           }
         }, user, now);
@@ -607,6 +606,16 @@ module.exports = {
   PcnService,
   notificationGroups
 };
+
+function submissionReview(before, record, user, now) {
+  const previous = before?.internalReview || {};
+  // Validate the submitted identity fields before adding the automatic check,
+  // so metadata-only writes retain the existing rejection behavior.
+  const review = user ? applySignatureIdentity(previous, record.internalReview || {}, user, now) : record.internalReview || {};
+  const candidate = { ...record, internalReview:review };
+  const prepared = firstSubmissionPrepared(before, candidate, user);
+  return prepared === candidate ? review : applySignatureIdentity(previous, prepared.internalReview, user, now);
+}
 
 function mergeReview(current, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new ApiError(400, 'internalReview must be an object');

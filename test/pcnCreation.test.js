@@ -61,7 +61,7 @@ test('preflight uses saved canonical version, readiness and prospective submitte
   const { creation } = setup(); const { record } = await create(creation);
   const result = await creation.preflight(record.id, { version: record.version }, user);
   assert.equal(result.version, record.version); assert.equal(result.checks.ready, true);
-  assert.equal(result.nextAction.signingStep, 'prepared');
+  assert.equal(result.nextAction.signingStep, 'checked');
   assert.deepEqual(result.notification, { configurationStatus: 'not_configured', recipientConfigured: false });
   assert.doesNotMatch(JSON.stringify(result), /@|mailRoutingState|signatureBindings/);
   await assert.rejects(creation.preflight(record.id, { version: '000000000000ffff' }, user), { statusCode: 409 });
@@ -130,14 +130,14 @@ test('roleless, inactive and unauthorized requirements are rejected before draft
 test('preflight recognizes verified assigned recipients without exposing their private addresses', async () => {
   const { applyUserMailRouting } = require('../src/userMailRouting');
   const { creation, repository } = setup(); const { record } = await create(creation);
-  const preparer = { id: 'preparer', displayName: 'Prepared person', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared',
-    identityProvider: 'employee-code', isActive: true, email: 'prepared@example.test', mailDirectoryId: 'directory-id',
-    mailVerifiedAt: '2026-10-01T00:00:00Z', mailProfile: { id: 'directory-id', email: 'prepared@example.test' } };
-  repository.getNotificationSettings = async () => applyUserMailRouting({ schemaVersion: 2, groups: [] }, [preparer]);
-  creation.authRepository.listUsers = async () => [preparer];
+  const checker = { id: 'checker', displayName: 'Checked person', roles: ['gsc'], department: 'gscTet', signingStep: 'checked',
+    identityProvider: 'employee-code', isActive: true, email: 'checked@example.test', mailDirectoryId: 'directory-id',
+    mailVerifiedAt: '2026-10-01T00:00:00Z', mailProfile: { id: 'directory-id', email: 'checked@example.test' } };
+  repository.getNotificationSettings = async () => applyUserMailRouting({ schemaVersion: 2, groups: [] }, [checker]);
+  creation.authRepository.listUsers = async () => [checker];
   const result = await creation.preflight(record.id, { version: record.version }, user);
   assert.equal(result.notification.recipientConfigured, true);
-  assert.deepEqual(result.nextAction.people, [{ displayName: 'Prepared person' }]);
+  assert.deepEqual(result.nextAction.people, [{ displayName: 'Checked person' }]);
   assert.doesNotMatch(JSON.stringify(result), /@|directory-id|mailProfile/);
 });
 

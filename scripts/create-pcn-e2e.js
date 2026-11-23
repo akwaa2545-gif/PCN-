@@ -11,7 +11,8 @@ const retryOnly = process.argv.includes('--retry-only');
 const identityOnly = process.argv.includes('--identity-only');
 const previewOnly = process.argv.includes('--preview-only');
 const entryMenuOnly = process.argv.includes('--entry-menu-only');
-const artifactSuffix = entryMenuOnly ? '-entry-menu' : layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
+const submissionPreparedOnly = process.argv.includes('--submission-prepared-only');
+const artifactSuffix = submissionPreparedOnly ? '-submission-prepared' : entryMenuOnly ? '-entry-menu' : layoutOnly ? '-layout' : retryOnly ? '-retry' : identityOnly ? '-identity' : previewOnly ? '-preview' : '';
 function checked(description) { report.checks.push(description); console.log(JSON.stringify({ creationCheck: description })); }
 const typeChoice = (page, type) => page.getByRole('radio', { name: type.toUpperCase(), exact: true });
 const report = { storage: 'isolated_memory_only', checks: [], errors: [], external: [], writes: [], outbox: [], submissions: [] };
@@ -29,10 +30,13 @@ function isolatedSystem(origin) {
   repository.getMasterData = async () => ({ ...masterData, versionId: 1 });
   const users = [{ username: 'create-admin', displayName: 'Creation Administrator', roles: ['admin'] },
     { username: 'create-preparer', displayName: 'Assigned GSC Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' },
+    { username: 'create-checker', displayName: 'Assigned GSC Checker', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' },
+    { username: 'create-qa', displayName: 'Creation QA Reviewer', roles: ['qa'], department: 'qaTet', signingStep: 'prepared' },
     ...(entryMenuOnly ? [{ username: 'badge-developer', displayName: 'Developer badge fixture', roles: ['developer'], department: 'developer' },
       { username: 'badge-checker', displayName: 'Checked badge fixture', roles: ['gsc'], department: 'gscTet', signingStep: 'checked' }] : [])];
   const authService = fakeAuthService({ additionalUsers: users });
-  const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'prepared@example.test' }] };
+  const settings = { schemaVersion: 2, groups: [{ key: 'department.gscTet.prepared', emails: 'prepared@example.test' },
+    { key: 'department.gscTet.checked', emails: 'checked@example.test' }] };
   let files = [], scanState = 'pendingScan', jobState = 'pending';
   const jobs = [];
   const metadata = file => Object.fromEntries(Object.entries(file).filter(([key]) => !['code','bytes'].includes(key)));
@@ -113,6 +117,46 @@ function isolatedSystem(origin) {
       rootDir: path.resolve(__dirname, '..'), publicOrigin: origin, secureCookies: false }) };
 }
 
+async function verifySubmissionActors(system, origin, openContext) {
+  const signaturePath = 'signoff.gscTet.prepared';
+  for (const [username, documentType, automatic] of [['create-preparer', 'sc', true], ['supplier', 'ta', false], ['create-qa', 'sc', false]]) {
+    const probe = await openContext(username), principal = (await (await probe.request.get(`${origin}/api/session`)).json()).data;
+    const probeHeaders = { origin, 'x-csrf-token': principal.csrfToken };
+    const { internalReview: omittedRequirements, ...document } = require('../create-model').toPayload(require('../create-model').sample(require('../src/masterData')));
+    const created = await probe.request.post(`${origin}/api/pcn-drafts`, { headers: probeHeaders,
+      data: { clientDraftKey: crypto.randomUUID(), document: { ...document, documentType } } });
+    assert.equal(created.status(), 201); const draft = (await created.json()).data.record;
+    assert.equal(require('../src/documentControl').hasSignatures(draft), false);
+    assert.equal((await (await probe.request.get(`${origin}/api/pcn-drafts/${draft.id}`)).json()).data.editable, true);
+    const jobsBeforePreflight = system.jobs.length;
+    const preflight = await probe.request.post(`${origin}/api/pcn-drafts/${draft.id}/preflight`, { headers: probeHeaders, data: { version: draft.version } });
+    assert.equal(preflight.status(), 200); assert.equal((await preflight.json()).data.nextAction.signingStep, automatic ? 'checked' : 'prepared');
+    assert.deepEqual(await system.repository.findById(draft.id), draft, 'Projected preflight must not persist a signature');
+    assert.equal(system.jobs.length, jobsBeforePreflight, 'Preflight cannot queue mail');
+    if (!automatic) {
+      const forged = await probe.request.patch(`${origin}/api/pcns/${draft.id}`, { headers: probeHeaders,
+        data: { version: draft.version, status: 'submitted', internalReview: { signoff: { gscTet: { prepared: true } } } } });
+      assert.equal(forged.status(), 403); assert.deepEqual(await system.repository.findById(draft.id), draft);
+      assert.equal(system.jobs.length, jobsBeforePreflight, 'Rejected signature injection cannot queue mail');
+    }
+    const startedAt = Date.now(), submitted = await probe.request.patch(`${origin}/api/pcns/${draft.id}`, { headers: probeHeaders, data: { version: draft.version, status: 'submitted' } });
+    assert.equal(submitted.status(), 200); const record = (await submitted.json()).data;
+    assert.equal(record.internalReview.signoff?.gscTet?.prepared === true, automatic);
+    const signature = record.documentControl.signatureBindings[signaturePath];
+    if (automatic) {
+      assert.equal(signature.userId, principal.user.id); assert.equal(record.internalReview.signoff.gscTet.preparedName, principal.user.displayName);
+      assert(Date.parse(signature.signedAt) >= startedAt && Date.parse(signature.signedAt) <= Date.now());
+      assert.equal(record.internalReview.signoff.gscTet.preparedDate, signature.signedAt.slice(0, 10));
+      assert.equal(signature.contentHash, record.documentControl.contentHash); assert.equal(signature.contentRevision, record.documentControl.contentRevision);
+    } else assert.equal(signature, undefined);
+    const next = await probe.request.get(`${origin}/api/pcns/${record.id}/action`);
+    assert.equal((await next.json()).data.signingStep, automatic ? 'checked' : 'prepared');
+    assert.equal(system.jobs.length, jobsBeforePreflight + 1, 'Exactly one normal submission action job is captured');
+    assert.equal(system.jobs.at(-1).payload.to, automatic ? 'checked@example.test' : 'prepared@example.test'); await probe.close();
+  }
+  checked('Assigned GSC Prepared submits SC directly to Checked with a bound server signature; Supplier and QA retain Prepared and cannot forge its signature');
+}
+
 async function main() {
   const server = http.createServer();
   let browser, context, page, system;
@@ -151,6 +195,10 @@ async function main() {
     page = await context.newPage();
     page.setDefaultTimeout(10000); page.setDefaultNavigationTimeout(30000);
     page.on('pageerror', error => report.errors.push(error.message));
+    if (submissionPreparedOnly) {
+      await verifySubmissionActors(system, origin, openContext);
+      assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); report.status = 'passed'; return;
+    }
     if(entryMenuOnly){
       await page.goto(`${origin}/admin`);
       const createLink=page.getByRole('link',{name:'Create PCN',exact:true});
@@ -444,6 +492,7 @@ async function main() {
     };
     const normal = await saveDraft(page);
     assert.equal(normal.status, 'draft'); assert.notEqual(normal.isTestDocument, true);
+    assert.equal(require('../src/documentControl').hasSignatures(normal), false);
     assert.equal(system.jobs.length, 0);
     checked('Live required-field errors preserve input; explicit draft save remains unsigned and sends no notification');
 
@@ -458,6 +507,7 @@ async function main() {
     assert.equal((await second.request.get(`${origin}/api/pcn-drafts/${other.id}`)).status(), 404);
     await secondPage.locator(`[data-draft="${normal.id}"]`).click();
     await expect(secondPage.locator('#supplierName')).toHaveValue('Creation supplier draft');
+    assert.equal(require('../src/documentControl').hasSignatures(await system.repository.findById(normal.id)), false);
     await secondPage.locator('#materialName').fill('Material from second device');
     await saveDraft(secondPage);
     await page.locator('#manufacturerName').fill('Unsaved first-device correction');
@@ -530,27 +580,50 @@ async function main() {
     checked('Separate official Print/PDF export retains the genuine sheet, DRAFT protection and persistent TESTING DOC without submitting');
 
     await page.locator('[data-stage="review"]').click();
-    await expect(page.locator('#nextActionLabel')).toContainText(/GSC\/TET.*Prepared/);
-    await expect(page.locator('#nextActionPeople')).toContainText('Assigned GSC Preparer');
+    await expect(page.locator('#nextActionLabel')).toContainText(/GSC\/TET.*Checked/);
+    await expect(page.locator('#nextActionPeople')).toContainText('Assigned GSC Checker');
+    assert.equal(require('../src/documentControl').hasSignatures(await system.repository.findById(testing.id)), false, 'Preflight never stamps the draft');
     await expect(page.locator('#submitButton')).toBeEnabled();
+    const submissionStartedAt = Date.now(), submittedDraftVersion = (await system.repository.findById(testing.id)).version;
     await page.locator('#submitButton').click({ clickCount: 2 });
     await expect(page.locator('#submissionReceipt')).toBeVisible();
     await expect(page.locator('#receiptDetails')).toContainText('Queued');
-    await expect(page.locator('#receiptDetails')).toContainText(/GSC\/TET.*Prepared/);
-    await expect(page.locator('#receiptDetails')).not.toContainText('prepared@example.test');
+    await expect(page.locator('#receiptDetails')).toContainText(/GSC\/TET.*Checked/);
+    await expect(page.locator('#receiptDetails')).not.toContainText('checked@example.test');
     assert.equal(report.submissions.length, 1);
     assert.deepEqual(Object.keys(report.submissions[0].body).sort(), ['status','version']);
-    assert.equal(system.jobs.length, 1); assert.equal(system.jobs[0].payload.to, 'prepared@example.test');
+    assert.equal(system.jobs.length, 1); assert.equal(system.jobs[0].payload.to, 'checked@example.test');
     assert.match(system.jobs[0].payload.subject, /TESTING DOC/);
     system.setJobState('sent');
     await expect(page.locator('#receiptDetails')).toContainText('Accepted by workflow', { timeout: 10000 });
     assert.doesNotMatch(await page.locator('#receiptDetails').textContent(), /(?:email|mail) (?:was )?delivered/i);
     testing = await system.repository.findById(testing.id);
     assert.equal(testing.status, 'submitted'); assert.equal(testing.isTestDocument, true);
-    checked('Only explicit submission changes status once and queues the exact Prepared recipient; receipt distinguishes Queued and workflow acceptance from delivery');
-
-    testing = await system.service.update(testing.id, { version: testing.version, internalReview: { signoff: { gscTet: { prepared: true } } } }, 'fixture-preparer',
-      { id: 'create-preparer-id', displayName: 'Assigned GSC Preparer', roles: ['gsc'], department: 'gscTet', signingStep: 'prepared' });
+    const signaturePath = 'signoff.gscTet.prepared', binding = testing.documentControl.signatureBindings[signaturePath];
+    assert.equal(testing.internalReview.signoff.gscTet.prepared, true);
+    assert.equal(testing.internalReview.signoff.gscTet.preparedName, 'Creation Administrator');
+    assert.equal(binding.userId, 'create-admin-id'); assert.equal(binding.displayName, 'Creation Administrator');
+    assert(Date.parse(binding.signedAt) >= submissionStartedAt && Date.parse(binding.signedAt) <= Date.now());
+    assert.equal(testing.internalReview.signoff.gscTet.preparedDate, binding.signedAt.slice(0, 10));
+    assert.equal(binding.contentHash, testing.documentControl.contentHash); assert.equal(binding.contentRevision, testing.documentControl.contentRevision);
+    const stamp = record => ({ binding: record.documentControl.signatureBindings[signaturePath], name: record.internalReview.signoff.gscTet.preparedName, date: record.internalReview.signoff.gscTet.preparedDate });
+    const originalStamp = structuredClone(stamp(testing)), session = (await (await context.request.get(`${origin}/api/session`)).json()).data;
+    const headers = { origin, 'x-csrf-token': session.csrfToken };
+    const staleSubmit = await context.request.patch(`${origin}/api/pcns/${testing.id}`, { headers, data: { version: submittedDraftVersion, status: 'submitted' } });
+    assert.equal(staleSubmit.status(), 409); assert.deepEqual(stamp(await system.repository.findById(testing.id)), originalStamp);
+    const repeat = await context.request.patch(`${origin}/api/pcns/${testing.id}`, { headers, data: { version: testing.version, status: 'submitted' } });
+    assert.equal(repeat.status(), 200); testing = (await repeat.json()).data; assert.deepEqual(stamp(testing), originalStamp);
+    const replay = await context.request.post(`${origin}/api/pcn-drafts`, { headers, data: { clientDraftKey: testing.creationDraftKey,
+      document: { ...require('../create-model').toPayload(require('../create-model').sample(require('../src/masterData'))), documentType: 'ta' }, testDocument: true } });
+    assert.equal(replay.status(), 201); assert.equal((await replay.json()).data.reused, true);
+    assert.deepEqual(stamp((await (await context.request.get(`${origin}/api/pcns/${testing.id}`)).json()).data), originalStamp);
+    assert.equal(system.jobs.length, 1, 'Reads and submission/draft replays cannot enqueue another handoff');
+    const official = await context.newPage(); await official.goto(`${origin}/form.html?id=${testing.id}`);
+    const preparedCheck = official.locator('[data-internal-field="signoff.gscTet.prepared"]');
+    await expect(preparedCheck).toBeChecked(); await expect(preparedCheck).toBeVisible();
+    await expect(preparedCheck.locator('..')).toHaveAttribute('data-signature-tooltip', new RegExp('Signed by: Creation Administrator'));
+    await official.locator('.signoff-box[data-role="gscTet"]').screenshot({ path: path.resolve('test-results/create-pcn-submission-prepared.png') }); await official.close();
+    checked('Explicit first submission auto-signs authorized GSC/TET Prepared with the server actor/date/content binding and queues Checked once; read, retry and draft replay preserve the signature');
     await page.locator('#receiptNew').click(); await page.locator('#confirmAccept').click();
     await page.locator('#startCopy').click();
     await page.locator('#templatePcnId').fill(testing.id); await page.locator('#copyTemplate').click();
@@ -671,6 +744,7 @@ async function main() {
     await expect(delayedPage.locator('#documentType')).toHaveValue('sc');
     await delayed.close();
     checked('Starting another PCN during a held background save uses a fresh UUID and ignores the prior draft reply, including its issued type');
+    await verifySubmissionActors(system, origin, openContext);
     assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []);
     report.status = 'passed';
   } catch (error) {

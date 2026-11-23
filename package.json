@@ -17,6 +17,8 @@
     "test:auto-refresh": "node scripts/auto-refresh-e2e.js",
     "test:timeline": "node scripts/timeline-e2e.js",
     "test:records-dashboard": "node scripts/records-dashboard-e2e.js",
+    "test:records-loading": "node scripts/records-loading-e2e.js",
+    "test:records-compact": "node scripts/records-compact-e2e.js",
     "test:developer-role": "node scripts/developer-role-e2e.js",
     "test:developer-tools": "node scripts/developer-tools-e2e.js",
     "test:user-presence": "node scripts/user-presence-e2e.js",

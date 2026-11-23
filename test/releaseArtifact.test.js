@@ -135,7 +135,7 @@ test('Windows packaging and deployment extraction accept every producer runtime 
   // Include new assets before they enter the Git index, so this acceptance test
   // also verifies a development workspace's producer/extractor compatibility.
   const runtimeFiles = selectRuntimeFiles([...new Set([...tracked.stdout.split('\0').filter(Boolean),
-    'pcn-types.js', 'notification-settings.js', 'system-settings.html', 'system-settings.js', 'system-settings.css'])]);
+    'pcn.png', 'pcn-types.js', 'notification-settings.js', 'system-settings.html', 'system-settings.js', 'system-settings.css'])]);
   for (const file of runtimeFiles) {
     await fs.mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await fs.writeFile(path.join(root, file), `isolated runtime asset: ${file}`);

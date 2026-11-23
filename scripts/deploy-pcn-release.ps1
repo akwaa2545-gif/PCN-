@@ -14,7 +14,7 @@ $script:RuntimeFiles = @(
     'server.js', 'package.json', 'package-lock.json', 'pcn-types.js',
     'admin.html', 'form.html', 'records.html', 'index.html', 'login.html',
     'app.js', 'admin.js', 'records.js', 'login.js', 'session-client.js', 'master-data.js',
-    'auth.css', 'admin.css', 'records.css', 'styles.css', 'tokin-header-logo.png', 'thailand-login.jpg',
+    'auth.css', 'admin.css', 'records.css', 'styles.css', 'pcn.png', 'tokin-header-logo.png', 'thailand-login.jpg',
     'document-workspace.js', 'document-workspace.css', 'document-recovery.js', 'document-bridge.js',
     'create.html', 'create.js', 'create.css', 'create-model.js', 'create-autosave.js', 'create-documents.js', 'pcn-readiness.js',
     'developer.html', 'developer.js', 'developer.css',

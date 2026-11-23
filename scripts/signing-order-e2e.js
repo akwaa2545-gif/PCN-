@@ -17,8 +17,9 @@ const report = { storage: 'isolated_memory_only', checks: [], errors: [], extern
 async function main() {
   const repository = memoryRepository();
   repository.getMasterData = async () => ({ ...masterData, versionId: 1 });
-  const users = actions.map(action => ({ username: `order-${action}`, displayName: `Order ${action}`, roles: ['gsc'],
-    department: 'gscTet', signingStep: action }));
+  const users = [...actions.map(action => ({ username: `order-${action}`, displayName: `Order ${action}`, roles: ['gsc'],
+    department: 'gscTet', signingStep: action })),
+  { username: 'order-submitter', displayName: 'Order QA Submitter', roles: ['qa'], department: 'qaTet', signingStep: 'prepared' }];
   const settings = { schemaVersion: 2, groups: [...actions.map(action => ({ key: `department.gscTet.${action}`, emails: `${action}@example.test` })),
     { key: 'department.prodEngTa.prepared', emails: 'engineering-prepared@example.test' }] };
   const jobs = [];
@@ -208,7 +209,8 @@ async function main() {
     assert.deepEqual(await repository.findById(record.id), incompleteBefore, 'Incomplete returned PCN cannot resubmit');
     assert.equal(jobs.length, incompleteJobs, 'Rejected incomplete resubmission queues no action mail');
     report.checks.push('Incomplete returned save shows five required items with field-focus buttons and concise alert copy on mobile, leaving completed fields, record and handoff unchanged');
-    record = firstRecord; csrf = await login('admin'); await load();
+    // An unsigned submission by a non-GSC actor still exercises all three manual GSC steps.
+    record = firstRecord; csrf = await login('order-submitter'); await load();
     await patch({ status: 'submitted' });
     assert.equal(jobs.at(-1).to, 'prepared@example.test');
     assert.match(jobs.at(-1).subject, /GSC\/TET Prepared/);

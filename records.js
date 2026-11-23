@@ -3,6 +3,8 @@
   const recordType = record => pcnTypes?.typeOf(record) || null;
   const typeLabel = record => ({ ta: 'TA', sc: 'SC' }[recordType(record)] || 'Legacy / unassigned');
   const columns = { id: 'PCN code', documentType: 'PCN type', status: 'Status', riskLevel: 'Risk', supplierName: 'Supplier', materialName: 'Material', progress: 'Progress', next: 'Next responsible', documents: 'Documents', pending: 'Pending time', updatedAt: 'Updated' };
+  const columnWidths = { id:270, documentType:80, status:124, riskLevel:60, supplierName:200, materialName:210, progress:174, next:204, documents:160, pending:112, updatedAt:126, actions:128 };
+  const statusLabel = value => ({ gsc_review:'GSC Review', qa_review:'QA Review', tapbu_review:'TaPBU Review' }[value] || label(value));
   const defaults = Object.keys(columns);
   const filterKeys = ['summary', 'search', 'status', 'risk', 'documentType', 'supplier', 'department', 'from', 'to'];
   const departments = { gscTet: 'GSC/TET', prodEngTet: 'Prod.Eng/TET', prodEngTa: 'Prod.Eng/TA', prodEngSc: 'Prod.Eng/SC', qaTet: 'QA/TET', gscTapbu: 'GSC/TaPBU', qaTapbu: 'QA/TaPBU' };
@@ -250,6 +252,7 @@
     try { preferences = readPreferences(storageKey ? window.localStorage?.getItem(storageKey) : null); } catch { preferences = readPreferences(null); }
     const initialLifecycle = new URL(window.location?.href || '/', 'http://pcn.local').searchParams.get('documents') === 'closed' ? 'closed' : 'open';
     let state = { records: [], lifecycle: initialLifecycle, filters: cleanFilters({ search: search.value }), page: 1, preferences, accessible: true };
+    let listLoading = false; let recordsLoaded = false; let loadFailed = false;
     let preview = { record: null, tab: 'overview', request: 0, cache: {}, opener: null };
     let rowMenus = [];
     const closeRowMenus = (restoreFocus = false, except = null) => {
@@ -286,6 +289,12 @@
     });
     const cards = node('div', undefined, 'rd-summary');
     const fields = node('div', undefined, 'rd-filters');
+    const advancedFilters = node('div', undefined, 'rd-advanced-filters'); advancedFilters.id = 'rdAdvancedFilters'; advancedFilters.hidden = true;
+    let filtersExpanded = false;
+    const filtersToggle = button('Filters', () => setAdvancedFilters(!filtersExpanded), 'rd-button rd-filter-toggle'); filtersToggle.id = 'rdFiltersToggle';
+    filtersToggle.setAttribute('aria-expanded', 'false'); filtersToggle.setAttribute('aria-controls', advancedFilters.id);
+    const filterChevron = node('span', '⌄', 'rd-filter-chevron'); filterChevron.setAttribute('aria-hidden', 'true'); filtersToggle.append(filterChevron);
+    const externalFilterLabels = [];
     const overdueAlert = node('p', '', 'rd-overdue-alert'); overdueAlert.setAttribute('role', 'status'); overdueAlert.hidden = true;
     const footer = node('div', undefined, 'rd-pagination');
     const table = rows.closest?.('table');
@@ -300,6 +309,13 @@
     const selectField = (key, title, external) => {
       const input = external || node('select'); refs[key] = input;
       input.setAttribute('aria-label', title); if (!external) { input.id = `rdFilter-${key}`; const wrapper = node('label', title); wrapper.append(input); fields.append(wrapper); }
+      else {
+        const wrapper = external.closest?.('label');
+        if (wrapper?.parentNode) {
+          const parent = wrapper.parentNode; externalFilterLabels.push({ wrapper, parent, next:wrapper.nextSibling });
+          parent.setAttribute('data-records-simple-search', ''); fields.append(wrapper);
+        }
+      }
       input.addEventListener('change', () => setFilter(key, input.value)); return input;
     };
     selectField('status', 'Status', options.statusFilter); selectField('risk', 'Risk', options.riskFilter);
@@ -348,9 +364,20 @@
       const csv = exportCsv(sortRecords(filterRecords(state.records, { ...state.filters, lifecycle: state.lifecycle }), state.preferences.sort, state.preferences.direction), state.preferences.columns);
       const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' })); const link = node('a'); link.href = url; link.download = 'pcn-records.csv'; link.click(); URL.revokeObjectURL(url);
     }));
-    toolbar.append(lifecycleTabs); toolbar.append(cards); toolbar.append(fields); toolbar.append(tools); toolbar.append(overdueAlert);
+    advancedFilters.append(fields); advancedFilters.append(tools);
+    toolbar.append(lifecycleTabs); toolbar.append(cards); toolbar.append(filtersToggle); toolbar.append(advancedFilters); toolbar.append(overdueAlert);
     const wrap = rows.closest?.('.admin-table-wrap'); if (wrap?.parentNode) wrap.parentNode.insertBefore(toolbar, wrap); else root.prepend?.(toolbar);
     const recordsPanel = wrap || node('section'); recordsPanel.id = 'rdRecordsPanel'; recordsPanel.setAttribute('role', 'tabpanel'); recordsPanel.setAttribute('aria-labelledby', lifecycleButtons[state.lifecycle].id); recordsPanel.tabIndex = 0;
+    recordsPanel.setAttribute('aria-busy', 'false');
+    const loadingStatus = node('div', undefined, 'rd-loading-status'); loadingStatus.id = 'rdRecordsLoading'; loadingStatus.hidden = true;
+    loadingStatus.setAttribute('role', 'status'); loadingStatus.setAttribute('aria-live', 'polite'); loadingStatus.setAttribute('aria-atomic', 'true');
+    const loadingLabel = node('span'); loadingLabel.id = 'rdRecordsLoadingLabel'; loadingStatus.append(loadingLabel);
+    const loadingOverlay = node('div', undefined, 'rd-loading-overlay'); loadingOverlay.id = 'rdRecordsLoadingOverlay'; loadingOverlay.hidden = true; loadingOverlay.setAttribute('aria-hidden', 'true');
+    const loadingBadge = node('span', undefined, 'rd-loading-badge');
+    const loadingSpinner = node('span', undefined, 'rd-loading-spinner'); loadingSpinner.setAttribute('aria-hidden', 'true'); loadingBadge.append(loadingSpinner); loadingOverlay.append(loadingBadge);
+    recordsPanel.setAttribute('data-records-loading-panel', '');
+    if (wrap) wrap.append(loadingOverlay); else root.append?.(loadingOverlay);
+    if (wrap?.parentNode) wrap.parentNode.insertBefore(loadingStatus, wrap); else root.append?.(loadingStatus);
     if (wrap?.parentNode) wrap.after(footer); else root.append?.(footer);
     const dialog = node('dialog', undefined, 'rd-preview'); dialog.id = 'rdPreviewDialog'; dialog.setAttribute('aria-labelledby', 'rdPreviewTitle');
     const header = node('div', undefined, 'rd-preview-header'); const title = node('h2'); title.id = 'rdPreviewTitle';
@@ -374,12 +401,64 @@
     dialog.addEventListener('click', event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closePreview(); } });
     search.addEventListener('input', () => setFilter('search', search.value));
 
+    function setAdvancedFilters(open, { restoreFocus = true } = {}) {
+      const focusInside = advancedFilters.contains?.(document.activeElement);
+      filtersExpanded = Boolean(open); advancedFilters.hidden = !filtersExpanded;
+      filtersToggle.setAttribute('aria-expanded', String(filtersExpanded));
+      if (!filtersExpanded) {
+        chooser.open = false; viewEditor.open = false;
+        if (restoreFocus && focusInside) filtersToggle.focus({ preventScroll:true });
+      }
+    }
+
     function updateOptions(ref, values, allLabel, selected, preserveSelected = false) {
       ref.replaceChildren(); const all = node('option', allLabel); all.value = ''; ref.append(all);
       [...new Set([...values, ...(preserveSelected && selected ? [selected] : [])].filter(Boolean))].sort().forEach(value => { const item = node('option', label(value)); item.value = value; ref.append(item); }); ref.value = selected || '';
     }
 
+    function renderHead() {
+      if (!tableHead) return;
+      table.setAttribute('data-records-compact', '');
+      table.style?.setProperty('min-width', `${state.preferences.columns.reduce((width, key) => width + columnWidths[key], columnWidths.actions)}px`);
+      tableHead.replaceChildren(); const heading = node('tr');
+      state.preferences.columns.forEach(key => { const cell = node('th'); cell.scope = 'col'; cell.dataset.column = key; cell.setAttribute('style', `width:${columnWidths[key]}px`); cell.setAttribute('aria-sort', state.preferences.sort === key ? state.preferences.direction === 'asc' ? 'ascending' : 'descending' : 'none'); const sort = button(`${columns[key]}${state.preferences.sort === key ? state.preferences.direction === 'asc' ? ' ↑' : ' ↓' : ''}`, () => { state = { ...state, preferences: { ...state.preferences, sort: key, direction: state.preferences.sort === key && state.preferences.direction === 'asc' ? 'desc' : 'asc' }, page: 1 }; savePrefs(); render(); }, 'rd-sort'); sort.dataset.rdFocus = `sort:${key}`; sort.disabled = listLoading && !recordsLoaded; cell.append(sort); heading.append(cell); });
+      const actions = node('th', 'Actions'); actions.scope = 'col'; actions.dataset.column = 'actions'; actions.setAttribute('style', `width:${columnWidths.actions}px`); heading.append(actions); tableHead.append(heading);
+    }
+
+    function renderSkeleton() {
+      renderHead(); rows.replaceChildren(); footer.replaceChildren(); toolbar.hidden = true; count.textContent = '—';
+      for (let index = 0; index < 5; index++) {
+        const row = node('tr', undefined, 'rd-skeleton-row'); row.setAttribute('aria-hidden', 'true');
+        [...state.preferences.columns, 'actions'].forEach((key, column) => {
+          const cell = node('td'); cell.dataset.column = key;
+          const line = node('span', undefined, `rd-skeleton-line rd-skeleton-line-${column % 3}`); cell.append(line);
+          if (key === 'id' || key === 'supplierName' || key === 'materialName') cell.append(node('span', undefined, 'rd-skeleton-line rd-skeleton-line-short'));
+          row.append(cell);
+        }); rows.append(row);
+      }
+    }
+
+    function setLoading(value, { quiet = false, error = false } = {}) {
+      if (quiet || !state.accessible) return;
+      listLoading = Boolean(value); loadFailed = !value && error;
+      recordsPanel.setAttribute('aria-busy', String(listLoading)); loadingStatus.hidden = !listLoading; loadingOverlay.hidden = !listLoading;
+      loadingLabel.textContent = listLoading ? recordsLoaded ? 'Refreshing PCN records…' : 'Loading PCN records…' : '';
+      if (listLoading) { message.textContent = ''; if (!recordsLoaded) renderSkeleton(); }
+      else if (!recordsLoaded) {
+        rows.replaceChildren(); renderHead();
+        if (loadFailed) renderLoadError();
+      }
+    }
+
+    function renderLoadError() {
+      rows.replaceChildren(); renderHead();
+      const row = node('tr'); const cell = node('td', 'Records could not be loaded. Select Refresh to try again.', 'rd-load-error records-empty');
+      cell.colSpan = state.preferences.columns.length + 1; row.append(cell); rows.append(row);
+    }
+
     function render() {
+      if (listLoading && !recordsLoaded) { renderSkeleton(); return; }
+      if (loadFailed && !recordsLoaded) { renderLoadError(); return; }
       const focused = document.activeElement;
       const focusKey = focused?.dataset?.rdFocus;
       const focusId = focused?.id;
@@ -416,11 +495,7 @@
       updateOptions(refs.department, scoped.map(departmentName), 'All departments', state.filters.department, true);
       updateOptions(saved, state.preferences.views.map(view => view.name), 'Select saved view', saved.value);
       refs.from.value = state.filters.from; refs.to.value = state.filters.to;
-      if (tableHead) {
-        tableHead.replaceChildren(); const heading = node('tr');
-        state.preferences.columns.forEach(key => { const cell = node('th'); cell.scope = 'col'; cell.setAttribute('aria-sort', state.preferences.sort === key ? state.preferences.direction === 'asc' ? 'ascending' : 'descending' : 'none'); const sort = button(`${columns[key]}${state.preferences.sort === key ? state.preferences.direction === 'asc' ? ' ↑' : ' ↓' : ''}`, () => { state = { ...state, preferences: { ...state.preferences, sort: key, direction: state.preferences.sort === key && state.preferences.direction === 'asc' ? 'desc' : 'asc' }, page: 1 }; savePrefs(); render(); }, 'rd-sort'); sort.dataset.rdFocus = `sort:${key}`; cell.append(sort); heading.append(cell); });
-        const actions = node('th', 'Actions'); actions.scope = 'col'; heading.append(actions); tableHead.append(heading);
-      }
+      renderHead();
       const filtered = sortRecords(filterRecords(scoped, state.filters), state.preferences.sort, state.preferences.direction);
       const page = paginate(filtered, state.page, state.preferences.pageSize); state = { ...state, page: page.page }; count.textContent = String(filtered.length); closeRowMenus(); rowMenus = []; rows.replaceChildren();
       if (!page.items.length) { const row = node('tr'); const cell = node('td', scoped.length ? `No ${state.lifecycle} documents match these filters. Reset filters to see all ${state.lifecycle} documents.` : state.lifecycle === 'closed' ? 'No closed documents yet. Completed PCNs will appear here.' : state.records.length ? 'No open documents. All available PCNs have finished their review.' : 'No PCN records are available.', 'records-empty'); cell.colSpan = state.preferences.columns.length + 1; row.append(cell); rows.append(row); }
@@ -444,17 +519,20 @@
           const href = options.codeHref?.(record) || `/${encodeURIComponent(record.id)}`;
           const link = node('a', record.id, 'rd-code-link'); link.dataset.rdFocus = `code:${record.id}`; link.href = href;
           identity.append(link);
-          if (deadline?.overdue === true) identity.append(node('span', `${deadlineName(deadline)} overdue`, 'rd-badge rd-deadline-overdue'));
+          const type = recordType(record);
+          if (type) { const badge = node('span', type.toUpperCase(), `rd-type-badge rd-type-${type}`); badge.setAttribute('aria-label', `PCN type ${type.toUpperCase()}`); badge.title = `PCN type ${type.toUpperCase()}`; identity.append(badge); }
+          if (deadline?.overdue === true) { const badge = node('span', 'Overdue', 'rd-badge rd-deadline-overdue'); badge.title = `${deadlineName(deadline)} overdue`; badge.setAttribute('aria-label', badge.title); identity.append(badge); }
           if (record.isTestDocument === true) identity.append(node('span', 'TESTING DOC', 'rd-test-badge'));
           const openLink = node('a', 'Open PCN', 'rd-button rd-open-button');
-          openLink.href = href; openLink.dataset.rdFocus = `open:${record.id}`; openLink.setAttribute('aria-label', `Open ${record.id}`);
+          openLink.href = href; openLink.dataset.rdFocus = `open:${record.id}`; openLink.setAttribute('aria-label', `Open PCN ${record.id}`);
           identity.append(openLink); cell.append(identity);
         }
-        else if (key === 'status') cell.append(node('span', label(record.status), `rd-badge rd-status-${String(record.status || '').replace(/[^a-z_]/g, '')}`));
+        else if (key === 'status') { const badge = node('span', statusLabel(record.status), `rd-badge rd-status-${String(record.status || '').replace(/[^a-z_]/g, '')}`); badge.title = badge.textContent; cell.append(badge); }
         else if (key === 'progress') renderProgress(cell, record);
-        else if (key === 'next') { cell.append(node('strong', action(record).label || 'Not available')); cell.append(node('small', personNames(record) || (terminal(record.status) ? 'Review finished' : 'Assignee not available'))); }
-        else if (key === 'documents') cell.append(node('span', documentLabel(record), `rd-badge rd-doc-${record.dashboard?.documents?.state || 'unknown'}`));
-        else { cell.textContent = columnValue(record, key); if (key === 'pending' && record.dashboard?.pending?.overdue === true) cell.className = 'rd-overdue'; }
+        else if (key === 'next') { const title = node('strong', action(record).label || 'Not available'); title.title = title.textContent; const person = node('small', personNames(record) || (terminal(record.status) ? 'Review finished' : 'Assignee not available')); person.title = person.textContent; cell.append(title); cell.append(person); }
+        else if (key === 'documents') { const badge = node('span', documentLabel(record), `rd-badge rd-doc-${record.dashboard?.documents?.state || 'unknown'}`); badge.title = badge.textContent; cell.append(badge); }
+        else if (key === 'supplierName' || key === 'materialName') { const value = columnValue(record, key); const displayed = node('span', value, 'rd-cell-text'); displayed.title = value; cell.title = value; cell.append(displayed); }
+        else { cell.textContent = columnValue(record, key); cell.title = key === 'updatedAt' ? record.updatedAt || record.createdAt || cell.textContent : cell.textContent; if (key === 'pending' && record.dashboard?.pending?.overdue === true) cell.className = 'rd-overdue'; }
         row.append(cell);
       });
       const actionsCell = node('td', undefined, 'rd-row-actions');
@@ -500,7 +578,7 @@
     function renderProgress(cell, record) {
       const progress = record.dashboard?.progress;
       if (!progress) { cell.textContent = 'Not available'; return; }
-      cell.append(node('strong', progress.terminal ? label(record.status) : progress.currentStepTitle));
+      const title = node('strong', progress.terminal ? statusLabel(record.status) : progress.currentStepTitle); title.title = title.textContent; cell.append(title);
       if (record.status === 'rejected') {
         cell.append(node('small', 'Review ended with rejection'));
         if (Number.isFinite(progress.totalSignatures)) cell.append(node('small', `${progress.completedSignatures}/${progress.totalSignatures} signing steps`));
@@ -632,6 +710,8 @@
     }
     function closePreview() { if (dialog.open) dialog.close(); finishPreview(); }
     function clear() {
+      setAdvancedFilters(false, { restoreFocus:false });
+      listLoading = false; recordsLoaded = false; loadFailed = false; loadingStatus.hidden = true; loadingOverlay.hidden = true; loadingLabel.textContent = ''; recordsPanel.setAttribute('aria-busy', 'false');
       state = { ...state, records: [] }; closeRowMenus(); rowMenus = []; closePreview(); rows.replaceChildren(); count.textContent = '0'; cards.replaceChildren(); footer.replaceChildren();
       content.replaceChildren(); title.textContent = ''; testBadge.hidden = true;
       overdueAlert.hidden = true; overdueAlert.textContent = '';
@@ -640,9 +720,15 @@
       chooser.open = false; viewEditor.open = false; toolbar.hidden = true;
     }
     return {
-      setRecords(records) { if (!state.accessible) return; toolbar.hidden = false; state = { ...state, records: [...records] }; render(); }, clear,
+      setRecords(records) { if (!state.accessible) return; recordsLoaded = true; loadFailed = false; toolbar.hidden = false; state = { ...state, records: [...records] }; render(); }, setLoading, clear,
       canRefresh: () => state.accessible && !dialog.open && !chooser.open && !viewEditor.open && !rowMenus.some(menu => menu.details.open) && !options.isBusy?.(),
-      destroy() { document.removeEventListener?.('click', outsideRowMenu); state = { ...state, accessible: false }; clear(); toolbar.remove?.(); footer.remove?.(); dialog.remove?.(); },
+      destroy() {
+        document.removeEventListener?.('click', outsideRowMenu); state = { ...state, accessible: false }; clear();
+        [...externalFilterLabels].reverse().forEach(({ wrapper, parent, next }) => {
+          parent.insertBefore(wrapper, next?.parentNode === parent ? next : null); parent.removeAttribute('data-records-simple-search');
+        });
+        toolbar.remove?.(); footer.remove?.(); dialog.remove?.(); loadingStatus.remove?.(); loadingOverlay.remove?.();
+      },
       getState: () => ({ lifecycle: state.lifecycle, filters: { ...state.filters }, page: state.page, preferences: { ...state.preferences }, preview: preview.record?.id || null }),
     };
   }
@@ -657,7 +743,7 @@
     let controller; let loading = false; let accessible = true; let fingerprint; let generation = 0;
     const accessLost = error => { accessible = false; generation++; controller?.clear(); workspace.hidden = true; const gate = document.getElementById('recordsGateError'); gate.textContent = error.message || 'Your access has changed. Reload the page to continue.'; gate.hidden = false; };
     const load = async ({ quiet = false, isCurrent = () => true } = {}) => {
-      if (loading || !accessible) return; const requestGeneration = generation; loading = true; refresh.disabled = true; if (!quiet) message.textContent = 'Loading records…';
+      if (loading || !accessible) return; const requestGeneration = generation; loading = true; refresh.disabled = true; controller.setLoading(true, { quiet }); let failed = false;
       const current = () => isCurrent() && requestGeneration === generation && accessible;
       try {
         const response = await window.PCN_SESSION.fetch('/api/pcns/overview'); if (!current()) return;
@@ -665,8 +751,8 @@
         const nextFingerprint = JSON.stringify(response.items);
         if (nextFingerprint !== fingerprint) { const focusKey = document.activeElement?.dataset?.rdFocus; const href = document.activeElement?.closest?.('a')?.getAttribute('href'); const scroll = { x: window.scrollX, y: window.scrollY }; fingerprint = nextFingerprint; controller.setRecords(response.items); if (!focusKey && href) Array.from(rows.querySelectorAll?.('a') || []).find(link => link.getAttribute('href') === href)?.focus({ preventScroll: true }); window.scrollTo?.(scroll.x, scroll.y); }
         message.textContent = `${response.items.length} PCN record${response.items.length === 1 ? '' : 's'} available.`;
-      } catch (error) { if (!current()) return; if ([401, 403].includes(error.status)) accessLost(error); message.textContent = error.message; if (quiet) throw error; }
-      finally { loading = false; refresh.disabled = false; }
+      } catch (error) { failed = true; if (!current()) return; if ([401, 403].includes(error.status)) accessLost(error); message.textContent = error.message; if (quiet) throw error; }
+      finally { loading = false; refresh.disabled = false; if (accessible) controller.setLoading(false, { quiet, error:failed }); }
     };
     try {
       const session = await window.PCN_SESSION.require(); if (!session) return;

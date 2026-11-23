@@ -25,7 +25,11 @@ async function reportArtifacts() {
 
 class DashboardPage {
   constructor(page, host = '#recordsWorkspace') { this.page = page; this.host = page.locator(host); }
-  async ready() { await expect(this.host).toBeVisible(); await expect(this.host.locator('[data-summary="all"]')).toBeVisible(); }
+  async ready() {
+    await expect(this.host).toBeVisible(); await expect(this.host.locator('[data-summary="all"]')).toBeVisible();
+    const filters = this.host.locator('#rdFiltersToggle');
+    if (await filters.getAttribute('aria-expanded') !== 'true') await filters.click();
+  }
   lifecycle(name) { return this.host.locator(`#rdLifecycleTab-${name}`); }
   card(name) { return this.host.getByRole('button', { name: new RegExp(name, 'i') }); }
   rows() { return this.host.locator('tr[data-pcn-id]'); }
@@ -161,7 +165,9 @@ async function reviewDeadlineJourney(browser) {
         clock = new Date(Date.parse(dueAt) + 1);
         await expect(banner).toBeVisible(); // Waits for real 5-second overview polling, without manual refresh.
         await expect(banner).toContainText(`1 PCN overdue for ${label}`);
-        await expect(row.locator('.rd-deadline-overdue')).toHaveText(`${label} overdue`);
+        await expect(row.locator('.rd-deadline-overdue')).toHaveText('Overdue');
+        await expect(row.locator('.rd-deadline-overdue')).toHaveAttribute('title', `${label} overdue`);
+        await expect(row.locator('.rd-deadline-overdue')).toHaveAttribute('aria-label', `${label} overdue`);
         await expect(row).toHaveClass(/rd-row-overdue/);
         await expect(pending).toHaveText('Overdue <1 day'); await expect(pending).toHaveClass(/rd-overdue/);
         clock = new Date(Date.parse(dueAt) + 3 * 86400000);

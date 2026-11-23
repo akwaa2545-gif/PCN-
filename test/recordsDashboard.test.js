@@ -185,6 +185,103 @@ function controllerPage(fetch, options = {}) {
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test('advanced record filters start collapsed and preserve their values and expanded state across renders', async () => {
+  const page = controllerPage(async () => ({}));
+  page.controller.setRecords([{id:'T-23112601',supplierName:'Acme',status:'submitted'}]);
+  const toggle = page.find('rdFiltersToggle'); const advanced = page.find('rdAdvancedFilters');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  assert.equal(toggle.attributes['aria-controls'], advanced.id);
+  assert.equal(advanced.hidden, true);
+  assert.equal(advanced.contains(page.find('rdFilter-saved')), true);
+  assert.equal(advanced.contains(page.find('rdViewEditor')), true);
+  assert.equal(advanced.contains(page.search), false);
+  await toggle.emit('click');
+  assert.equal(advanced.hidden, false); assert.equal(toggle.attributes['aria-expanded'], 'true');
+  const supplier = page.find('rdFilter-supplier'); supplier.value='Acme'; await supplier.emit('change');
+  page.controller.setRecords([{id:'T-23112601',supplierName:'Acme',status:'submitted'},{id:'T-23112602',supplierName:'Other',status:'submitted'}]);
+  assert.equal(advanced.hidden, false); assert.equal(supplier.value, 'Acme');
+  await toggle.emit('click');
+  assert.equal(advanced.hidden, true); assert.equal(page.rows.children.length, 1);
+  page.controller.setRecords([{id:'T-23112601',supplierName:'Acme',status:'submitted'}]);
+  assert.equal(advanced.hidden, true); assert.equal(page.controller.getState().filters.supplier, 'Acme');
+});
+
+test('collapsing advanced filters safely closes editors, returns focused controls and clear resets expansion', async () => {
+  const page = controllerPage(async () => ({})); page.controller.setRecords([]);
+  const toggle = page.find('rdFiltersToggle'); const advanced = page.find('rdAdvancedFilters');
+  await toggle.emit('click'); page.find('rdViewEditor').open = true; page.find('rdColumnChooser').open = true;
+  page.find('rdViewName').focus(); await toggle.emit('click');
+  assert.equal(page.document.activeElement, toggle);
+  assert.equal(page.find('rdViewEditor').open, false); assert.equal(page.find('rdColumnChooser').open, false);
+  await toggle.emit('click'); page.controller.clear();
+  assert.equal(advanced.hidden, true); assert.equal(toggle.attributes['aria-expanded'], 'false');
+});
+
+test('initial records loading shows only decorative skeleton rows with a single busy status', () => {
+  const page = controllerPage(async () => ({}));
+  page.controller.setLoading(true);
+  assert.equal(page.find('rdRecordsPanel').attributes['aria-busy'], 'true');
+  assert.equal(page.find('rdRecordsLoading').hidden, false);
+  assert.equal(page.find('rdRecordsLoading').attributes.role, 'status');
+  assert.equal(page.find('rdRecordsLoadingOverlay').hidden, false);
+  assert.equal(page.find('rdRecordsLoadingOverlay').attributes['aria-hidden'], 'true');
+  assert.equal(page.count.textContent, '—');
+  assert.equal(page.rows.children.length, 5);
+  for (const row of page.rows.children) {
+    assert.equal(row.className, 'rd-skeleton-row');
+    assert.equal(row.attributes['aria-hidden'], 'true');
+    assert.equal(row.children.length, page.controller.getState().preferences.columns.length + 1);
+    assert.equal(row.dataset.pcnId, undefined);
+  }
+  page.controller.setRecords([]);
+  page.controller.setLoading(false);
+  assert.equal(page.find('rdRecordsLoading').hidden, true);
+  assert.equal(page.find('rdRecordsPanel').attributes['aria-busy'], 'false');
+  assert.equal(page.count.textContent, '0');
+  assert.match(page.rows.children[0].children[0].textContent, /No PCN records/);
+});
+
+test('manual refresh keeps real rows and filter state while quiet polling never changes the loading presentation', async () => {
+  const page = controllerPage(async () => ({}));
+  page.controller.setRecords([{ id:'T-23112601', status:'submitted', supplierName:'Acme' }]);
+  page.search.value = 'Acme'; await page.search.emit('input');
+  const row = page.rows.children[0];
+  const count = page.count.textContent;
+  page.controller.setLoading(true);
+  assert.equal(page.rows.children[0], row);
+  assert.equal(page.count.textContent, count);
+  assert.equal(page.controller.getState().filters.search, 'Acme');
+  assert.equal(page.find('rdRecordsLoadingLabel').textContent, 'Refreshing PCN records…');
+  page.controller.setLoading(false);
+  page.controller.setLoading(true, { quiet:true });
+  assert.equal(page.find('rdRecordsLoading').hidden, true);
+  assert.equal(page.find('rdRecordsPanel').attributes['aria-busy'], 'false');
+  assert.equal(page.rows.children[0], row);
+});
+
+test('failed initial records load offers retry and clears skeletons, retry and access cleanup cannot retain loading UI', () => {
+  const page = controllerPage(async () => ({}));
+  page.controller.setLoading(true);
+  page.controller.setLoading(false, { error:true });
+  assert.equal(page.rows.children.length, 1);
+  assert.equal(page.rows.children[0].children[0].className, 'rd-load-error records-empty');
+  assert.match(page.rows.children[0].children[0].textContent, /Refresh.*try again/);
+  assert.equal(page.find('rdRecordsLoading').hidden, true);
+  page.search.value = 'Acme'; page.search.events.input[0]();
+  assert.match(page.rows.children[0].children[0].textContent, /Refresh.*try again/);
+  page.controller.setLoading(true);
+  assert.equal(page.rows.children.length, 5);
+  page.controller.clear();
+  assert.equal(page.rows.children.length, 0);
+  assert.equal(page.find('rdRecordsLoading').hidden, true);
+  assert.equal(page.find('rdRecordsLoadingOverlay').hidden, true);
+  assert.equal(page.find('rdRecordsPanel').attributes['aria-busy'], 'false');
+  page.controller.destroy();
+  page.controller.setLoading(true);
+  assert.equal(page.rows.children.length, 0);
+  assert.equal(page.find('rdRecordsLoading').hidden, true);
+});
+
 test('type selection survives lifecycle switching, refresh and saved views while reset keeps the active tab', async () => {
   const page = controllerPage(async () => ({}));
   const items = [
@@ -342,11 +439,11 @@ test('QA/TET red overdue alerts and badges coexist with Prod.Eng/TET counts and 
   assert.match(pendingCell.className, /rd-overdue/); assert.equal(pendingCell.textContent, 'Overdue 2 days');
   const pendingChoice = page.find('rdColumnChooser').querySelectorAll().find(item => item.tag === 'label' && item.children.some(child => child.textContent === 'Pending time')).children[0];
   pendingChoice.checked = false; await pendingChoice.emit('change');
-  const qaBadges = page.rows.querySelectorAll().filter(item => item.textContent === 'QA/TET overdue');
+  const qaBadges = page.rows.querySelectorAll().filter(item => item.attributes?.['aria-label'] === 'QA/TET overdue');
   assert.equal(qaBadges.length, 2); assert.ok(qaBadges.every(item => item.className.includes('rd-deadline-overdue')));
   page.controller.setRecords([{ ...qa, dashboard: { action: { department: 'qaTet', label: 'QA/TET Final Judgment' }, pending: { overdue: false, activeReviewDeadline: null, prodEngDeadline: null, qaDeadline: null } } }]);
   assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
-  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'QA/TET overdue'), false);
+  assert.equal(page.rows.querySelectorAll().some(item => item.attributes?.['aria-label'] === 'QA/TET overdue'), false);
   page.controller.setRecords([{ ...qa, status: 'approved' }]); assert.equal(banner.hidden, true);
 });
 
@@ -401,20 +498,20 @@ test('Prod.Eng/TET overdue alert counts records and persists in PCN code when pe
   const pendingChoice = page.find('rdColumnChooser').querySelectorAll().find(item => item.tag === 'label' && item.children.some(child => child.textContent === 'Pending time')).children[0];
   pendingChoice.checked = false; await pendingChoice.emit('change');
   assert.equal(page.rows.querySelectorAll().some(item => item.dataset.column === 'pending'), false);
-  const badges = page.rows.querySelectorAll().filter(item => item.textContent === 'Prod.Eng/TET overdue');
+  const badges = page.rows.querySelectorAll().filter(item => item.attributes?.['aria-label'] === 'Prod.Eng/TET overdue');
   assert.equal(badges.length, 2); assert.ok(badges.every(item => item.className.includes('rd-deadline-overdue')));
   assert.ok(badges.every(item => item.parentElement.className === 'rd-code-cell'));
   page.controller.setRecords([prodEngRecord()]);
   assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
-  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  assert.equal(page.rows.querySelectorAll().some(item => item.attributes?.['aria-label'] === 'Prod.Eng/TET overdue'), false);
   page.controller.setRecords([prodEngRecord({ dueAt: null, overdue: null, source: 'unknown' })]);
   assert.equal(banner.hidden, true);
-  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  assert.equal(page.rows.querySelectorAll().some(item => item.attributes?.['aria-label'] === 'Prod.Eng/TET overdue'), false);
   page.controller.setRecords([{ ...overdue, status: 'qa_review', dashboard: { pending: { prodEngDeadline: null, overdue: false } } }]);
   assert.equal(banner.hidden, true);
   page.controller.setRecords([{ ...overdue, status: 'approved' }]);
   assert.equal(banner.hidden, true);
-  assert.equal(page.rows.querySelectorAll().some(item => item.textContent === 'Prod.Eng/TET overdue'), false);
+  assert.equal(page.rows.querySelectorAll().some(item => item.attributes?.['aria-label'] === 'Prod.Eng/TET overdue'), false);
   page.controller.setRecords([overdue]); assert.match(banner.textContent, /^1 PCN overdue/); page.controller.clear();
   assert.equal(banner.hidden, true); assert.equal(banner.textContent, '');
 });
@@ -546,6 +643,43 @@ test('record opening uses native links with the exact authorized route and keeps
   assert.equal(identity.children[1].textContent, 'TESTING DOC');
   assert.equal(identity.children[2].textContent, 'Open PCN');
   assert.equal(identity.parentElement.dataset.column, 'id');
+});
+
+test('compact identity exposes canonical TA or SC badges without changing the code link or inventing legacy types', () => {
+  const page = controllerPage(async () => ({}), { codeHref: record => `/view/${record.id}?readonly=1` });
+  const records = [{id:'T-23112601',documentType:'ta',isTestDocument:true}, {id:'S-23112601',documentType:'sc'},
+    {id:'T-23112602'}, {id:'PCN-2026-0001'}, {id:'T-invalid'}];
+  page.controller.setRecords(records);
+  for (const record of records) {
+    const row = page.rows.children.find(item => item.dataset.pcnId === record.id);
+    const identity = row.children.find(item => item.dataset.column === 'id').children[0];
+    assert.equal(identity.children[0].tag, 'a'); assert.equal(identity.children[0].textContent, record.id);
+    assert.equal(identity.children[0].href, `/view/${record.id}?readonly=1`);
+    const badges = identity.children.filter(item => item.className?.includes('rd-type-badge'));
+    const type = require('../pcn-types').typeOf(record);
+    assert.equal(badges.length, type ? 1 : 0);
+    if (type) { assert.equal(badges[0].textContent, type.toUpperCase()); assert.equal(badges[0].attributes['aria-label'], `PCN type ${type.toUpperCase()}`); }
+    assert.equal(identity.children.at(-1).textContent, 'Open PCN');
+    assert.equal(identity.children.at(-1).href, `/view/${record.id}?readonly=1`);
+  }
+});
+
+test('compact rows retain full supplier, material and responsible text for tooltips and CSV', () => {
+  const page = controllerPage(async () => ({}));
+  const supplier = 'Supplier <img src=x> with a long unabridged organization name';
+  const material = 'Material with a long complete specification and original designation';
+  const next = 'QA/TET — Prepare a long detailed review action'; const person = 'A long reviewer display name';
+  const record = {id:'T-23112601',supplierName:supplier,materialName:material,status:'qa_review',dashboard:{action:{label:next,people:[{displayName:person}]}}};
+  page.controller.setRecords([record]); const row = page.rows.children[0];
+  for (const [key, value] of [['supplierName',supplier],['materialName',material]]) {
+    const cell = row.children.find(item => item.dataset.column === key);
+    assert.equal(cell.title, value); assert.equal(cell.children[0].textContent, value); assert.equal(cell.children[0].title, value);
+  }
+  const responsible = row.children.find(item => item.dataset.column === 'next');
+  assert.equal(responsible.children[0].title, next); assert.equal(responsible.children[1].title, person);
+  const status = row.children.find(item => item.dataset.column === 'status').children[0]; assert.equal(status.textContent, 'QA Review');
+  const csv = dashboard().exportCsv([record], ['supplierName','materialName','next']);
+  assert.ok(csv.includes(supplier)); assert.ok(csv.includes(material)); assert.ok(csv.includes(person));
 });
 
 test('overflow actions pause refresh, close safely and never select their row', async () => {

@@ -5,6 +5,7 @@ const { buildChecks, buildAction } = require('./documentChecks');
 const { normalizeMailRouting, resolveNextMailTarget } = require('./mailRouting');
 const { canSetRequirements, draftContent, templateContent } = require('./pcnTemplates');
 const { summarizeNotificationStatus } = require('./notificationStatus');
+const { firstSubmissionPrepared } = require('./firstSubmissionPrepared');
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const validVersion = value => typeof value === 'string' && /^[0-9a-f]{16}$/i.test(value);
 function body(input, keys) {
@@ -55,7 +56,7 @@ class PcnCreationService {
     if (typeof this.documents?.listForRecords !== 'function') throw new ApiError(503, 'Document status is unavailable');
     const entry = (await this.documents.listForRecords([id])).get(id);
     if (!entry || entry.parentVersion !== record.version) throw new ApiError(409, 'Draft changed while checking documents; review again');
-    const candidate = { ...record, status: 'submitted' };
+    const candidate = firstSubmissionPrepared(record, { ...record, status:'submitted' }, user);
     const users = isInternal(user) && this.authRepository?.listUsers ? await this.authRepository.listUsers() : [];
     const settings = normalizeMailRouting(await this.repository.getNotificationSettings());
     const target = resolveNextMailTarget(candidate);

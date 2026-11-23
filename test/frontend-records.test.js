@@ -17,7 +17,7 @@ function element(tag = 'div') {
   };
 }
 
-async function recordsPage(session, result = []) {
+async function recordsPage(session, result = [], { deferInit = false } = {}) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'records.html'), 'utf8');
   const elements = new Map([...html.matchAll(/id="([^"]+)"/g)].map((match) => [match[1], element()]));
   const requests = [];
@@ -42,14 +42,37 @@ async function recordsPage(session, result = []) {
       fetch: async (url) => {
         requests.push(url);
         if (result instanceof Error) throw result;
-        return {items: typeof result === 'function' ? result() : result};
+        return {items: await (typeof result === 'function' ? result() : result)};
       }
     }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'records.js'), 'utf8'), { document, window, URL });
-  await init();
-  return { elements, requests, redirects, profiles, automatic };
+  const ready = init();
+  if (!deferInit) await ready;
+  return { elements, requests, redirects, profiles, get automatic() { return automatic; }, ready };
 }
+
+test('Records initial request stays a busy skeleton until data arrives and failed retry never leaves a loader behind', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const session = { user:{ identityProvider:'employee-code', employeeCode:'EMP001', roles:[] } };
+  const page = await recordsPage(session, () => pending, { deferInit:true });
+  await new Promise(setImmediate);
+  const rows = page.elements.get('recordsRows');
+  assert.equal(rows.children.length, 5);
+  assert.equal(rows.children[0].className, 'rd-skeleton-row');
+  assert.equal(page.elements.get('recordsCount').textContent, '—');
+  assert.equal(page.elements.get('recordsMessage').textContent, '');
+  resolve([]); await page.ready;
+  assert.match(rows.children[0].children[0].textContent, /No PCN records/);
+  assert.equal(page.elements.get('recordsRefreshButton').disabled, false);
+  let retryReject;
+  const failure = await recordsPage(session, () => new Promise((done, fail) => { retryReject = fail; }), { deferInit:true });
+  await new Promise(setImmediate); retryReject(new Error('Connection interrupted')); await failure.ready;
+  assert.match(failure.elements.get('recordsRows').children[0].children[0].textContent, /Refresh.*try again/);
+  assert.equal(failure.elements.get('recordsRefreshButton').disabled, false);
+  assert.match(failure.elements.get('recordsMessage').textContent, /Connection interrupted/);
+});
 
 test('automatic Records refresh preserves search and unchanged row identity, replacing only changed results',async()=>{
   let data=[{id:'PCN-2026-0001',supplierName:'Acme'}];

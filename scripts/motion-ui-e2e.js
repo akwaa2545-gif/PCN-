@@ -136,13 +136,27 @@ async function main() {
     await page.goto(`${origin}/admin`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.account-trigger')).toBeVisible();
     if (recordsDensityOnly) {
-      await expect(page.locator('#adminPcnRows tr')).toHaveCount(5);
+      await expect(page.locator('#adminPcnRows tr[data-pcn-id]')).toHaveCount(5);
+      const filtersToggle = page.locator('#rdFiltersToggle');
+      await expect(filtersToggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.locator('#rdAdvancedFilters')).toBeHidden();
+      await filtersToggle.click();
+      await expect(page.locator('#rdAdvancedFilters')).toBeVisible();
       // The density target must include the extra navigation visible to a Developer.
       // Showing an existing link changes only this isolated page's geometry.
       await page.locator('#adminDeveloperLink').evaluate(node => { node.hidden = false; });
       await page.evaluate(() => document.fonts.ready);
       const failures = [], verify = (condition, message) => { if (!condition) failures.push(message); };
       const wrapper = page.locator('#pcnAdminView .admin-table-wrap');
+      await page.setViewportSize({ width: 1440, height: 1000 });
+      const searchLayout = await page.locator('#adminSearchInput').evaluate(input => {
+        const label = input.closest('label'), toolbar = label.parentElement, style = getComputedStyle(toolbar);
+        return { labelWidth: label.getBoundingClientRect().width,
+          gridWidth: toolbar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+          columns: style.gridTemplateColumns };
+      });
+      report.recordsSearch = searchLayout;
+      verify(Math.abs(searchLayout.labelWidth - searchLayout.gridWidth) <= 1, '1440px Records Search spans its complete toolbar grid');
       report.recordsDensity = [];
       for (const viewport of [{ width: 1536, height: 864 }, { width: 1366, height: 768 }, { width: 1280, height: 720 }]) {
         await page.setViewportSize(viewport); await page.mouse.move(0, viewport.height - 1);
@@ -159,12 +173,16 @@ async function main() {
           const wrap = pane.querySelector('.admin-table-wrap'), table = wrap.querySelector('table');
           const controls = [...pane.querySelectorAll('.admin-table-toolbar input, .admin-table-toolbar select, .rd-filters input, .rd-filters select')];
           const filterControls = [...pane.querySelectorAll('.rd-filters input, .rd-filters select')];
+          const filterGrid = pane.querySelector('.rd-filters').getBoundingClientRect();
+          const expectedFilters = ['adminStatusFilter', 'adminRiskFilter', 'rdFilter-documentType', 'rdFilter-supplier', 'rdFilter-department', 'rdFilter-from', 'rdFilter-to', 'rdFilter-saved'];
           const cells = [...table.querySelectorAll('tbody tr:first-child td')];
           const nav = [...document.querySelectorAll('.topbar-actions > button:not([hidden]), .topbar-actions > a:not([hidden]), .create-start-dropdown, .account-trigger')];
           return { viewport: innerWidth, body: document.documentElement.scrollWidth, htmlZoom: getComputedStyle(document.documentElement).zoom, bodyZoom: getComputedStyle(document.body).zoom, scale: visualViewport.scale,
             twoColumns: right.left >= left.right - 1, sidebar: right.width, sidebarOverflow: side.scrollWidth > side.clientWidth + 1,
             topbar: document.querySelector('.topbar').getBoundingClientRect().height, navFits: nav.every(node => { const box = node.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; }),
             filterCount: filterControls.length, filterRows: new Set(filterControls.map(control => Math.round(control.getBoundingClientRect().bottom))).size,
+            expectedFilters: expectedFilters.every(id => filterControls.some(control => control.id === id)),
+            filterFits: filterControls.every(control => { const box = control.getBoundingClientRect(); return box.width > 0 && box.height > 0 && box.left >= filterGrid.left - 1 && box.right <= filterGrid.right + 1 && box.top >= filterGrid.top - 1 && box.bottom <= filterGrid.bottom + 1; }),
             maxInputHeight: Math.max(...controls.map(control => control.getBoundingClientRect().height)),
             header: table.querySelector('thead').getBoundingClientRect().height,
             maxCellPadding: Math.max(...cells.map(cell => Math.max(parseFloat(getComputedStyle(cell).paddingTop), parseFloat(getComputedStyle(cell).paddingBottom)))),
@@ -180,7 +198,7 @@ async function main() {
         verify(metrics.twoColumns && metrics.sidebar >= 270 && metrics.sidebar <= 290, label + ' keeps a 270-290px selected-document sidebar beside the table');
         verify(!metrics.sidebarOverflow, label + ' selected-document sidebar contents fit');
         verify(metrics.topbar <= 76 && metrics.navFits, label + ' complete Developer navigation fits in a compact header');
-        verify(metrics.filterCount === 5 && metrics.filterRows === 1, label + ' keeps all five additional filters on one row');
+        verify(metrics.filterCount === 8 && metrics.expectedFilters && metrics.filterFits && metrics.filterRows <= 2, label + ' keeps all eight advanced filters contained in the expanded compact grid');
         verify(metrics.maxInputHeight <= 38, label + ' filter controls are at most 38px high');
         verify(metrics.header <= 44 && metrics.maxCellPadding <= 12, label + ' table headers and cell spacing retain compact density');
         verify(metrics.minFont >= 12 && metrics.supplierFont >= 14 && metrics.materialFont >= 14, label + ' preserves legible table and Supplier/Material type');
@@ -204,7 +222,7 @@ async function main() {
       verify(await page.locator('#pcnAdminView .admin-workspace').evaluate(node => { const main = node.querySelector(':scope > .admin-panel').getBoundingClientRect(), side = node.querySelector('.admin-detail-panel').getBoundingClientRect(); return side.top >= main.bottom - 1 && document.documentElement.scrollWidth <= innerWidth; }), '1024px Records keeps the stacked layout without whole-page overflow');
       assert.deepEqual(report.errors, []); assert.deepEqual(report.external, []); assert.deepEqual(report.forbidden, []); assert.deepEqual(await repository.list(), before);
       if (failures.length) throw new Error(failures.join('; '));
-      report.checks.push('Records has compact 100% density with full Developer navigation, five filters, a right sidebar and reachable actions at 1536/1366/1280; 1024 retains stacking');
+      report.checks.push('Records has compact 100% density with full Developer navigation, eight collapsed-by-default advanced filters, a right sidebar and reachable actions at 1536/1366/1280; 1024 retains stacking');
       report.status = 'passed'; return;
     }
     if (usersLayoutOnly) {

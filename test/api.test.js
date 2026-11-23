@@ -130,8 +130,9 @@ test('exact department signer records server identity and cannot alter other sig
     { username: 'reviewer', roles: ['reviewer'] },
     { username: 'qa-approved', roles: ['qa'], department: 'qaTet', signingStep: 'approved' }
   ] }) });
-  const admin = await api.login('admin');
-  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  // Supplier submission leaves Prepared unsigned so this test exercises the manual signer.
+  const supplier = await api.login('supplier');
+  const created = await api.request('/api/pcns', { method: 'POST', session: supplier, body: unsignedPayload });
   assert.equal(created.status, 201);
   let record = created.body.data;
   const approver = await api.login('gsc-approved');
@@ -180,7 +181,8 @@ test('an unassigned administrator signs all 18 ordered steps and supplier checks
   ] }) });
   const admin = await api.login('global-admin');
   const disabled = await api.login('disabled-admin');
-  const created = await api.request('/api/pcns', { method: 'POST', session: admin, body: unsignedPayload });
+  const supplier = await api.login('supplier');
+  const created = await api.request('/api/pcns', { method: 'POST', session: supplier, body: unsignedPayload });
   assert.equal(created.status, 201);
   let record = created.body.data;
   const patch = (internalReview, session = admin) => api.request(`/api/pcns/${record.id}`, { method: 'PATCH', session,
