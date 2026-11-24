@@ -594,9 +594,9 @@ async function main() {
       icon: { family: getComputedStyle(row.querySelector('.rd-preview-button')).fontFamily, size: getComputedStyle(row.querySelector('.rd-preview-button')).fontSize }
     }));
     const compactTypography = admin.page.viewportSize().width >= 1200;
-    const tableSize = compactTypography ? '13px' : '14px', supplierSize = compactTypography ? '14px' : '16px';
+    const tableSize = compactTypography ? '13px' : '14px', supplierSize = '14px';
     for (const cell of typography.cells) { assert.match(cell.family, /PCN Table Semibold/); assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? supplierSize : tableSize); }
-    assert.match(typography.open.family, /PCN Table Semibold/); assert.equal(typography.open.size, tableSize);
+    assert.match(typography.open.family, /PCN Table Semibold/); assert.equal(typography.open.size, '12px');
     assert.match(typography.icon.family, /PCN Table Semibold/); assert.equal(typography.icon.size, tableSize);
     await expect(history).toHaveAttribute('title', 'History');
     await expect(history.locator('svg[aria-hidden="true"]')).toHaveCount(1);
@@ -642,7 +642,7 @@ async function main() {
 
     await dashboard.reset(); await page.setViewportSize({ width: 390, height: 844 }); await dashboard.fits();
     const mobileTypography = await dashboard.rows().first().evaluate(row => [...row.cells].map(cell => ({ column: cell.dataset.column || 'actions', size: getComputedStyle(cell).fontSize })));
-    for (const cell of mobileTypography) assert.equal(cell.size, ['supplierName', 'materialName'].includes(cell.column) ? '16px' : '14px', 'Mobile table typography stays unchanged');
+    for (const cell of mobileTypography) assert.equal(cell.size, '14px', 'Mobile compact table keeps legible 14px cell typography');
     await page.screenshot({ path: path.resolve('test-results/records-dashboard-mobile.png'), fullPage: true });
     await dashboard.preview(records[0].id).click(); await expect(page.locator('#rdPreviewContent')).toContainText('Dashboard material 01');
     await dialog.getByRole('tab', { name: 'Timeline', exact: true }).click(); await expect(dialog.locator('[data-workflow-stage]')).toHaveCount(6);
