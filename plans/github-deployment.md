@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-10-19. Signed `pcn-test-22-2` is installed with canonical origin `http://tet-pcn.kemet.com:8443`. Release CI, exact-release identity, SQL readiness and guarded real DNS browser login/session/CSRF/logout acceptance passed. Only the two approved nonsecret origin settings changed; private file ACLs, proxy, IIS binding, firewall scope and deployment trust anchors were retained. Repeat consumer and SYSTEM task checks returned `already_current`; final independent checks confirmed Node PID 10044 unchanged and the task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
+Updated: 2026-11-24. Signed `pcn-test-25-1` is installed at `http://tet-pcn.kemet.com:8443` with password sign-in enabled. Release CI, exact-release identity, SQL/password-schema readiness and guarded public browser acceptance passed. The protected consumer received the reviewed asset allowlist update; only `AUTH_MODE` changed in the private environment, with a protected backup and ACL retained. Repeat checks returned `already_current`, and the SYSTEM task is enabled / Ready / last result 0. See the [current Windows acceptance record](windows-test-deployment.md#current-runtime--pcn-test-25-1-password-sign-in-and-current-pcn-features) for host evidence and acceptance limits.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -14,9 +14,11 @@ Push main -> Windows Actions tests -> production runtime ZIP -> signed prereleas
                              failed check -> previous release
 ```
 
-## Pending System Settings release — not deployed
+## Runtime 25 prerequisites
 
-The 2026-10-21 local settings feature adds `system-settings.html/js/css` to the runtime allowlist and requires explicit SQL migration **008_workflow_settings.sql**. After the user approved a local startup repair, migration 008 was applied to configured `SVR120A / Scn_DB`, preserving existing business counts and PCN versions; local readiness now succeeds. SQL migration scripts remain excluded from public runtime archives and are never run by the consumer. Update the protected consumer's reviewed asset allowlist separately before selecting a release containing these assets. Earlier signed runtime evidence describes the version originally validated against migrations 001–007; no signed deployment of the settings page was performed.
+Host preflight confirmed migrations **001–010** were already applied to the shared `SVR120A / Scn_DB`; this deployment ran no migration, import or bootstrap. The independently updated protected consumer permits the System Settings assets, `notification-settings.js`, `pcn-types.js` and `pcn.png`. Its verifier and pinned public key were retained. Migration SQL remains excluded from runtime archives and is never run by the consumer.
+
+Deploy the new signed runtime while retaining `AUTH_MODE=employee-code`, verify readiness and exact service identity, then back up the protected environment and switch only `AUTH_MODE=employee-password`. The consumer rolls back WinSW XML, not the external environment, so switching the mode before the new runtime is installed would prevent runtime 22 from restarting during rollback. Password-mode readiness verifies migration 010's checksum, columns and trusted constraints.
 
 ## Build and signing contract
 
@@ -92,7 +94,7 @@ For a signing-key rotation, disable the task, update the Actions secret and pinn
 
 The workflow is scoped to the established test service and existing `Scn_DB`. Application saves and password changes still affect that database. Deployment checks do not reset passwords or create test PCN records there.
 
-## Employee-code cutover gate
+## Historical employee-code cutover gate
 
 The replacement defaults to `AUTH_MODE=employee-code`; password mode is explicit maintenance only. It reads `[KEY_Code_DB].[dbo].[tblEmployee]` on the same configured SQL server, with no source writes, synchronization or bulk import. Selected employees still require active PCN accounts and explicit roles/departments. Migration 003 retires old AD mappings and revokes their sessions/tokens; a verified, explicit source-code link preserves the intended PCN user ID, roles and ownership.
 
@@ -102,7 +104,11 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current runtime — pcn-test-22-2; internal DNS login origin
+### Current runtime — pcn-test-25-1
+
+[Actions 45309203805](https://github.com/akwaa2545-gif/PCN-/actions/runs/45309203805) published signed [pcn-test-25-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-25-1), commit `3a664b0100f523f76786a62dddbef985d07f7a0e`, after the configured security, unit/API and isolated browser gates passed. The 16,808,284-byte ZIP SHA-256 is `80ac0fbce28d16347810efd771fc4620e9248a0ed32aa27fff317e662a38e08a`. The [Windows deployment record](windows-test-deployment.md#current-runtime--pcn-test-25-1-password-sign-in-and-current-pcn-features) contains the protected-consumer/environment changes, exact runtime identity, public browser checks and their unauthenticated scope. Runtime 22 and earlier evidence below is historical.
+
+### Historical runtime — pcn-test-22-2; internal DNS login origin
 
 [Actions 39224662731, attempt 2](https://github.com/akwaa2545-gif/PCN-/actions/runs/39224662731/attempts/2) passed all configured gates in 6m 55s and published signed [pcn-test-22-2](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-22-2) from commit `db43208503ff611adebcc24fb42d226f22750bf9`. The 15,878,057-byte ZIP has SHA-256 `7046a203bb6a3ff61533b5078b0d55c96b910d6b1985133422437d762f1d97aa`. Attempt 1 stopped on an unrelated motion/Create browser-fixture undefined-model failure; two local passes of the seven-group suite supported retrying the same source without an application change. Local validation passed all 991 tests, including 20 targeted origin/configuration checks, with 88.25% line / 91.10% branch / 94.62% function coverage. An isolated DNS browser journey also passed login, host-only HTTP cookie isolation, session, CSRF rejection and logout.
 

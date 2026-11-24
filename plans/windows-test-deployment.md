@@ -1,10 +1,10 @@
-# Windows internal deployment and employee-code cutover
+# Windows internal deployment and authentication cutover
 
-Updated: 2026-10-19. Signed `pcn-test-22-2` is installed with canonical origin `http://tet-pcn.kemet.com:8443`. Release CI, exact-release identity, SQL readiness and guarded real DNS browser login/session/CSRF/logout acceptance passed. Only the two approved nonsecret origin settings changed; private file ACLs, proxy, IIS binding, firewall scope and deployment trust anchors were retained. Repeat consumer and SYSTEM task checks returned `already_current`; final independent checks confirmed Node PID 10044 unchanged and the task enabled / Ready / last result 0. Earlier runtime evidence is preserved below.
+Updated: 2026-11-24. Signed `pcn-test-25-1` is installed at `http://tet-pcn.kemet.com:8443` with `AUTH_MODE=employee-password`. Release CI, exact-release identity, SQL/password-schema readiness and guarded public desktop/mobile browser acceptance passed. The protected consumer received only the reviewed asset allowlist update; the private configuration changed only `AUTH_MODE`, with a protected backup and existing ACL retained. Repeat checks returned `already_current`, and automatic deployment is enabled / Ready / last result 0. Earlier runtime evidence is historical.
 
-## Pending System Settings release — not deployed
+## Current release prerequisites
 
-The 2026-10-21 settings feature requires explicit migration **008_workflow_settings.sql** before its updated runtime starts. The user approved this migration after the development server failed readiness; it is now applied to configured `SVR120A / Scn_DB`. It created/seeded only `pcn.WorkflowSettings` and migration metadata; before/after business counts and PCN versions were unchanged. The local server now returns HTTP 200 `ready` with eight migrations. Ordinary startup and the deployment consumer never apply migrations. The new `system-settings.html/js/css` assets must still be allowed by the separately installed protected deployment consumer before a signed release is selected. No signed runtime cutover or consumer replacement was performed.
+Read-only preflight confirmed migrations **001–010** were already applied to the shared `SVR120A / Scn_DB`. This deployment ran no DDL, import, bootstrap, PCN/account write or operational test mail. Runtime archives still exclude migration SQL. The independently updated protected consumer now permits `pcn-types.js`, the System Settings assets, `notification-settings.js` and `pcn.png`; its verifier and pinned public key were unchanged. System Settings, notification preferences, TA/SC routing, automatic closure, compact Records and first-submission GSC Prepared signing are included in runtime 25.
 
 ## Scope and retained components
 
@@ -13,7 +13,7 @@ The limited pilot runs on `THCHA-WEBHOST01`, Windows 10 Pro, at `http://tet-pcn.
 The replacement data flow is:
 
 ```text
-Browser employee code -> IIS HTTP :8443 -> Node 127.0.0.1:3000
+Browser Employee ID/password -> IIS HTTP :8443 -> Node 127.0.0.1:3000
                                            | PCN users / sessions / roles -> Scn_DB
                                            | read-only employee lookup   -> KEY_Code_DB.dbo.tblEmployee
 ```
@@ -28,7 +28,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-22-2` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-25-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -42,7 +42,7 @@ SQL passwords and signed mail/directory URLs remain outside Git, releases, WinSW
 The replacement nonsecret runtime configuration is:
 
 ```text
-AUTH_MODE=employee-code
+AUTH_MODE=employee-password
 HOST=127.0.0.1
 PORT=3000
 TRUST_PROXY=loopback
@@ -52,7 +52,7 @@ INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com
 ALLOW_INTERNAL_HTTP=true
 ```
 
-`employee-code` is the normal runtime default. Explicit `AUTH_MODE=password` is maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings and proxy secrets are removed from the replacement environment; their presence must not activate Windows mode. Normal employee-code sign-in requires neither a PCN password nor a Windows-authenticated browser.
+The code still defaults to `employee-code`; this pilot explicitly selects `employee-password`. Employee ID is checked first, followed by restricted first-use password setup or the enrolled account's password field. Passwords contain exactly eight letters/digits; profile settings provide Change password. Explicit `AUTH_MODE=password` remains maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings do not activate Windows mode.
 
 ## Internal DNS origin cutover
 
@@ -134,7 +134,21 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-### Current runtime — pcn-test-22-2; internal DNS login origin
+### Current runtime — pcn-test-25-1; password sign-in and current PCN features
+
+[Actions 45309203805](https://github.com/akwaa2545-gif/PCN-/actions/runs/45309203805) passed the configured security, unit/API and isolated browser gates and published signed [pcn-test-25-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-25-1) from commit `3a664b0100f523f76786a62dddbef985d07f7a0e`. The 16,808,284-byte ZIP has SHA-256 `80ac0fbce28d16347810efd771fc4620e9248a0ed32aa27fff317e662a38e08a`. Local validation passed **1,348 tests**, with **90.08% line / 91.81% branch / 95.13% function coverage**; the updated dependency audit reported zero vulnerabilities.
+
+The pinned consumer validated the signed archive before installing it at observed host UTC `2026-11-24T02:23:22.3652246Z`, retaining `employee-code` mode for the initial cutover. Only after the new runtime passed readiness did the protected environment switch to `AUTH_MODE=employee-password`, at observed host UTC `2026-11-24T02:24:13.4841113Z`. The initial cutover therefore remained rollback-compatible. After the password-mode switch, recovery to runtime 22 must first restore the protected employee-code environment, because the consumer restores WinSW XML only. The environment backup is `C:\SupplierPCN\deployment\password-transition-20261124-9bb119d900054de4b34d399515455c00`; its ACL was preserved and the post-switch environment SHA-256 is `ED6CCAB8DA5726C42DE555D89332633C3FF9588E4D9E00932977EC365680DD09`. No credentials, DNS, SQL/integration settings, proxy or IIS binding changed.
+
+The consumer changed only its reviewed runtime asset allowlist, with a protected backup, and has SHA-256 `A954250D205C00A9756409F651E79C4D8DBEE7D1E8F4C44397E6A5324A854DDC`. The verifier hash remained `64823DB4DB5998F8C976328D48CA4A37F1364CCC9A430255CA15DF9C6888B103`; the public-key file hash remained `04D893A9C5021114C816C9DA5BDD5D7A80EA6E061C6573CACB9196CC38EA3306`.
+
+Independent checks confirmed exact-release Node PID **1304**, WinSW parent PID **8028**, NetworkService ownership and the sole `127.0.0.1:3000` listener. Public DNS readiness and password configuration returned 200; `PCNTest` retained its HTTP `172.30.77.137:8443:` binding, and unrelated Default Web Site HTTP :80 still returned 200. Guarded public browser acceptance verified **19 matching assets**, **five private-path denials**, initial Employee-ID-only login at **1440/320 pixels**, the visible TOKIN logo and PCN favicon. Its 47 GETs made no authentication, password enrollment, business or integration requests; no blocked requests or errors occurred. This does not establish authenticated password or business-workflow acceptance.
+
+The repeat protected-consumer invocation returned `already_current`. The resumed SYSTEM task also completed successfully, enabled / Ready / last result **0**, without changing Node PID 1304 or the release. Final independent checks at observed host UTC `2026-11-24T02:26:22.2626899Z` retained the exact release, password mode, SQL readiness, environment ACL, proxy, IIS binding, deployment controls and unrelated default site.
+
+Ignored evidence under `test-results/`: `deploy-nov24-activated.json`, `deploy-nov24-password.json`, `deploy-nov24-live-acceptance.json`, `deploy-nov24-resumed.json`, `deploy-nov24-identity-final.json`, `deploy-nov24-ci25-success.log` and `release25/manifest.json`.
+
+### Historical runtime — pcn-test-22-2; internal DNS login origin
 
 [Actions 39224662731, attempt 2](https://github.com/akwaa2545-gif/PCN-/actions/runs/39224662731/attempts/2) passed all configured gates in 6m 55s and published signed [pcn-test-22-2](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-22-2) from commit `db43208503ff611adebcc24fb42d226f22750bf9`. The 15,878,057-byte ZIP has SHA-256 `7046a203bb6a3ff61533b5078b0d55c96b910d6b1985133422437d762f1d97aa`. Attempt 1 stopped on an unrelated motion/Create browser-fixture undefined-model failure; two local passes of the seven-group suite supported retrying the same source without an application change. Local validation passed all 991 tests, including 20 targeted origin/configuration checks, with 88.25% line / 91.10% branch / 94.62% function coverage. An isolated DNS browser journey also passed login, host-only HTTP cookie isolation, session, CSRF rejection and logout.
 
