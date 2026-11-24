@@ -118,6 +118,12 @@ async function main() {
     const dialog = page.locator('#pcnTimelineDialog'), events = dialog.locator('.pcn-timeline-event');
     const details = dialog.locator('#pcnTimelineDetails');
     const open = async (keyboard = false, changeHistory = true) => {
+      const fixture = allBefore.find(item => item.id === activeId);
+      assert.ok(fixture, 'The timeline target must be an existing fixture');
+      const lifecycle = ['approved', 'rejected', 'closed'].includes(fixture.status) ? 'closed' : 'open';
+      const tab = page.locator(`#rdLifecycleTab-${lifecycle}`);
+      if (await tab.getAttribute('aria-selected') !== 'true') await tab.click();
+      await expect(tab).toHaveAttribute('aria-selected', 'true');
       if (keyboard) { await eye().focus(); await page.keyboard.press('Enter'); }
       else await eye().click();
       await expect(dialog).toBeVisible();
