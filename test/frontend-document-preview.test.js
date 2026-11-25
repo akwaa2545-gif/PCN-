@@ -13,7 +13,7 @@ function fixture(options={}) {
   const window={location:{pathname:options.pathname || '/document-preview',search:options.search ?? `?id=${id}&version=${version}&request=1`,origin:'http://preview.test',assign:value=>calls.push(['redirect',value])},
     PCN_TYPES:require('../pcn-types'),
     PCN_SESSION:{require:async()=>({user:{id:'owner',identityProvider:'employee-code',employeeCode:'0000001',roles:['admin']}}),mountProfile:()=>calls.push(['profile']),
-      fetch:async(route,settings)=>{calls.push([route,settings]);if(route==='/api/master-data')return master;if(route==='/api/pcns')return [record];if(options.error)throw new Error(options.error);return {...record,...options.record};}},
+      fetch:async(route,settings)=>{calls.push([route,settings]);if(route==='/api/master-data'||route.endsWith('/master-data'))return master;if(route==='/api/pcns')return [record];if(options.error)throw new Error(options.error);return {...record,...options.record};}},
     PCN_DOCUMENT_BRIDGE:{exportStamp:require('../document-bridge').exportStamp,mount:()=>{calls.push(['bridge']);return {loaded:()=>calls.push(['bridge-loaded'])};}},
     PCN_AUTO_REFRESH:{start:()=>calls.push(['auto-refresh'])}};
   window.parent=options.topLevel?window:{postMessage:(message,origin)=>messages.push({message,origin})};
@@ -36,7 +36,7 @@ test('Dedicated preview renders the exact saved version read-only without profil
   assert.equal(f.window.rendered.record.id,f.id);
   assert.equal(f.classes.has('document-preview-only'),true);
   assert.equal(f.calls.some(([name])=>['profile','bridge','auto-refresh'].includes(name)),false);
-  assert.deepEqual(f.calls.map(([name])=>name),['/api/master-data',`/api/pcns/${f.id}`]);
+  assert.deepEqual(f.calls.map(([name])=>name),['/api/master-data',`/api/pcns/${f.id}`,`/api/pcns/${f.id}/master-data`]);
   assert.equal(f.messages.length,1);
   assert.deepEqual(JSON.parse(JSON.stringify(f.messages[0])),{origin:'http://preview.test',message:{type:'pcn-document-preview',state:'ready',id:f.id,version:f.version,request:'1'}});
 });

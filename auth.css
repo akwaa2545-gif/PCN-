@@ -749,13 +749,60 @@ body.auth-page {
 }
 
 .employee-password-mode .employee-lock-icon {
-  width:92px;
-  height:90px;
-  margin-bottom:10px;
+  display:none;
 }
 
 .employee-password-mode .employee-entry-help {
   margin-bottom:22px;
+}
+
+.employee-password-mode label[for="employeeCode"] {
+  display:block;
+  position:static;
+  width:auto;
+  height:auto;
+  margin:0 0 8px;
+  overflow:visible;
+  clip-path:none;
+  white-space:normal;
+  text-align:left;
+  color:#173967;
+  font-size:13px;
+  font-weight:650;
+}
+.employee-password-mode #employeePasswordField .employee-password-circles { display:none; }
+.employee-password-mode .employee-pin-slot,
+.employee-password-mode .employee-pin-entry:hover .employee-pin-slot { border-color:#72899c; }
+.employee-password-mode .employee-pin-entry:focus-within .employee-pin-slot.is-active { border-color:#1b4e86; }
+.employee-password-mode .employee-pin-entry:focus-within { outline:2px solid #173967; outline-offset:4px; border-radius:12px; }
+.employee-password-mode #employeePassword {
+  display:block;
+  position:static;
+  width:100%;
+  height:50px;
+  min-height:50px;
+  padding:12px 14px;
+  border:1px solid #72899c;
+  border-radius:6px;
+  background:#fff;
+  color:#142747;
+  -webkit-text-fill-color:#142747;
+  caret-color:#142747;
+  opacity:1;
+  font:inherit;
+  font-size:16px;
+  line-height:1.5;
+}
+.employee-password-mode #employeePassword:focus {
+  outline:2px solid #173967;
+  outline-offset:2px;
+}
+.employee-password-mode #employeePassword::selection { background:Highlight; color:HighlightText; -webkit-text-fill-color:HighlightText; }
+.employee-password-mode #employeePasswordField:not([hidden]) { margin-top:20px; animation:none; }
+.employee-password-mode .employee-password-control { min-height:0; }
+.employee-password-mode .employee-password-control:focus-within { outline:none; }
+@media (forced-colors:active) {
+  .employee-password-mode #employeePassword { color:CanvasText; -webkit-text-fill-color:CanvasText; caret-color:CanvasText; background:Canvas; border-color:CanvasText; }
 }
 
 @keyframes auth-password-reveal {

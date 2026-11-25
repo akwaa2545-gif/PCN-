@@ -46,7 +46,7 @@ function fixture() {
     PCN_SESSION:{async fetch(...args) {calls.push(args);return {};}}
   };
   const source = fs.readFileSync(path.join(__dirname,'..','app.js'),'utf8').replace(/\}\)\(\);\s*$/, `
-    cacheElements();
+    cacheElements(); populateSelectors=()=>{};
     showNotice = (...args) => {window.TEST_NOTICES.push(args);els.appNotice.hidden=false;els.appNoticeTitle.textContent=args[1];};
     window.TEST_UNSAVED = {state,getSubmissionSnapshot,hasUnsavedChanges,markSubmissionSaved,confirmDiscardChanges,guardBeforeUnload,guardPageNavigation,advanceWorkflowStep,syncSavedRecordKeepingEdits,pollSavedRecord,reloadRemoteRecord,handleRemoteRefreshError,
       setupPoll(fetch,apply,notice) { apiFetch=fetch;applyRemoteRecord=apply;showRemoteChange=notice; },
@@ -54,6 +54,7 @@ function fixture() {
   window.TEST_NOTICES = notices;
   vm.runInNewContext(source,{window,document,URL,URLSearchParams});
   const app = window.TEST_UNSAVED;
+  app.state.recordMasters.set('PCN-2026-0001:legacy',{formDefinitions:{rawMaterial:{id:'rawMaterial',riskOptions:[]}},commonDocuments:[],workflowBase:[],statusDefinitions:[]});
   app.state.apiReady = true;
   app.markSubmissionSaved();
   return {app,controls,prompts,calls,notices,dialog,document,elements,setModalOpen(value) {modalOpen=value;},choose(value) {elements[value?'pcnLeaveWithoutSaving':'pcnKeepEditing'].click();}};

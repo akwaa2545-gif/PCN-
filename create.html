@@ -62,7 +62,13 @@
               <label class="create-field">Manufacturer<input id="manufacturerName" data-field="manufacturerName" maxlength="180" /><small data-error="manufacturerName"></small></label>
               <label class="create-field create-field-wide">Material / chemical name <span>*</span><input id="materialName" data-field="materialName" maxlength="180" /><small data-error="materialName"></small></label>
               <label class="create-field">Change form <span>*</span><select id="changeForm" data-field="changeForm"></select><small data-error="changeForm"></small></label>
-              <label class="create-field">Risk level <span>*</span><select id="riskLevel" data-field="riskLevel"><option>RL3</option><option>RL2</option><option>RL1</option><option>RL0</option></select><small data-error="riskLevel"></small></label>
+              <div class="create-field create-risk-field"><label id="riskLevelLabel" for="riskLevelTrigger">Risk level <span aria-hidden="true">*</span></label>
+                <button id="riskLevelTrigger" type="button" class="create-risk-trigger" role="combobox" aria-haspopup="listbox" aria-controls="riskLevelOptions" aria-expanded="false" aria-labelledby="riskLevelLabel" aria-describedby="riskLevelHelp" aria-required="true" disabled><span id="riskLevelValue">RL2</span></button>
+                <select id="riskLevel" data-field="riskLevel" hidden aria-hidden="true" tabindex="-1"><option value="RL3">RL3</option><option value="RL2">RL2</option><option value="RL1">RL1</option><option value="RL0">RL0</option></select>
+                <div id="riskLevelOptions" class="create-risk-options" role="listbox" aria-labelledby="riskLevelLabel" hidden></div>
+                <p id="riskLevelHelp" class="create-risk-help">Choose a risk level to view its change descriptions.</p>
+                <small data-error="riskLevel"></small>
+              </div>
             </div>
           </section>
           <section class="create-stage" data-panel="changes" aria-labelledby="changesTitle" hidden><div class="create-section-heading"><div><p class="create-eyebrow">Step 2 of 4</p><h2 id="changesTitle" tabindex="-1">Describe the proposed change</h2><p>Explain what changes and why it is needed.</p></div></div>

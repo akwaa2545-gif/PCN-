@@ -34,18 +34,19 @@
     const employeePassword = document.getElementById('employeePassword');
     const employeeRemember = document.getElementById('employeeRemember');
     const setupForm = document.getElementById('passwordSetupForm');
+    const setupEmployeeCode = document.getElementById('setupEmployeeCode');
     const setupPassword = document.getElementById('setupPassword');
     const setupConfirmation = document.getElementById('setupConfirmPassword');
     const employeeDigits = Array.from({ length: 7 }, (_, index) => document.getElementById(`employeeDigit${index + 1}`));
     let employeeCodeFocused = false;
     let employeePreviousValue = employeeCodeInput.value;
     let employeeSigningIn = false;
-    let employeePasswordPreviousValue = '';
     let identifiedEmployeeCode = null;
     let employeeRequestVersion = 0;
     let pageActive = true;
+    let initialConfiguration = true;
     let mode = null;
-    const employeePasswordControl = passwordCircleControl('employeePassword', 'password', () => mode === 'employee-password' && !employeeForm.hidden, employeePasswordChanged);
+    const employeePasswordControl = passwordCircleControl('employeePassword', 'password', () => mode === 'employee-password' && !employeeForm.hidden);
     const setupPasswordControls = [
       passwordCircleControl('setupPassword', 'new password', () => mode === 'employee-password' && !setupForm.hidden),
       passwordCircleControl('setupConfirmPassword', 'confirm password', () => mode === 'employee-password' && !setupForm.hidden)
@@ -76,21 +77,18 @@
       const enteredValue = employeeCodeInput.value;
       renderEmployeeCode();
       if (employeePreviousValue === employeeCodeInput.value) return;
+      const previousCode = employeePreviousValue;
       employeePreviousValue = employeeCodeInput.value;
       showMessage('');
       if (mode === 'employee-password') {
         identifiedEmployeeCode = null;
-        employeePasswordControl.clear();
-        employeeRemember.checked = false;
+        if (previousCode !== '' || !/^[0-9]{7}$/.test(enteredValue)) employeePasswordControl.clear();
+        if (previousCode.length === 7) employeeRemember.checked = false;
         employeeBusy(false);
       }
-      if (['employee-code', 'employee-password'].includes(mode) && /^[0-9]{7}$/.test(enteredValue)) signInEmployee();
-    }
-    function employeePasswordChanged() {
-      const value = employeePassword.value;
-      if (employeePasswordPreviousValue === value) return;
-      employeePasswordPreviousValue = value;
-      if (pageActive && !employeeForm.hidden && !employeeSigningIn && passwordEntryAvailable() && /^[A-Za-z0-9]{8}$/.test(value)) signInEmployee();
+      if (['employee-code', 'employee-password'].includes(mode) && /^[0-9]{7}$/.test(enteredValue)) {
+        signInEmployee({ identifyOnly: mode === 'employee-password' });
+      }
     }
     employeeCodeInput.addEventListener('input', employeeCodeChanged);
     employeeCodeInput.addEventListener('change', employeeCodeChanged);
@@ -174,44 +172,44 @@
     }
     function maskEmployeePassword() { employeePasswordControl.mask(); }
     function passwordEntryAvailable() {
-      return mode === 'employee-password' && /^[0-9]{7}$/.test(employeeCodeInput.value)
-        && identifiedEmployeeCode === employeeCodeInput.value;
+      return mode === 'employee-password';
     }
     function renderEmployeeEntry() {
       const passwordReady = passwordEntryAvailable();
       employeePasswordField.hidden = !passwordReady;
-      employeePassword.required = passwordReady;
+      employeePassword.required = false;
       employeeForm.classList.toggle('employee-password-mode', mode === 'employee-password');
-      document.getElementById('employeeEntryTitle').textContent = passwordReady ? 'Enter your password' : 'Enter your Employee ID';
+      document.getElementById('employeeEntryTitle').textContent = passwordReady ? 'Sign in' : 'Enter your Employee ID';
       document.getElementById('employeeEntryHelp').textContent = passwordReady
-        ? 'Enter your password to sign in.' : mode === 'employee-password'
-          ? 'Enter your 7-digit Employee ID to continue.' : 'Enter your 7-digit Employee ID to sign in automatically.';
+        ? 'Your Employee Number'
+        : 'Enter your 7-digit Employee ID to sign in automatically.';
     }
-    function employeeBusy(value) {
+    function employeeBusy(value, identifying = false) {
       employeeSigningIn = value;
-      employeeCodeInput.disabled = value;
+      employeeCodeInput.readOnly = value && identifying;
+      employeeCodeInput.disabled = value && !identifying;
       renderEmployeeEntry();
-      const identifying = mode === 'employee-password' && !passwordEntryAvailable();
       employeeForm.setAttribute('aria-busy', String(value));
       employeeForm.querySelectorAll('button').forEach(button => { button.disabled = value; });
       employeeForm.querySelectorAll('button[type="submit"]').forEach(button => {
-        button.textContent = value ? (identifying ? 'Checking…' : 'Signing in…') : (identifying ? 'Continue' : 'Sign in');
+        button.textContent = value ? (identifying ? 'Checking…' : 'Signing in…') : 'Sign in';
       });
-      employeePasswordControl.setDisabled(value || !passwordEntryAvailable());
-      employeeRemember.disabled=value || !passwordEntryAvailable();
+      employeePasswordControl.setDisabled((value && !identifying) || !passwordEntryAvailable());
+      employeeRemember.disabled=(value && !identifying) || !passwordEntryAvailable();
       if(value)maskEmployeePassword();
     }
-    function showEmployeeSignIn(text = '', tone = 'error', passwordReady = false) {
+    function showEmployeeSignIn(text = '', tone = 'error', preserveCredentials = false) {
       authIntro.hidden = true; loginForm.hidden = true; changeForm.hidden = true; setupForm.hidden = true;
       employeeForm.hidden = false;
-      identifiedEmployeeCode = passwordReady && /^[0-9]{7}$/.test(employeeCodeInput.value) ? employeeCodeInput.value : null;
-      employeePasswordControl.clear(); employeeRemember.checked = false;
+      identifiedEmployeeCode = null;
+      if (!preserveCredentials) { employeePasswordControl.clear(); employeeRemember.checked = false; }
       employeeBusy(false); renderEmployeeCode(); employeePreviousValue = employeeCodeInput.value;
       showMessage(text, tone);
     }
     function showPasswordSetup() {
       authIntro.hidden = false; loginForm.hidden = true; employeeForm.hidden = true; changeForm.hidden = true;
       setupForm.hidden = false; employeePasswordControl.clear(); clearSetupPasswords(); showMessage('');
+      setupEmployeeCode.value = /^[0-9]{7}$/.test(employeeCodeInput.value) ? employeeCodeInput.value : '';
       document.getElementById('authTitle').textContent = 'Set your password';
       document.getElementById('authDescription').textContent = 'Create your password before opening the PCN portal.';
       setupPassword.focus();
@@ -239,19 +237,20 @@
         else window.location.assign(destinationFor(session.user));
       });
     });
-    async function signInEmployee() {
+    async function signInEmployee({ identifyOnly = false } = {}) {
       if (!pageActive || !['employee-code', 'employee-password'].includes(mode) || employeeForm.hidden || employeeSigningIn) return;
       const requestVersion = ++employeeRequestVersion;
       const requestMode = mode;
       const code = employeeCodeInput.value;
-      const identifying = mode === 'employee-password' && !passwordEntryAvailable();
+      const identifying = mode === 'employee-password' && (identifyOnly || !employeePassword.value);
+      let preservePassword = false;
       try {
         const credentials = employeeLoginBody(code, !identifying && mode === 'employee-password' ? employeePassword.value : undefined,
           !identifying && mode === 'employee-password' && employeeRemember.checked);
-        if (!identifying && mode === 'employee-password' && !employeePassword.value) throw new Error('Enter your 8-character password.');
+        if (!identifying && mode === 'employee-password' && !/^[A-Za-z0-9]{8}$/.test(employeePassword.value)) throw new Error('Use exactly 8 letters or numbers for your password.');
         const body = identifying ? {employeeCode:credentials.employeeCode, identifyOnly:true} : credentials;
         employeePreviousValue = code;
-        employeeBusy(true);
+        employeeBusy(true, identifying);
         showMessage('');
         const session = await window.PCN_SESSION.fetch('/api/auth/login', { method: 'POST', body: JSON.stringify(body) });
         if (!pageActive || requestVersion !== employeeRequestVersion || mode !== requestMode) return;
@@ -261,20 +260,28 @@
         }
         if (identifying && session?.authenticated === false && session.passwordRequired === true
           && Object.keys(session).every(key => ['authenticated', 'passwordRequired'].includes(key))) {
-          identifiedEmployeeCode = code; employeeBusy(false); employeePassword.focus(); return;
+          identifiedEmployeeCode = code; preservePassword = true; employeeBusy(false);
+          if (!identifyOnly || document.activeElement === employeeCodeInput) employeePassword.focus();
+          if (!identifyOnly && !employeePassword.value) showMessage('Enter your password to sign in.');
+          return;
         }
         if (mode === 'employee-password' && session?.authenticated === true && session.user?.passwordSetupRequired === true) {
           if (session.user.employeeCode && session.user.employeeCode !== code) throw new Error('Employee sign-in did not complete. Please try again.');
           employeeBusy(false); showPasswordSetup(); return;
         }
         if (identifying || session?.authenticated !== true) throw new Error('Employee sign-in did not complete. Please try again.');
+        if (mode === 'employee-password') {
+          employeeCodeInput.disabled = false;
+          employeePassword.disabled = false;
+        }
         window.location.assign(destinationFor(session.user));
+        preservePassword = true;
       } catch (error) {
         if (!pageActive || requestVersion !== employeeRequestVersion || mode !== requestMode) return;
         employeeBusy(false);
         showMessage(error.message);
       } finally {
-        if (pageActive && requestVersion === employeeRequestVersion) employeePasswordControl.clear();
+        if (pageActive && requestVersion === employeeRequestVersion && !preservePassword) employeePasswordControl.clear();
       }
     }
     employeeForm.addEventListener('submit', (event) => {
@@ -293,7 +300,7 @@
             method: 'POST', body: JSON.stringify({ newPassword, confirmPassword })
           });
           if (result.authenticated !== false || result.passwordSet !== true) throw new Error('Password setup did not complete. Sign in again to check your account.');
-          showEmployeeSignIn('Password set. Sign in with your Employee ID and password.', 'success', true);
+          showEmployeeSignIn('Password set. Sign in with your Employee ID and password.', 'success');
           if (passwordEntryAvailable()) employeePassword.focus(); else employeeCodeInput.focus();
         } finally { clearSetupPasswords(); }
       });
@@ -304,6 +311,7 @@
     window.addEventListener?.('pagehide', () => {
       pageActive = false; employeeRequestVersion++; identifiedEmployeeCode = null; employeeRemember.checked = false;
       employeePasswordControl.clear(); clearSetupPasswords();
+      setupEmployeeCode.value = '';
       for (const id of ['password', 'currentPassword', 'newPassword', 'confirmPassword']) document.getElementById(id).value = '';
     });
     window.addEventListener?.('pageshow', event => { if (event.persisted) configure(); });
@@ -326,6 +334,8 @@
     });
     document.getElementById('signOutButton').addEventListener('click', () => submit(changeForm, () => window.PCN_SESSION.logout()));
     async function configure() {
+      const preserveAutofill = initialConfiguration;
+      initialConfiguration = false;
       pageActive = true; employeeRequestVersion++; identifiedEmployeeCode = null; employeeSigningIn = false;
       mode = null;
       loginForm.hidden = true;
@@ -333,8 +343,10 @@
       changeForm.hidden = true;
       setupForm.hidden = true;
       employeePasswordField.hidden = true;
-      employeePassword.disabled = true;
-      employeePasswordControl.clear(); clearSetupPasswords();
+      employeePassword.disabled = !preserveAutofill;
+      if (!preserveAutofill) employeePasswordControl.clear();
+      clearSetupPasswords();
+      setupEmployeeCode.value = '';
       authIntro.hidden = true;
       retryButton.hidden = true;
       showMessage('Loading sign-in options...');
@@ -354,11 +366,15 @@
           authIntro.hidden = mode !== 'password';
           document.getElementById('authDescription').textContent = 'Enter your credentials to continue to the PCN portal.';
           if (['employee-code', 'employee-password'].includes(mode)) {
+            const enteredCode = employeeCodeInput.value;
             const changed = mode === 'employee-password' && new URLSearchParams(window.location.search).get('passwordChanged') === '1';
-            showEmployeeSignIn(changed ? 'Password changed. Sign in with your new password.' : '', changed ? 'success' : 'error');
+            showEmployeeSignIn(changed ? 'Password changed. Sign in with your new password.' : '', changed ? 'success' : 'error', mode === 'employee-password' && preserveAutofill && !changed);
+            if (mode === 'employee-password' && /^[0-9]{7}$/.test(enteredCode) && enteredCode === employeeCodeInput.value) {
+              signInEmployee({ identifyOnly: true });
+            }
           } else document.getElementById('username').focus();
         }
-      } catch (error) { mode = null; authIntro.hidden = false; showMessage(error.message); retryButton.hidden = false; retryButton.focus(); }
+      } catch (error) { mode = null; employeePasswordControl.clear(); clearSetupPasswords(); authIntro.hidden = false; showMessage(error.message); retryButton.hidden = false; retryButton.focus(); }
     }
     retryButton.addEventListener('click', () => configure());
     await configure();

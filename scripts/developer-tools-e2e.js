@@ -56,6 +56,7 @@ async function main() {
     const workflowTab = page.getByRole('tab', { name: 'Workflow', exact: true });
     const transactionsTab = page.getByRole('tab', { name: 'Document Transactions', exact: true });
     const adminToolsTab = page.getByRole('tab', { name: 'Admin tools', exact: true });
+    const correctionsTab = page.getByRole('tab', { name: 'Corrections', exact: true });
     await workflowTab.focus();await workflowTab.press('End');
     await expect(adminToolsTab).toBeFocused();await expect(adminToolsTab).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#adminToolsPanel')).toBeVisible();await expect(page.locator('#workflowPanel')).toBeHidden();
@@ -63,14 +64,16 @@ async function main() {
     await workflowTab.press('ArrowLeft');await expect(adminToolsTab).toBeFocused();
     await adminToolsTab.press('Home');await expect(workflowTab).toBeFocused();
     await workflowTab.press('ArrowRight');await expect(transactionsTab).toBeFocused();
-    await transactionsTab.press('ArrowRight');await expect(adminToolsTab).toBeFocused();
-    await adminToolsTab.press('ArrowLeft');await expect(transactionsTab).toBeFocused();
+    await transactionsTab.press('ArrowRight');await expect(correctionsTab).toBeFocused();
+    await correctionsTab.press('ArrowRight');await expect(adminToolsTab).toBeFocused();
+    await adminToolsTab.press('ArrowLeft');await expect(correctionsTab).toBeFocused();
+    await correctionsTab.press('ArrowLeft');await expect(transactionsTab).toBeFocused();
     await transactionsTab.press('End');await expect(adminToolsTab).toBeFocused();
     const toolPanel = page.locator('#adminToolsPanel');
     for (const [name, href] of [['System settings', '/system-settings'], ['Mail Routing', '/admin#mail-routing'], ['User access', '/admin#users']]) {
       await expect(toolPanel.getByRole('link', { name: new RegExp(name, 'i') })).toHaveAttribute('href', href);
     }
-    check('Developer opens Admin tools without selecting a PCN; all three tabs support Home, End and arrow-key wrapping');
+    check('Developer opens Admin tools without selecting a PCN; all four tabs support Home, End and arrow-key wrapping');
     await page.screenshot({ path: path.resolve('test-results/developer-admin-tools-desktop.png'), fullPage: true });
     const returnToTools = async () => {
       await page.goto(`${origin}/developer`);await expect(page.locator('#developerMain')).toBeVisible();

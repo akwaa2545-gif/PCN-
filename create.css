@@ -414,6 +414,26 @@
 @media (prefers-reduced-motion:reduce) {
   .create-type-card {transition:none}
 }
+.create-risk-field { min-width:0; }
+.create-risk-field > label { display:inline-flex; flex-direction:row; align-items:center; gap:4px; font:inherit; color:inherit; }
+.create-risk-field > label > span { color:#a52626; }
+.create-risk-trigger { display:flex; justify-content:space-between; align-items:center; width:100%; min-height:45px; padding:11px 12px; background:#fff; color:var(--ink); border:1px solid #72899c; border-radius:2px; font-size:14px!important; font-weight:400; text-align:left; }
+.create-risk-trigger::after { content:''; width:8px; height:8px; margin-right:3px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg); }
+.create-risk-trigger:disabled { cursor:default!important; background:#f1f4f7; color:var(--muted); }
+.create-risk-trigger:focus-visible { outline:3px solid #0074d4; outline-offset:3px; }
+.create-risk-help { width:100%; color:var(--muted); font-size:12px; line-height:1.6; font-weight:400; overflow-wrap:anywhere; margin:0!important; }
+.create-risk-options { position:fixed; z-index:70; max-height:480px; overflow-y:auto; overscroll-behavior:contain; border:1px solid #72899c; background:#fff; box-shadow:0 8px 22px #17355026; box-sizing:border-box; }
+.create-risk-option { position:relative; padding:15px 18px; border:2px solid transparent; border-bottom-color:var(--line); color:var(--ink); cursor:pointer; overflow-wrap:anywhere; }
+.create-risk-option:last-child { border-bottom-color:transparent; }
+.create-risk-option > strong { display:block; color:var(--navy); font-size:16px; line-height:1.5; padding-right:28px; }
+.create-risk-option ul { margin:8px 0 0; padding-left:18px; font-size:13px; line-height:1.65; font-weight:400; }
+.create-risk-option li + li { margin-top:6px; }
+.create-risk-option p { margin:7px 0 0; font-size:12px; font-weight:400; color:var(--muted); }
+.create-risk-check { position:absolute; top:15px; right:18px; color:var(--navy); font-size:19px; }
+.create-risk-option[aria-selected="true"] { background:#eef5fb; }
+.create-risk-option:hover { background:#f5f8fb; }
+.create-risk-option[data-active="true"] { border-color:#0074d4; }
+@media (max-width:700px) { .create-risk-option { padding:13px 12px; } .create-risk-check { top:13px; right:12px; } }
 @media (max-width:420px) {
   .create-type-options {gap:10px}
   .create-type-card {padding:16px 12px;gap:8px;min-height:96px}

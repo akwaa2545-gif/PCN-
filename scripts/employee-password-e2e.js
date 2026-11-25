@@ -11,7 +11,7 @@ const { ApiError } = require('../src/apiError');
 const { createRequestHandler } = require('../src/httpServer');
 const { memoryRepository } = require('../test/helpers/apiHarness');
 const masterData = require('../src/masterData');
-const { exerciseEmployeeCircleControls, exerciseAutomaticPassword } = require('./helpers/employee-password-browser');
+const { exerciseEmployeePasswordControls, exerciseExplicitPassword, exercisePasswordManagerHandoff, exerciseInstalledEdgePasswordManager } = require('./helpers/employee-password-browser');
 
 const output = path.resolve('test-results');
 const artifact = name => path.join(output, `employee-password-${name}`);
@@ -82,21 +82,20 @@ class EmployeeLoginPage {
   async open(returnTo = '/admin') {
     await this.page.goto(`${this.origin}/login?returnTo=${encodeURIComponent(returnTo)}`);
     await expect(this.page.locator('#employeeLoginForm')).toBeVisible();
-    await expect(this.page.locator('#employeePassword')).toBeHidden();
+    await expect(this.page.locator('#employeePassword')).toBeVisible();
   }
   async signIn(code, password = '', remember = false) {
     const identifier = this.page.locator('#employeeCode');
-    const unchanged = await identifier.inputValue() === code;
     await identifier.fill(code);
-    if (unchanged && !await this.page.locator('#employeePassword').isVisible()) {
-      await this.page.locator('#employeeLoginForm button[type=submit]').click();
+    if (!password) {
+      await expect.poll(async () => await this.page.locator('#passwordSetupForm').isVisible()
+        || await this.page.locator('#employeeAuthMessage').textContent() !== '').toBe(true);
+      return;
     }
-    await expect.poll(async () => await this.page.locator('#passwordSetupForm').isVisible()
-      || await this.page.locator('#employeePassword').isVisible()).toBe(true);
-    if (!password) return;
     await expect(this.page.locator('#employeePassword')).toBeVisible();
     await this.page.getByRole('checkbox', { name: 'Remember me', exact: true }).setChecked(remember);
     await this.page.locator('#employeePassword').fill(password);
+    await this.page.locator('#employeeLoginForm button[type=submit]').click();
   }
   async setup(password) {
     await expect(this.page.locator('#passwordSetupForm')).toBeVisible();
@@ -201,17 +200,34 @@ async function main() {
       assert(remaining > expected - 15000 && remaining <= expected,
         `Expected a ${days}-day session; actual remaining ${remaining}ms`);
     };
+    if (process.argv.includes('--password-manager-only')) {
+      await login.open();
+      await page.locator('#employeeCode').fill('0011001');
+      await expect(page.locator('#passwordSetupForm')).toBeVisible();
+      await expect(page.locator('#passwordSetupForm input[autocomplete="username"]')).toHaveValue('0011001');
+      const setup = await session(mainContext);
+      assert.equal((await post(mainContext, '/api/auth/setup-password', { newPassword: passwords.numeric,
+        confirmPassword: passwords.numeric }, setup.csrfToken)).status(), 200);
+      const options = { origin, code: '0011001', password: passwords.numeric, artifact, checked, report };
+      const managerContext = await openContext();
+      await exercisePasswordManagerHandoff({ ...options, context: managerContext });
+      await exerciseInstalledEdgePasswordManager(options);
+      assert.deepEqual(report.errors, []);
+      assert.deepEqual(report.external, []);
+      report.status = 'passed';
+      return;
+    }
     await login.open();
-    await expect(page.locator('#employeePasswordField .employee-password-circles > span')).toHaveCount(8);
+    await expect(page.locator('#employeePasswordField .employee-password-circles')).toBeHidden();
     const identifier = page.locator('#employeeCode');
     const employeeSubmit = page.locator('#employeeLoginForm button[type=submit]');
-    await expect(employeeSubmit).toContainText('Continue');
+    await expect(employeeSubmit).toContainText('Sign in');
     for (const width of [1440, 320]) {
       await page.setViewportSize({ width, height: width < 700 ? 844 : 1000 });
-      await expect(page.locator('#employeePasswordField')).toBeHidden();
-      await expect(page.getByRole('checkbox', { name: 'Remember me', exact: true })).toBeHidden();
+      await expect(page.locator('#employeePasswordField')).toBeVisible();
+      await expect(page.getByRole('checkbox', { name: 'Remember me', exact: true })).toBeVisible();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-      await page.screenshot({ path: artifact(`identifier-first-${width === 1440 ? 'desktop' : 'mobile-320'}.png`), fullPage: true });
+      await page.screenshot({ path: artifact(`standard-empty-${width === 1440 ? 'desktop' : 'mobile-320'}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
     await identifier.fill('001100');
@@ -220,12 +236,12 @@ async function main() {
     await identifier.fill('9999999');
     await expect(page.locator('#employeeAuthMessage')).not.toBeEmpty();
     await expect(identifier).toBeEnabled();
-    await expect(page.locator('#employeePasswordField')).toBeHidden();
-    assert.equal(report.authRequests.length, 1, 'An unknown seven-digit ID is checked once');
+    await expect(page.locator('#employeePasswordField')).toBeVisible();
+    assert.equal(report.authRequests.length, 1, 'An unknown seven-digit ID is checked automatically once');
     await employeeSubmit.click();
     await expect(identifier).toBeEnabled();
     await expect(page.locator('#employeeAuthMessage')).not.toBeEmpty();
-    assert.equal(report.authRequests.length, 2, 'Continue retries the same failed identifier once');
+    assert.equal(report.authRequests.length, 2, 'Sign in retries the same failed identifier once');
     assert.equal(authentication.state.sessions.length, 0, 'Invalid IDs cannot create a session');
     let releaseIdentification, heldIdentificationCount = 0;
     const identificationGate = new Promise(resolve => { releaseIdentification = resolve; });
@@ -238,13 +254,17 @@ async function main() {
     await page.route('**/api/auth/login', holdIdentification);
     try {
       await identifier.fill('0011001');
-      await expect(identifier).toBeDisabled();
+      await expect.poll(() => heldIdentificationCount).toBe(1);
+      await expect(identifier).toBeEnabled();
+      await expect(identifier).toHaveJSProperty('readOnly', true);
+      await expect(page.locator('#employeePassword')).toBeEnabled();
+      await expect(page.locator('#employeeRemember')).toBeEnabled();
       await expect(employeeSubmit).toBeDisabled();
       await identifier.dispatchEvent('change');
       await page.locator('#employeeLoginForm').dispatchEvent('submit');
       releaseIdentification();
       await expect(page.locator('#passwordSetupForm')).toBeVisible();
-      assert.equal(heldIdentificationCount, 1, 'Seven digits auto-identify once despite change/submit events while pending');
+      assert.equal(heldIdentificationCount, 1, 'Automatic ID check runs once despite change/submit events while pending');
     } finally {
       releaseIdentification();
       await page.unroute('**/api/auth/login', holdIdentification);
@@ -252,7 +272,9 @@ async function main() {
     await assertPasswordCircles(page, '', false, 'setupPassword');
     await assertPasswordCircles(page, '', false, 'setupConfirmPassword');
     await page.screenshot({ path: artifact('setup-circles-empty-desktop.png'), fullPage: true });
-    await assertPasswordCircles(page, '');
+    await expect(page.locator('#employeePassword')).toHaveValue('');
+    await expect(page.locator('#passwordSetupForm input[autocomplete="username"]')).toHaveValue('0011001');
+    await expect(page.locator('#passwordSetupForm input[autocomplete="username"]')).toHaveAttribute('readonly', '');
     const setupSession = await session(mainContext);
     assert.equal(setupSession.user.passwordSetupRequired, true);
     assert.equal(setupSession.user.mustChangePassword, true);
@@ -265,7 +287,7 @@ async function main() {
     }
     assert.equal((await post(mainContext, '/api/pcn-drafts', { clientDraftKey: crypto.randomUUID(), document: { documentType: 'ta' } }, setupSession.csrfToken)).status(), 403);
     assert.equal((await post(mainContext, '/api/auth/change-password', { currentPassword: passwords.numeric, newPassword: passwords.letters, confirmPassword: passwords.letters }, setupSession.csrfToken)).status(), 403);
-    checked('ID-only entry rejects incomplete/unknown IDs, allows retry, and auto-identifies first use once; pending controls prevent duplicate requests');
+    checked('Seven-digit ID automatically checks unknown/first-use accounts once and supports retry; only identity is checked and pending controls prevent duplicates');
     checked('First-use identification creates only ten-minute setup access and cannot read PCNs, profile, administration or perform writes');
 
     const setupWrites = authentication.state.writes.length;
@@ -433,24 +455,25 @@ async function main() {
       await assertPasswordCircles(page, '', false, inputId);
     }
     assert.match(authentication.state.users.find(user => user.employeeCode === '0011001').passwordHash, /^\$argon2id\$/);
-    const { remember, passwordControl } = await exerciseEmployeeCircleControls({
-      page, report, passwords, artifact, checked, assertPasswordCircles
+    const { remember, passwordControl } = await exerciseEmployeePasswordControls({
+      page, report, passwords, artifact, checked
     });
     await login.open();
     await identifier.fill('0011001');
     await expect(passwordControl).toBeVisible();
+    await expect(employeeSubmit).toBeEnabled();
     const requestsBeforeIdEdit = report.authRequests.length;
     await remember.setChecked(true);
     await passwordControl.fill(passwords.mixed.slice(0, 7));
     await page.getByRole('button', { name: 'Show password', exact: true }).click();
     await identifier.fill('001100');
-    await expect(page.locator('#employeePasswordField')).toBeHidden();
+    await expect(page.locator('#employeePasswordField')).toBeVisible();
     await expect(passwordControl).toHaveValue('');
     await expect(passwordControl).toHaveAttribute('type', 'password');
     await expect(page.locator('#employeeRemember')).not.toBeChecked();
-    await expect(page.locator('#employeeRemember')).toBeDisabled();
-    await expect(employeeSubmit).toContainText('Continue');
-    assert.equal(report.authRequests.length, requestsBeforeIdEdit, 'Editing to an incomplete ID clears the challenge without submitting');
+    await expect(page.locator('#employeeRemember')).toBeEnabled();
+    await expect(employeeSubmit).toContainText('Sign in');
+    assert.equal(report.authRequests.length, requestsBeforeIdEdit, 'Editing to an incomplete ID clears the previous password without submitting');
     assert.equal((await post(mainContext, '/api/auth/login', { employeeCode: '0011001' })).status(), 401,
       'A normal enrolled login without a password remains unauthorized');
     const failuresBeforeChallenge = authentication.state.users.find(user => user.employeeCode === '0011001').failedLoginCount;
@@ -473,14 +496,14 @@ async function main() {
     assert.equal((await mainContext.request.get(`${origin}/api/pcns`)).status(), 401);
     await identifier.dispatchEvent('change');
     await passwordControl.fill(passwords.numeric.slice(0, 7));
-    assert.equal(report.authRequests.length, requestsBeforeIdEdit + 1, 'The challenge is checked once; entering seven password characters never submits');
+    assert.equal(report.authRequests.length, requestsBeforeIdEdit + 1, 'The automatic ID challenge is checked once; password editing never submits');
     for (const width of [1440, 320]) {
       await page.setViewportSize({ width, height: width < 700 ? 844 : 1000 });
-      await page.screenshot({ path: artifact(`identifier-password-${width === 1440 ? 'desktop' : 'mobile-320'}.png`), fullPage: true });
+      await page.screenshot({ path: artifact(`standard-password-${width === 1440 ? 'desktop' : 'mobile-320'}.png`), fullPage: true });
     }
     await page.setViewportSize({ width: 1440, height: 1000 });
-    checked('Editing Employee ID clears and hides password/remember; enrolled identification expands the challenge without cookies, sessions or failure-count changes');
-    await exerciseAutomaticPassword({ page, report, passwords, artifact, checked, assertPasswordCircles });
+    checked('Editing Employee ID clears the previous password while fields remain visible; automatic enrolled identification creates no cookies, sessions or failure-count changes');
+    await exerciseExplicitPassword({ page, report, passwords, artifact, checked });
     await passwordControl.fill(passwords.wrong.slice(0, 7));
     await page.getByRole('button', { name: 'Show password', exact: true }).click();
     let releaseLogin;
@@ -491,7 +514,7 @@ async function main() {
       await login.signIn('0011001', passwords.wrong, true);
       await expect(passwordControl).toHaveAttribute('type', 'password');
       await expect(passwordControl).toBeDisabled();
-      await assertPasswordCircles(page, passwords.wrong);
+      await expect(passwordControl).toHaveValue(passwords.wrong);
       await expect(page.getByRole('button', { name: 'Show password', exact: true })).toBeDisabled();
       await expect(remember).toBeDisabled();
       await expect(page.locator('#employeePasswordToggleText')).toHaveText('Show');
@@ -507,7 +530,7 @@ async function main() {
     await expect(page.getByRole('button', { name: 'Show password', exact: true })).toBeEnabled();
     await expect(passwordControl).toHaveValue('');
     await expect(passwordControl).toHaveAttribute('type', 'password');
-    await assertPasswordCircles(page, '');
+    await expect(passwordControl).toHaveValue('');
     assert.equal((await session(mainContext)).authenticated, false);
     const requestsAfterError = report.authRequests.length;
     await passwordControl.dispatchEvent('change');
@@ -656,6 +679,11 @@ async function main() {
       assert.equal((await context.request.get(`${origin}/api/pcns`)).status(), 401);
     }
     checked('Old null-method and code-only cookies cannot become password-authenticated sessions after enrollment');
+    authentication.service.attempts.clear(); // The independent password-manager scenario uses only synthetic fixture sessions.
+    const managerOptions = { origin, code: '0011001', password: passwords.mixed, artifact, checked, report };
+    const managerContext = await openContext();
+    await exercisePasswordManagerHandoff({ ...managerOptions, context: managerContext });
+    await exerciseInstalledEdgePasswordManager(managerOptions);
     assert.deepEqual(businessWrites, []);
     assert.deepEqual(report.errors, []);
     assert.deepEqual(report.external, []);

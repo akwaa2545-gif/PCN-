@@ -24,6 +24,7 @@
     <div class="developer-tabs" role="tablist" aria-label="Developer tools">
       <button id="workflowTab" type="button" role="tab" aria-controls="workflowPanel" aria-selected="true">Workflow</button>
       <button id="transactionsTab" type="button" role="tab" aria-controls="transactionsPanel" aria-selected="false" tabindex="-1">Document Transactions</button>
+      <button id="correctionsTab" type="button" role="tab" aria-controls="correctionsPanel" aria-selected="false" tabindex="-1">Corrections</button>
       <button id="adminToolsTab" type="button" role="tab" aria-controls="adminToolsPanel" aria-selected="false" tabindex="-1">Admin tools</button>
     </div>
     <section id="workflowPanel" role="tabpanel" aria-labelledby="workflowTab" class="developer-panel">
@@ -36,6 +37,32 @@
       <p class="developer-date-note">Dates are shown and filtered in UTC.</p>
       <div class="developer-table-scroll" tabindex="0" role="region" aria-label="PCN change history"><table class="developer-table"><colgroup><col class="developer-col-time" /><col class="developer-col-actor" /><col class="developer-col-revision" /><col class="developer-col-field" /><col class="developer-col-value" /><col class="developer-col-value" /></colgroup><thead><tr><th scope="col">Time (UTC)</th><th scope="col">Changed by</th><th scope="col">Revision</th><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody id="transactionRows"><tr><td colspan="6">Select a PCN to view recorded changes.</td></tr></tbody></table></div>
       <div class="developer-pagination"><p id="transactionCount" role="status" aria-live="polite">0 changes</p><div><button id="transactionPrevious" type="button" class="developer-button" disabled>Previous</button><button id="transactionNext" type="button" class="developer-button" disabled>Next</button></div></div>
+    </section>
+    <section id="correctionsPanel" role="tabpanel" aria-labelledby="correctionsTab" class="developer-panel" hidden>
+      <h2>Correct PCN documents</h2>
+      <p>Edit up to 20 documents. Signatures stay in place.</p>
+      <ol class="developer-correction-steps" aria-label="Correction steps"><li id="correctionStepSelect" aria-current="step"><span>1</span> Select documents</li><li id="correctionStepEdit"><span>2</span> Edit content</li><li id="correctionStepReview"><span>3</span> Review changes</li></ol>
+      <div id="correctionsControls">
+        <section id="correctionSelectionStage" aria-labelledby="correctionSelectionHeading">
+          <div class="developer-correction-section-heading"><h3 id="correctionSelectionHeading" tabindex="-1">Select documents</h3><span id="correctionSelectionCount" role="status" aria-live="polite">0 selected</span></div>
+          <label>Find documents<input id="correctionSearch" type="search" placeholder="PCN number, supplier or material" /></label>
+          <fieldset class="developer-correction-picker"><legend>PCN documents</legend><div id="correctionChoices"></div></fieldset>
+          <p id="correctionSelectionHelp" class="developer-correction-help" hidden>Edits are kept. Return to editing or discard edits to change documents.</p>
+          <div class="developer-correction-actions"><button id="loadCorrections" type="button" class="developer-button developer-button-primary" disabled>Edit selected documents</button><button id="resumeCorrectionEditing" type="button" class="developer-button" hidden>Return to editing</button></div>
+        </section>
+        <section id="correctionEditStage" aria-labelledby="correctionEditHeading" hidden>
+          <div class="developer-correction-section-heading"><div><h3 id="correctionEditHeading" tabindex="-1">Edit content</h3><p id="correctionLoadedSummary" class="developer-correction-help"></p></div><button id="changeCorrectionSelection" type="button" class="developer-button">Change selection</button></div>
+          <details class="developer-shared-correction" id="sharedCorrectionTools"><summary>Set the same value on these documents</summary><div class="developer-correction-shared-fields"><label>Field<select id="sharedCorrectionField"></select></label><label>New value<textarea id="sharedCorrectionValue" rows="2" maxlength="2000"></textarea></label><button id="setSharedCorrection" type="button" class="developer-button" disabled>Set on loaded documents</button></div></details>
+          <div id="correctionEditors"></div>
+          <footer class="developer-correction-footer" id="correctionEditFooter">
+            <p id="correctionChangeCount" class="developer-correction-change-count" role="status" aria-live="polite" aria-atomic="true">0 documents changed</p>
+            <label class="developer-correction-reason">Reason for this correction <span class="developer-correction-required">Required · saved in history</span><textarea id="correctionReason" rows="2" maxlength="1200" required aria-describedby="correctionReviewHint"></textarea></label>
+            <div class="developer-correction-footer-actions"><p id="correctionReviewHint" class="developer-correction-help">Change a field and enter a reason to review.</p><button id="previewCorrections" type="button" class="developer-button developer-button-primary" disabled>Review changes</button></div>
+          </footer>
+        </section>
+        <button id="discardCorrections" type="button" class="developer-button developer-correction-discard" hidden>Discard edits</button>
+      </div>
+      <div id="correctionResults" class="developer-correction-results" role="status" aria-live="polite" aria-atomic="true" tabindex="-1"></div>
     </section>
     <section id="adminToolsPanel" role="tabpanel" aria-labelledby="adminToolsTab" class="developer-panel" hidden>
       <h2>Admin tools</h2>
@@ -59,6 +86,14 @@
       </div>
     </section>
   </main>
+  <dialog id="correctionPreviewDialog" class="developer-correction-dialog" aria-labelledby="correctionPreviewTitle">
+    <h2 id="correctionPreviewTitle">Review corrections</h2><p>Signatures will be retained as evidence of the originally signed content. These changes will be saved in audit history.</p><p id="correctionPreviewReason"></p><div id="correctionPreviewChanges"></div>
+    <div class="developer-correction-actions"><button id="cancelCorrectionPreview" type="button" class="developer-button">Back to editing</button><button id="applyCorrections" type="button" class="developer-button developer-button-primary">Apply corrections</button></div>
+  </dialog>
+  <dialog id="unsignDialog" class="developer-correction-dialog" aria-labelledby="unsignTitle">
+    <h2 id="unsignTitle">Remove signature</h2><div id="unsignImpact"></div><label>Reason for removing signatures<textarea id="unsignReason" rows="2" maxlength="1200" required></textarea></label>
+    <div class="developer-correction-actions"><button id="cancelUnsign" type="button" class="developer-button">Cancel</button><button id="confirmUnsign" type="button" class="developer-button developer-button-danger">Remove signatures</button></div>
+  </dialog>
   <script src="/session-client.js"></script><script src="/pcn-types.js"></script><script src="/developer.js"></script>
 </body>
 </html>

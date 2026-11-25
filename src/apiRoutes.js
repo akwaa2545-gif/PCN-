@@ -12,6 +12,7 @@ const { buildWorkflowSummary } = require('./workflowSummary');
 const { RULES, validateWorkflowSettings, readWorkflowSettings } = require('./workflowSettings');
 const { isEmployeeMode } = require('./authModes');
 const { validateNotificationPreferences } = require('./notificationPreferences');
+const { validateChangeCategories, categorySettings, publicMaster } = require('./changeCategories');
 
 async function handleApi(req, res, url, context, requestId) {
   const { readJsonBody, writeJson } = require('./httpServer');
@@ -76,7 +77,14 @@ async function handleApi(req, res, url, context, requestId) {
     clearSessionCookie(res,cookieOptions);
     return send({authenticated:false,passwordChanged:true});
   }
-  if (route.startsWith('/api/developer/')) return send(await handleDeveloperTools(method,url,context,user));
+  if (route.startsWith('/api/developer/')) {
+    if (!['GET','HEAD'].includes(method)) {
+      enforceSameOrigin(req, context.publicOrigin, context.developmentLoopbackOrigins);
+      enforceCsrf(req, principal);
+    }
+    const body = method === 'POST' ? await readJsonBody(req) : undefined;
+    return send(await handleDeveloperTools(method,url,context,user,body));
+  }
   if (route === '/api/profile') {
     if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
     if (url.searchParams.size) throw new ApiError(400, 'Profile request does not accept selectors');
@@ -125,6 +133,14 @@ async function handleApi(req, res, url, context, requestId) {
       const input = validateWorkflowSettings(await readJsonBody(req));
       if (typeof repository.saveWorkflowSettings !== 'function') throw new ApiError(503, 'Workflow settings are unavailable');
       return send({ ...await repository.saveWorkflowSettings(input, actor, user), rules: RULES });
+    }
+    if (route === '/api/admin/change-categories') {
+      if (!['GET', 'PUT'].includes(method)) throw new ApiError(405, 'Method not allowed');
+      if (url.searchParams.size) throw new ApiError(400, 'Content of Changes request does not accept selectors');
+      if (method === 'GET') return send(categorySettings(await repository.getMasterData()));
+      const input = validateChangeCategories(await readJsonBody(req));
+      if (typeof repository.saveChangeCategories !== 'function') throw new ApiError(503, 'Content of Changes settings are unavailable');
+      return send(await repository.saveChangeCategories(input, actor, user));
     }
     if (route === '/api/admin/users' && method === 'GET') {
       const accounts = await authService.repository.listUsers();
@@ -191,7 +207,10 @@ async function handleApi(req, res, url, context, requestId) {
     }
     throw new ApiError(404,'API route not found');
   }
-  if (route === '/api/master-data' && method === 'GET') return send(await repository.getMasterData());
+  if (route === '/api/master-data' && method === 'GET') {
+    if (url.searchParams.size) throw new ApiError(400, 'Master data request does not accept selectors');
+    return send(publicMaster(await repository.getMasterData()));
+  }
   if (route === '/api/notification-settings') {
     admin();
     if (method === 'GET') return send(await service.getNotificationSettings());
@@ -209,6 +228,11 @@ async function handleApi(req, res, url, context, requestId) {
   if (!match) throw new ApiError(404,'API route not found');
   const [,code,subroute] = match;
   const record = await service.getById(code,user);
+  if (subroute === 'master-data') {
+    if (method !== 'GET') throw new ApiError(405, 'Method not allowed');
+    if (url.searchParams.size) throw new ApiError(400, 'Master data request does not accept selectors');
+    return send(publicMaster(await service.resolveRecordMaster(record)));
+  }
   if (subroute === 'workflow-summary') {
     if (method !== 'GET') throw new ApiError(405,'Method not allowed');
     if (url.searchParams.size) throw new ApiError(400,'Workflow summary request does not accept selectors');
@@ -328,6 +352,6 @@ function assertDocumentEdit(record,user) {
 }
 function isViewerReadRoute(route) {
   if (['/api/pcns', '/api/pcns/overview', '/api/master-data'].includes(route)) return true;
-  return new RegExp(`^/api/pcns/${CODE_PATTERN}(?:/(?:progress|workflow|workflow-summary|checks|action|revisions(?:/[1-9]\\d*)?|documents(?:/[0-9a-f-]{36}(?:/preview)?)?))?$`, 'i').test(route);
+  return new RegExp(`^/api/pcns/${CODE_PATTERN}(?:/(?:master-data|progress|workflow|workflow-summary|checks|action|revisions(?:/[1-9]\\d*)?|documents(?:/[0-9a-f-]{36}(?:/preview)?)?))?$`, 'i').test(route);
 }
 module.exports = { handleApi, requireVersion };

@@ -86,24 +86,24 @@ test('Admin tools opens without selecting a PCN or making additional requests', 
   assert.deepEqual(fixture.calls, requests);
 });
 
-test('three Developer tabs support arrow wrapping, Home and End with one focus target', async () => {
+test('four Developer tabs support arrow wrapping, Home and End with one focus target', async () => {
   const fixture = page(() => ({ items: [] }));
   await tools.mount(fixture.root);
   for (const [from, key, target] of [
     ['workflow', 'ArrowLeft', 'adminTools'], ['adminTools', 'ArrowRight', 'workflow'],
-    ['workflow', 'ArrowRight', 'transactions'], ['transactions', 'ArrowRight', 'adminTools'],
+    ['workflow', 'ArrowRight', 'transactions'], ['transactions', 'ArrowRight', 'corrections'], ['corrections', 'ArrowRight', 'adminTools'],
     ['adminTools', 'Home', 'workflow'], ['workflow', 'End', 'adminTools']
   ]) {
     let prevented = false;
     fixture.get(`${from}Tab`).events.keydown({ key, preventDefault() { prevented = true; } });
     assert.equal(prevented, true);
-    for (const name of ['workflow', 'transactions', 'adminTools']) {
+    for (const name of ['workflow', 'transactions', 'corrections', 'adminTools']) {
       assert.equal(fixture.get(`${name}Tab`).tabIndex, name === target ? 0 : -1);
       assert.equal(fixture.get(`${name}Panel`).hidden, name !== target);
     }
     assert.equal(fixture.get(`${target}Tab`).focused, true);
-    assert.equal(fixture.get('developerPcnPicker').hidden, target === 'adminTools');
-    assert.equal(fixture.get('refreshDeveloper').hidden, target === 'adminTools');
+    assert.equal(fixture.get('developerPcnPicker').hidden, ['adminTools', 'corrections'].includes(target));
+    assert.equal(fixture.get('refreshDeveloper').hidden, ['adminTools', 'corrections'].includes(target));
   }
 });
 

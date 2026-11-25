@@ -7,7 +7,7 @@ const keys = ['submitted','actionRequired','updated','completed','dueSoon','over
 const userId = '00000000-0000-4000-8000-000000000001';
 function response(version = 'a'.repeat(64)) {
   return { schemaVersion:1, version, rules:Object.fromEntries(keys.map(key => [key, {
-    enabled:true, includeDefaultRecipients:true, groupKeys:[], userIds:[], excludedUserIds:[]
+    enabled:true, includeDefaultRecipients:true, groupKeys:[], excludedGroupKeys:[], userIds:[], excludedUserIds:[]
   }])), options:{ types:keys.map(key => ({key,label:key,description:`${key} description`})),
     groups:[{key:'department.qaTet.prepared',label:'QA/TET Prepared',departmentKey:'qaTet',action:'prepared'},
       {key:'role.admin',label:'PCN role — Administrator',role:'admin'},{key:'role.reviewer',label:'PCN role — Reviewer',role:'reviewer'},
@@ -58,32 +58,31 @@ test('role-first view shows all six subscription rules and truthful conditional 
   change(page,'notificationOverviewGroup','role.admin');assert.equal(page.get('notificationGroupRules').hidden,false);
   assert.equal(page.get('notificationOverviewTitle').textContent,'PCN role — Administrator');
   assert.equal(page.get('notificationGroupSelected-submitted').checked,true);
-  assert.equal(page.get('notificationGroupSelected-submitted').attributes['aria-label'],'Include group PCN role — Administrator for submitted');
-  assert.match(page.get('notificationGroupStatus-submitted').textContent,/explicitly included.*exclusions/i);
-  assert.match(page.get('notificationGroupStatus-actionRequired').textContent,/off for everyone/i);
-  assert.equal(page.get('notificationGroupSelected-updated').checked,false);
-  assert.equal(page.get('notificationGroupCurrent-updated').textContent,'Current recipients enabled');
-  assert.match(page.get('notificationGroupStatus-updated').textContent,/administrator delivery.*department/i);
-  assert.match(page.get('notificationGroupStatus-completed').textContent,/overlapping groups or individual choices/i);
-  assert.match(page.get('notificationGroupStatus-dueSoon').textContent,/no recipients selected/i);
+  assert.equal(page.get('notificationGroupSelected-submitted').attributes['aria-label'],'Receive New PCN submitted for PCN role — Administrator');
+  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Selected group');
+  assert.equal(page.get('notificationGroupCurrent-actionRequired').textContent,'Off for everyone');
+  assert.equal(page.get('notificationGroupSelected-actionRequired').disabled,true);
+  assert.equal(page.get('notificationGroupSelected-updated').checked,true);
+  assert.equal(page.get('notificationGroupCurrent-updated').textContent,'Responsible department');
+  assert.equal(page.get('notificationGroupCurrent-completed').textContent,'Not selected');
+  assert.equal(page.get('notificationGroupCurrent-dueSoon').textContent,'Not selected');
   assert.equal(page.controller.dirty(),false);
 });
 
 test('TaPBU current defaults are visible before adding subscriptions and distinguish updates from workflow mail',async()=>{
   const page=fixture();await page.controller.open();change(page,'notificationOverviewGroup','role.tapbu');
   for(const key of ['submitted','updated','completed']) {
-    assert.equal(page.get(`notificationGroupCurrent-${key}`).textContent,'Current recipients enabled');
-    assert.match(page.get(`notificationGroupStatus-${key}`).textContent,/eligible internal/i);
+    assert.equal(page.get(`notificationGroupCurrent-${key}`).textContent,'General updates');
+    assert.equal(page.get(`notificationGroupSelected-${key}`).checked,true);
   }
   for(const key of ['actionRequired','dueSoon','overdue']) {
-    assert.equal(page.get(`notificationGroupCurrent-${key}`).textContent,'When assigned to this review');
-    assert.match(page.get(`notificationGroupStatus-${key}`).textContent,/active workflow step/i);
+    assert.equal(page.get(`notificationGroupCurrent-${key}`).textContent,'Not selected');
+    assert.equal(page.get(`notificationGroupSelected-${key}`).checked,false);
   }
-  for(const key of keys) assert.equal(page.get(`notificationGroupSelected-${key}`).checked,false);
-  assert.match(page.get('notificationGroupSummary').textContent,/6 email types enabled system-wide.*6 use current recipients.*0 additional group selections/i);
+  assert.match(page.get('notificationGroupSummary').textContent,/3 of 6 notification types enabled for this group/i);
   assert.equal(page.controller.dirty(),false);assert.equal(page.calls.length,1);
   change(page,'notificationOverviewGroup','department.gscTapbu.any');
-  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Current recipients enabled');
+  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'General updates');
 });
 
 test('current delivery badges honor globally off, custom-only and explicit subscription settings',async()=>{
@@ -95,24 +94,22 @@ test('current delivery badges honor globally off, custom-only and explicit subsc
   data.rules.overdue.groupKeys=['role.tapbu'];
   const page=fixture(()=>data);await page.controller.open();change(page,'notificationOverviewGroup','role.tapbu');
   assert.equal(page.get('notificationGroupCurrent-updated').textContent,'Off for everyone');
-  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Custom recipients only');
-  assert.equal(page.get('notificationGroupCurrent-completed').textContent,'No recipients selected');
-  assert.equal(page.get('notificationGroupCurrent-dueSoon').textContent,'Group subscription enabled');
-  assert.equal(page.get('notificationGroupCurrent-overdue').textContent,'Current + group recipients');
-  assert.match(page.get('notificationGroupStatus-submitted').textContent,/overlapping groups or individual choices/i);
-  assert.match(page.get('notificationGroupStatus-overdue').textContent,/individual exclusions/i);
+  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Not selected');
+  assert.equal(page.get('notificationGroupCurrent-completed').textContent,'Not selected');
+  assert.equal(page.get('notificationGroupCurrent-dueSoon').textContent,'Selected group');
+  assert.equal(page.get('notificationGroupCurrent-overdue').textContent,'Selected group');
 });
 
-test('removing an additional group keeps saved current recipients visible and preserves all other rules',async()=>{
+test('switching a group off blocks current recipients and preserves all other rules',async()=>{
   const initial=response();initial.rules.submitted.groupKeys=['role.tapbu'];let saved;
   const page=fixture((url,options)=>{if(options?.method==='PUT'){saved=JSON.parse(options.body);return {...response('b'.repeat(64)),rules:saved.rules};}return saved ? {...response('b'.repeat(64)),rules:saved.rules}:initial;});
   await page.controller.open();change(page,'notificationOverviewGroup','role.tapbu');
   page.get('notificationGroupSelected-submitted').checked=false;page.get('notificationGroupSelected-submitted').events.change();
-  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Current recipients enabled');
+  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Off for this group');
   await page.controller.save();await page.controller.reload();
-  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Current recipients enabled');
+  assert.equal(page.get('notificationGroupCurrent-submitted').textContent,'Off for this group');
   assert.equal(page.get('notificationGroupSelected-submitted').checked,false);
-  assert.deepEqual(saved.rules.submitted,{...initial.rules.submitted,groupKeys:[]});
+  assert.deepEqual(saved.rules.submitted,{...initial.rules.submitted,groupKeys:[],excludedGroupKeys:['role.tapbu']});
   for(const key of keys.filter(key=>key!=='submitted')) assert.deepEqual(saved.rules[key],initial.rules[key]);
 });
 
@@ -124,14 +121,15 @@ test('group edits and type edits share a draft while preserving global flags and
   await page.controller.open();change(page,'notificationOverviewGroup','role.admin');
   page.get('notificationGroupSelected-submitted').checked=false;page.get('notificationGroupSelected-submitted').events.change();
   page.get('notificationGroupSelected-actionRequired').checked=true;page.get('notificationGroupSelected-actionRequired').events.change();
-  assert.equal(page.controller.dirty(),true);assert.match(page.get('notificationGroupStatus-actionRequired').textContent,/off for everyone/i);
+  assert.equal(page.controller.dirty(),true);assert.equal(page.get('notificationGroupCurrent-actionRequired').textContent,'Off for everyone');
   click(page,'notificationGroupConfigure-submitted');assert.equal(page.get('notificationView').value,'type');
   assert.equal(page.get('notificationType').value,'submitted');assert.equal(page.get('notificationTypeView').hidden,false);
   change(page,'notificationGroupPicker','role.admin');click(page,'notificationAddGroup');
+  page.get('notificationUseDefaults').checked=false;page.get('notificationUseDefaults').events.change();
   change(page,'notificationView','group');assert.equal(page.get('notificationGroupSelected-submitted').checked,true);
   await page.controller.save();
-  assert.deepEqual(saved.rules.submitted,{...data.rules.submitted,groupKeys:[...data.rules.submitted.groupKeys].sort()});
-  assert.deepEqual(saved.rules.actionRequired,{...data.rules.actionRequired,groupKeys:['role.admin']});
+  assert.deepEqual(saved.rules.submitted,{...data.rules.submitted,includeDefaultRecipients:false,groupKeys:[...data.rules.submitted.groupKeys].sort()});
+  assert.deepEqual(saved.rules.actionRequired,data.rules.actionRequired);
   assert.deepEqual(saved.rules.updated,data.rules.updated);assert.equal(page.controller.dirty(),false);
   assert.equal(page.get('notificationOverviewGroup').value,'role.admin');
 });
@@ -140,14 +138,14 @@ test('group-first conflict/reload preserves the selected view and clears members
   const conflict=new Error('Changed');conflict.status=409;
   const page=fixture((url,options)=>{if(options?.method==='PUT')throw conflict;return response();});
   await page.controller.open();change(page,'notificationOverviewGroup','role.admin');
-  page.get('notificationGroupSelected-updated').checked=true;page.get('notificationGroupSelected-updated').events.change();
-  await page.controller.save();assert.equal(page.get('notificationGroupSelected-updated').checked,true);
+  page.get('notificationGroupSelected-updated').checked=false;page.get('notificationGroupSelected-updated').events.change();
+  await page.controller.save();assert.equal(page.get('notificationGroupSelected-updated').checked,false);
   page.root.confirmResult=false;await page.controller.reload();assert.equal(page.calls.length,2);
-  page.root.confirmResult=true;await page.controller.reload();assert.equal(page.get('notificationGroupSelected-updated').checked,false);
+  page.root.confirmResult=true;await page.controller.reload();assert.equal(page.get('notificationGroupSelected-updated').checked,true);
   assert.equal(page.get('notificationView').value,'group');assert.equal(page.get('notificationOverviewGroup').value,'role.admin');
   page.revoke();assert.equal(page.get('notificationOverviewGroup').children.length,0);
   assert.equal(page.get('notificationOverviewTitle').textContent,'');assert.equal(page.get('notificationGroupRules').hidden,true);
-  for(const key of keys){assert.equal(page.get(`notificationGroupSelected-${key}`).checked,false);assert.equal(page.get(`notificationGroupStatus-${key}`).textContent,'');assert.equal(page.get(`notificationGroupSelected-${key}`).attributes['aria-label'],'Include group');}
+  for(const key of keys){assert.equal(page.get(`notificationGroupSelected-${key}`).checked,false);assert.equal(page.get(`notificationGroupStatus-${key}`).textContent,'');assert.equal(page.get(`notificationGroupSelected-${key}`).attributes['aria-label'],'Receive notification');}
 });
 
 test('groups and individual Receive/Exclude choices save exact rules without granting signing access',async()=>{
@@ -160,7 +158,7 @@ test('groups and individual Receive/Exclude choices save exact rules without gra
   assert.equal(page.controller.dirty(),true);assert.equal(page.get('notificationSave').disabled,false);
   await page.controller.save();
   assert.deepEqual(Object.keys(saved).sort(),['rules','schemaVersion','version']);assert.equal(saved.version,'a'.repeat(64));
-  assert.deepEqual(saved.rules.submitted,{enabled:true,includeDefaultRecipients:false,groupKeys:['department.qaTet.prepared'],userIds:[],excludedUserIds:[userId]});
+  assert.deepEqual(saved.rules.submitted,{enabled:true,includeDefaultRecipients:false,groupKeys:['department.qaTet.prepared'],excludedGroupKeys:[],userIds:[],excludedUserIds:[userId]});
   assert.deepEqual(saved.rules.updated,response().rules.updated);assert.equal(page.controller.dirty(),false);
   assert.equal(page.get('notificationSave').disabled,true);
 });

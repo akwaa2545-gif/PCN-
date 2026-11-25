@@ -25,29 +25,43 @@
         <button class="settings-feature" id="settingsReviewLimits" type="button">
           <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg></span>
           <span class="settings-feature-title">Review limits</span>
-          <span class="settings-feature-description">Set how many days each department has to complete a review.</span>
           <span class="settings-feature-action">Configure limits <span aria-hidden="true">→</span></span>
         </button>
         <button class="settings-feature" id="settingsNotifications" type="button">
           <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg></span>
           <span class="settings-feature-title">Notifications</span>
-          <span class="settings-feature-description">Choose who receives each type of PCN notification email.</span>
           <span class="settings-feature-action">Configure notifications <span aria-hidden="true">&rarr;</span></span>
+        </button>
+        <button class="settings-feature" id="settingsChangeCategories" type="button">
+          <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h3"/></svg></span>
+          <span class="settings-feature-title">Content of Changes</span>
+          <span class="settings-feature-action">Manage change options <span aria-hidden="true">&rarr;</span></span>
         </button>
         <a class="settings-feature" href="/admin#mail-routing">
           <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></span>
           <span class="settings-feature-title">Mail routing</span>
-          <span class="settings-feature-description">Manage the recipients for department notifications.</span>
           <span class="settings-feature-action">Manage routing <span aria-hidden="true">→</span></span>
         </a>
         <a class="settings-feature" href="/admin#users">
           <span class="settings-feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"/></svg></span>
           <span class="settings-feature-title">User access</span>
-          <span class="settings-feature-description">Manage user accounts, roles, and department access.</span>
           <span class="settings-feature-action">Manage users <span aria-hidden="true">→</span></span>
         </a>
       </div>
       <p class="settings-home-note">Mail routing and user access open in the Admin Portal.</p>
+    </section>
+    <section class="admin-panel settings-editor change-categories-editor" id="changeCategoriesEditor" aria-labelledby="changeCategoriesTitle" hidden>
+      <div class="panel-header settings-section-heading"><div><h2 id="changeCategoriesTitle" tabindex="-1">Content of Changes</h2><p>Applies to new PCNs. Existing documents keep their saved wording, categories and risk levels.</p></div><span id="changeCategoriesVersion" class="change-categories-version"></span></div>
+      <form id="changeCategoriesForm" novalidate>
+        <fieldset id="changeCategoriesFields" disabled>
+          <legend class="sr-only">Change options for Raw Material and Packaging</legend>
+          <p class="settings-help">Expand a risk level to edit its options or add one under that level. Disable an option to hide it from new PCNs; its earlier documents remain available.</p>
+          <div id="changeCategoriesRows"></div>
+          <label class="change-categories-reason" for="changeCategoriesReason"><span>Reason for this change <span aria-hidden="true">*</span></span><textarea id="changeCategoriesReason" rows="2" maxlength="1200" required aria-describedby="changeCategoriesReasonHelp"></textarea></label>
+          <p class="settings-help" id="changeCategoriesReasonHelp">The saved version and audit history record your changes and reason.</p>
+        </fieldset>
+        <footer class="settings-footer"><p>Existing PCNs are unchanged.</p><button class="settings-button settings-primary" type="submit" id="changeCategoriesSave" disabled>Save Content of Changes</button></footer>
+      </form>
     </section>
     <section class="admin-panel settings-editor" id="settingsEditor" aria-labelledby="pendingDaysTitle" hidden>
       <div class="panel-header settings-section-heading"><div><h2 id="pendingDaysTitle" tabindex="-1">Department review limits</h2><p id="settingsExplanation">Applies to new and ongoing reviews from the original handoff.</p></div></div>
@@ -127,44 +141,43 @@
             <div class="notification-type-bar"><label for="notificationOverviewGroup">Role or group</label><select id="notificationOverviewGroup" aria-describedby="notificationGroupHelp"></select></div>
             <h3 id="notificationOverviewTitle">Select a role or group</h3>
             <p id="notificationGroupSummary" class="notification-audience" role="status" aria-live="polite" aria-atomic="true"></p>
-            <p class="settings-help" id="notificationGroupHelp">Current setting shows the delivery rule below. Changes apply after Save notification settings. Include group adds an additional subscription; leaving it unchecked keeps current recipients unchanged. Overlapping groups and individual choices can still apply. Individual Exclude choices take priority. Details opens the complete rule.</p>
-            <p class="settings-help">General updates go to eligible internal users. Administrator notices follow the PCN event's department; supplier notices only cover their own PCNs. Workflow messages depend on the active assignment.</p>
+            <p class="settings-help" id="notificationGroupHelp">Changes apply after saving. Individual choices take priority. Details shows exceptions.</p>
             <div id="notificationGroupRules" class="notification-group-rules" role="group" aria-labelledby="notificationOverviewTitle" hidden>
-              <div class="notification-group-headings" aria-hidden="true"><span>Notification type</span><span>Current setting</span><span>Additional group subscription</span><span></span></div>
+              <div class="notification-group-headings" aria-hidden="true"><span>Receive notification</span><span>Notification type</span><span>Delivery</span><span></span></div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-submitted"><input id="notificationGroupSelected-submitted" type="checkbox" aria-describedby="notificationGroupCurrent-submitted notificationGroupStatus-submitted notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-submitted"></h4><p id="notificationGroupDescription-submitted"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-submitted"></strong><p class="notification-group-status" id="notificationGroupStatus-submitted"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-submitted"><input id="notificationGroupSelected-submitted" type="checkbox" aria-describedby="notificationGroupCurrent-submitted notificationGroupStatus-submitted notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-submitted" type="button">Details</button>
               </div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-actionRequired"><input id="notificationGroupSelected-actionRequired" type="checkbox" aria-describedby="notificationGroupCurrent-actionRequired notificationGroupStatus-actionRequired notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-actionRequired"></h4><p id="notificationGroupDescription-actionRequired"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-actionRequired"></strong><p class="notification-group-status" id="notificationGroupStatus-actionRequired"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-actionRequired"><input id="notificationGroupSelected-actionRequired" type="checkbox" aria-describedby="notificationGroupCurrent-actionRequired notificationGroupStatus-actionRequired notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-actionRequired" type="button">Details</button>
               </div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-updated"><input id="notificationGroupSelected-updated" type="checkbox" aria-describedby="notificationGroupCurrent-updated notificationGroupStatus-updated notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-updated"></h4><p id="notificationGroupDescription-updated"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-updated"></strong><p class="notification-group-status" id="notificationGroupStatus-updated"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-updated"><input id="notificationGroupSelected-updated" type="checkbox" aria-describedby="notificationGroupCurrent-updated notificationGroupStatus-updated notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-updated" type="button">Details</button>
               </div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-completed"><input id="notificationGroupSelected-completed" type="checkbox" aria-describedby="notificationGroupCurrent-completed notificationGroupStatus-completed notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-completed"></h4><p id="notificationGroupDescription-completed"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-completed"></strong><p class="notification-group-status" id="notificationGroupStatus-completed"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-completed"><input id="notificationGroupSelected-completed" type="checkbox" aria-describedby="notificationGroupCurrent-completed notificationGroupStatus-completed notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-completed" type="button">Details</button>
               </div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-dueSoon"><input id="notificationGroupSelected-dueSoon" type="checkbox" aria-describedby="notificationGroupCurrent-dueSoon notificationGroupStatus-dueSoon notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-dueSoon"></h4><p id="notificationGroupDescription-dueSoon"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-dueSoon"></strong><p class="notification-group-status" id="notificationGroupStatus-dueSoon"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-dueSoon"><input id="notificationGroupSelected-dueSoon" type="checkbox" aria-describedby="notificationGroupCurrent-dueSoon notificationGroupStatus-dueSoon notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-dueSoon" type="button">Details</button>
               </div>
               <div class="notification-group-rule">
+                <label class="notification-group-toggle" for="notificationGroupSelected-overdue"><input id="notificationGroupSelected-overdue" type="checkbox" aria-describedby="notificationGroupCurrent-overdue notificationGroupStatus-overdue notificationGroupHelp" /><span>Receive notification</span></label>
                 <div class="notification-group-mail"><h4 id="notificationGroupType-overdue"></h4><p id="notificationGroupDescription-overdue"></p></div>
                 <div class="notification-group-current"><strong class="notification-current-badge" id="notificationGroupCurrent-overdue"></strong><p class="notification-group-status" id="notificationGroupStatus-overdue"></p></div>
-                <label class="notification-group-toggle" for="notificationGroupSelected-overdue"><input id="notificationGroupSelected-overdue" type="checkbox" aria-describedby="notificationGroupCurrent-overdue notificationGroupStatus-overdue notificationGroupHelp" /><span>Include group</span></label>
                 <button class="settings-button notification-group-details" id="notificationGroupConfigure-overdue" type="button">Details</button>
               </div>
             </div>
@@ -185,6 +198,7 @@
               <label for="notificationGroupPicker">Department / role group</label>
               <div class="notification-picker-row"><select id="notificationGroupPicker"></select><button class="settings-button" id="notificationAddGroup" type="button">Add group</button></div>
               <ul id="notificationSelectedGroups" class="notification-recipients" aria-label="Selected recipient groups"></ul>
+              <div id="notificationExcludedGroupsSection" class="notification-blocked-groups" hidden><h5>Blocked groups</h5><ul id="notificationExcludedGroups" class="notification-recipients" aria-label="Blocked recipient groups"></ul></div>
             </section>
             <section class="notification-recipient-panel" aria-labelledby="notificationUsersTitle">
               <h4 id="notificationUsersTitle">Individual users</h4>

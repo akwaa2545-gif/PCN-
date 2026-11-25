@@ -69,6 +69,8 @@
 
   const state = {
     formDefinitions: {},
+    latestMaster: null,
+    recordMasters: new Map(),
     commonDocuments: [],
     workflowBase: [],
     statusDefinitions: [],
@@ -123,6 +125,7 @@
         showNotice("error", "Sign out failed", error.message);
       });
       await loadFromApi();
+      if (!state.apiReady) return;
       renderAll();
       if (documentPreview) {
         stampDocumentPreview();
@@ -267,6 +270,9 @@
 
     els.loadDemoButton.addEventListener("click", async () => {
       if (!await confirmDiscardChanges()) return;
+      try { state.latestMaster = await apiFetch('/api/master-data'); }
+      catch (error) { showNotice('error', 'Unable to load current categories', error.message); return; }
+      activateRecordMaster({});
       state.activeRequest = createNewRequest();
       loadRequestToForm(state.activeRequest);
       state.message = "Demo values loaded. Submit to create a new PCN id.";
@@ -357,15 +363,44 @@
     });
   }
 
+  function recordMasterKey(record) { return `${record.id}:${record.masterDataVersionId ?? 'legacy'}`; }
+
+  function blockUnavailableMaster() {
+    state.masterUnavailable = true;
+    const sheet = document.getElementById('submissionView');
+    sheet?.setAttribute('hidden', ''); sheet?.style?.setProperty('display', 'none', 'important');
+    document.querySelectorAll?.('#submissionView input, #submissionView select, #submissionView textarea, #workflowView input')
+      .forEach(control => { control.disabled = true; });
+    if (els.submitButton) els.submitButton.disabled = true;
+  }
+
+  async function loadRecordMaster(record) {
+    if (!record?.id) return state.latestMaster;
+    const key = recordMasterKey(record);
+    if (!state.recordMasters.has(key)) {
+      const master = await apiFetch(`/api/pcns/${encodeURIComponent(record.id)}/master-data`);
+      if (!master?.formDefinitions || !Object.keys(master.formDefinitions).length) throw new Error('The saved master data is unavailable. Reload this document.');
+      state.recordMasters.set(key, master);
+    }
+    return state.recordMasters.get(key);
+  }
+
+  function activateRecordMaster(record) {
+    const master = record?.id ? state.recordMasters.get(recordMasterKey(record)) : state.latestMaster;
+    if (!master?.formDefinitions) throw new Error('The saved master data is unavailable. Reload this document.');
+    state.formDefinitions = master.formDefinitions;
+    state.commonDocuments = master.commonDocuments;
+    state.workflowBase = master.workflowBase;
+    state.statusDefinitions = master.statusDefinitions || [];
+    state.adminItems = master.adminItems || [];
+    populateSelectors();
+  }
+
   async function loadFromApi() {
     try {
       const master = await apiFetch("/api/master-data");
-      state.formDefinitions = master.formDefinitions;
-      state.commonDocuments = master.commonDocuments;
-      state.workflowBase = master.workflowBase;
-      state.statusDefinitions = master.statusDefinitions || [];
-      state.adminItems = master.adminItems || [];
-      populateSelectors();
+      state.latestMaster = master;
+      activateRecordMaster({});
       if (!documentPreview) state.pcns = await apiFetch("/api/pcns");
       const routePcnId = documentPreview ? previewIdentity.id : getPcnIdFromPath();
       if (routePcnId) {
@@ -373,6 +408,7 @@
         if (documentPreview && (state.activeRequest.id !== previewIdentity.id || state.activeRequest.version !== previewIdentity.version)) {
           throw new Error('This document changed after the preview was requested. Close the preview and open it again.');
         }
+        await loadRecordMaster(state.activeRequest);
         state.message = state.viewOnly ? `Viewing ${routePcnId}. This account has read-only access.` : `Loaded ${routePcnId}. Changes will update this PCN.`;
         showNotice("success", "PCN loaded", state.message);
       } else {
@@ -384,6 +420,7 @@
       loadRequestToForm(state.activeRequest);
     } catch (error) {
       state.apiReady = false;
+      if (state.activeRequest.id && !state.recordMasters.has(recordMasterKey(state.activeRequest))) blockUnavailableMaster();
       state.message = error.message;
       if (documentPreview) throw error;
       els.submitButton.disabled = true;
@@ -395,10 +432,10 @@
     const request = structuredCloneSafe(demoRequest);
     return {
       ...request,
+      status: 'draft', selectedChange: '', changeRows: [],
       supplierName: '', manufacturerName: '', materialName: '', desiredStart: '',
       sampleSubmitted: 'pending', currentCondition: '', newCondition: '', reason: '',
       identification: '', sampleLocation: '',
-      changeRows: request.changeRows.map(row => ({...row,currentCondition:'',newCondition:''})),
       internalReview: {...request.internalReview,pcnCode:''}
     };
   }
@@ -463,6 +500,7 @@
   }
 
   function loadRequestToForm(request) {
+    activateRecordMaster(request);
     state.savedRecord = structuredCloneSafe(request);
     Object.entries(request).forEach(([key, value]) => {
       if (els[key]) {
@@ -638,6 +676,7 @@
     const savedStatus = state.activeRequest.status;
     const previouslySavedStatus = state.savedRecord?.status || savedStatus;
     let closedRecord;
+    let savedMasterUnavailable = false;
     const draftAllowed = !state.activeRequest.id || ['draft','supplier_action'].includes(savedStatus);
     if (mode === 'draft' && !draftAllowed) return;
     if (mode === 'draft') state.activeRequest = {...state.activeRequest,status:savedStatus === 'supplier_action' ? savedStatus : 'draft'};
@@ -672,8 +711,12 @@
       });
       markSubmissionSaved(submittedSnapshot);
       state.savedRecord = structuredCloneSafe(saved);
+      state.activeRequest = { ...state.activeRequest, id: saved.id, version: saved.version, status: saved.status,
+        documentType: saved.documentType, documentControl: saved.documentControl, masterDataVersionId: saved.masterDataVersionId };
       if (!hasDatabaseId && window.history?.replaceState) window.history.replaceState(null,'',`/form.html?id=${encodeURIComponent(saved.id)}`);
       documentUI?.saved(recoverySnapshot);
+      try { await loadRecordMaster(saved); state.masterUnavailable = false; }
+      catch (error) { savedMasterUnavailable = true; state.apiReady = false; blockUnavailableMaster(); throw error; }
 
       let mailMessage = "";
       let mailWarning = "";
@@ -709,9 +752,10 @@
     } catch (error) {
       state.activeRequest = {...state.activeRequest,status:state.savedRecord?.status || savedStatus};
       state.message = error.message;
-      showSaveError(error);
+      if (savedMasterUnavailable) showNotice('warning', 'PCN saved; reload required', `${state.savedRecord.id} was saved. Its saved categories could not be loaded. Reload before editing or signing.`);
+      else showSaveError(error);
     } finally {
-      els.submitButton.disabled = false;
+      els.submitButton.disabled = !state.apiReady;
       document.body.classList.remove("is-saving");
       setSaveOverlayVisible(false);
     }
@@ -828,6 +872,7 @@
   async function refreshPcns(activeId, options = {}) {
     state.pcns = await apiFetch("/api/pcns");
     const saved=state.pcns.find((record) => record.id === activeId) || state.pcns[0] || { ...demoRequest };
+    await loadRecordMaster(saved);
     if(options.preserveEditsSince && getSubmissionSnapshot() !== options.preserveEditsSince) {
       syncSavedRecordKeepingEdits(saved);
       showNotice('warning','Saved — newer edits remain','The submitted changes are saved. Save your newer edits when ready.');
@@ -838,6 +883,7 @@
   }
 
   function syncSavedRecordKeepingEdits(saved) {
+    activateRecordMaster(saved);
     const review = structuredCloneSafe(state.activeRequest.internalReview || {});
     const savedReview = saved.internalReview || {};
     const metadata = /^(supplierSignoff\.(approved|checked|prepared)\.(name|date)|(signoff\.(gscTet|prodEngTet|qaTet)|tapbu\.(gsc|qa)|qateFinal\.signoff)\.(approved|checked|prepared)(Name|Date))$/;
@@ -860,6 +906,7 @@
   }
 
   function renderAll() {
+    if (state.masterUnavailable) { blockUnavailableMaster(); return; }
     renderDocumentType(state.activeRequest);
     renderChangeOptions();
     renderSummary();
@@ -898,7 +945,7 @@
     const generation = documentLoadGeneration;
     const current = () => isRemoteRequestCurrent(id,baseline,generation,isCurrent);
     let saved;
-    try { saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`); }
+    try { saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`); await loadRecordMaster(saved); }
     catch (error) { if (current()) throw error; return; }
     if (!current()) return;
     if (!saved || saved.id !== id) throw new Error('The PCN is no longer available.');
@@ -965,6 +1012,7 @@
     const current = () => isRemoteRequestCurrent(id,baseline,generation,isCurrent);
     try {
       const saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`);
+      await loadRecordMaster(saved);
       if (!current() || snapshot !== getSubmissionSnapshot()) return;
       if (saved?.id !== id) throw new Error('The PCN is no longer available.');
       applyRemoteRecord(saved);
@@ -988,6 +1036,7 @@
     const beforeVersion=state.activeRequest.version;
     const id = isPcnCode(result.id) ? result.id : state.activeRequest.id;
     const saved = await apiFetch(`/api/pcns/${encodeURIComponent(id)}`);
+    await loadRecordMaster(saved);
     if(state.activeRequest.id!==beforeId || state.activeRequest.version!==beforeVersion) return;
     if (hasUnsavedChanges()) {
       const controls=()=>document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea');
@@ -1031,6 +1080,24 @@
   }
 
   function renderDocumentEditability() {
+    const correctionTools = document.getElementById('developerCorrectionTools');
+    if (correctionTools) {
+      const record = state.activeRequest, control = record.documentControl || {};
+      const marked = new Set(control.correctedSignatures || control.lastDeveloperCorrection?.retainedSignatures || []);
+      const corrected = [...new Set([...marked, ...Object.keys(control.signatureBindings || {})])].some(path => {
+        const value = path.split('.').reduce((at, key) => at?.[key], record.internalReview);
+        if (value !== true && value?.checked !== true) return false;
+        const hash = control.signatureBindings?.[path]?.contentHash;
+        return hash && control.contentHash ? hash !== control.contentHash : marked.has(path);
+      });
+      const user = state.user, developer = user?.isActive === true && user.roles?.length === 1
+        && String(user.roles[0]).toLowerCase() === 'developer' && user.department === 'developer' && user.signingStep == null;
+      const link = document.getElementById('developerCorrectDocument');
+      link.hidden = !developer || !record.id || documentPreview;
+      link.href = `/developer?pcn=${encodeURIComponent(record.id || '')}#corrections`;
+      document.getElementById('developerCorrectionNotice').hidden = !corrected;
+      correctionTools.hidden = !corrected && link.hidden;
+    }
     const closed = state.activeRequest.status === 'closed';
     const editable=!state.viewOnly && (!state.activeRequest.id || ['draft','supplier_action'].includes(state.activeRequest.status));
     document.querySelectorAll('#submissionView input:not([data-internal-field]), #submissionView select:not([data-internal-field]), #submissionView textarea:not([data-internal-field])')
@@ -1038,13 +1105,15 @@
     if (els.documentType) els.documentType.disabled=!editable || Boolean(state.activeRequest.id) || document.body.classList.contains('is-saving');
     const draft=document.getElementById('saveDraftButton');
     if(draft) {draft.hidden=!editable;draft.disabled=!state.apiReady || document.body.classList.contains('is-saving');}
-    if (closed) {
+    if (closed || state.masterUnavailable) {
       document.querySelectorAll('#submissionView input, #submissionView select, #submissionView textarea, #workflowView input')
         .forEach(control => {control.disabled=true;});
       els.submitButton.disabled=true;
-      els.submitButton.textContent='PCN closed';
-      els.formActionTitle.textContent='Closed PCN';
-      els.formActionDescription.textContent='All required signatures are complete. This document is read-only.';
+      if (closed) {
+        els.submitButton.textContent='PCN closed';
+        els.formActionTitle.textContent='Closed PCN';
+        els.formActionDescription.textContent='All required signatures are complete. This document is read-only.';
+      }
     }
   }
 
@@ -1064,6 +1133,7 @@
   }
 
   function renderChangeOptions() {
+    if (state.masterUnavailable) return;
     const definition = getActiveDefinition();
 
     if (!definition) {
@@ -1480,6 +1550,7 @@
         const beforeVersion=state.activeRequest.version;
         try {
           const loaded = await apiFetch(`/api/pcns/${record.id}`);
+          await loadRecordMaster(loaded);
           if(generation!==documentLoadGeneration || state.activeRequest.id!==beforeId || state.activeRequest.version!==beforeVersion) return;
           if(getSubmissionSnapshot()!==snapshot) {
             showNotice('warning','Load canceled','Your new edits were kept. Save them before loading another PCN.');return;
@@ -1988,6 +2059,7 @@
   }
 
   function fitPrintedPage() {
+    if (state.masterUnavailable) { blockUnavailableMaster(); return; }
     const sheet = document.getElementById('submissionView');
     if (!sheet) return;
     activatePrintLayout();
@@ -2028,7 +2100,7 @@
       });
     }
     window.addEventListener('resize', fitSignatureNames);
-    window.addEventListener('beforeprint', () => { activatePrintLayout(); fitSignatureNames(); fitPrintedPage(); });
+    window.addEventListener('beforeprint', () => { if(state.masterUnavailable){blockUnavailableMaster();return;}activatePrintLayout();fitSignatureNames();fitPrintedPage(); });
     window.addEventListener('afterprint', () => { resetPrintedPage(); fitSignatureNames(); });
     document.fonts?.ready.then(fitSignatureNames);
     document.fonts?.addEventListener('loadingdone', fitSignatureNames);

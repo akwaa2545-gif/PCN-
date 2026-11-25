@@ -6,6 +6,7 @@ const { normalizeMailRouting, resolveNextMailTarget } = require('./mailRouting')
 const { canSetRequirements, draftContent, templateContent } = require('./pcnTemplates');
 const { summarizeNotificationStatus } = require('./notificationStatus');
 const { firstSubmissionPrepared } = require('./firstSubmissionPrepared');
+const { publicMaster } = require('./changeCategories');
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const validVersion = value => typeof value === 'string' && /^[0-9a-f]{16}$/i.test(value);
 function body(input, keys) {
@@ -31,15 +32,22 @@ class PcnCreationService {
   }
   async get(id, user) {
     creator(user); const record = await this.service.getById(id, user); owned(record, user);
-    return { record, editable: true, canSetRequirements: canSetRequirements(user), scannerConfigured: this.scannerConfigured };
+    return { record, masterData: publicMaster(await this.service.resolveRecordMaster(record)), editable: true,
+      canSetRequirements: canSetRequirements(user), scannerConfigured: this.scannerConfigured };
   }
   async create(input, actor, user) {
     creator(user); body(input, ['clientDraftKey','document','testDocument']);
     if (typeof input.clientDraftKey !== 'string' || !uuid.test(input.clientDraftKey)) throw new ApiError(400, 'A valid draft identity is required');
     if (input.testDocument !== undefined && typeof input.testDocument !== 'boolean') throw new ApiError(400, 'Test document must be boolean');
     const content = draftContent(input.document, user);
+    const draftKey = input.clientDraftKey.toLowerCase();
+    const existing = (await this.repository.list({ ownerUserId: user.id })).find(record =>
+      String(record.ownerUserId) === String(user.id) && record.creationDraftKey === draftKey);
+    // Replay still uses the normal transactional creation path, including current-account
+    // and type checks. Validate the retried content against the version issued to it.
+    const replayMaster = existing ? await this.service.resolveRecordMaster(existing) : undefined;
     const saved = await this.service.create({ ...content, status: 'draft' }, actor, user,
-      { clientDraftKey: input.clientDraftKey.toLowerCase(), testDocument: input.testDocument === true });
+      { clientDraftKey: draftKey, testDocument: input.testDocument === true, ...(replayMaster ? { replayMaster } : {}) });
     const { creationReused, ...record } = saved;
     return { record, reused: creationReused === true };
   }

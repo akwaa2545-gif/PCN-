@@ -54,6 +54,8 @@ function fixture({savedStatus = 'closed', refreshFails = false, saveFails = fals
   app.state.apiReady=true;
   app.state.activeRequest={id:saved.id,status:'qa_review',version:'1',internalReview:{}};
   app.state.savedRecord={...app.state.activeRequest};
+  // This fixture starts with an already-loaded document; its pinned master is cached.
+  app.state.recordMasters.set(`${saved.id}:legacy`, {formDefinitions:require('../src/masterData').formDefinitions});
   return {app,document,get:id=>document.getElementById(id),calls,notices,updates,formControls};
 }
 

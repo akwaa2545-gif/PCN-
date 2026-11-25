@@ -9,7 +9,49 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (pcnTypes) {
   'use strict';
   const validPcn = value => pcnTypes.isCode(value);
-  const tabNames = ['workflow', 'transactions', 'adminTools'];
+  const tabNames = ['workflow', 'transactions', 'corrections', 'adminTools'];
+  const correctionFields = Object.freeze({ supplierName: 'Supplier name', manufacturerName: 'Manufacturer', materialName: 'Material / chemical',
+    desiredStart: 'Target start date or lot', sampleSubmitted: 'Sample submitted', sampleSubmittedDate: 'Sample submitted date',
+    currentCondition: 'Current condition', newCondition: 'New condition', reason: 'Reason for change',
+    identification: 'How to identify the changed material', sampleLocation: 'Sample location', priceLevel: 'Price level',
+    selectedChange: 'Selected change', changeRows: 'Content of Changes' });
+  function correctionChanges(original, edited) {
+    return Object.fromEntries(Object.keys(correctionFields).filter(key => JSON.stringify(original[key]) !== JSON.stringify(edited[key]))
+      .map(key => [key, edited[key]]));
+  }
+  function editCorrectionRow(record, index, field, value) {
+    if (!['text', 'currentCondition', 'newCondition'].includes(field) || !record.changeRows?.[index]) throw new Error('Invalid change row');
+    const previous = record.changeRows[index];
+    const selected = record.selectedChange === previous.text && (!record.riskLevel || record.riskLevel === previous.risk);
+    return { ...record, ...(selected ? { [field === 'text' ? 'selectedChange' : field]: value } : {}),
+      changeRows: record.changeRows.map((row, at) => at === index ? { ...row, [field]: value } : row) };
+  }
+  function editCorrectionField(record, field, value) {
+    const next = { ...record, [field]: value };
+    if (!['currentCondition', 'newCondition'].includes(field)) return next;
+    return { ...next, changeRows: (record.changeRows || []).map(row => row.text === record.selectedChange
+      && (!record.riskLevel || row.risk === record.riskLevel) ? { ...row, [field]: value } : row) };
+  }
+  function correctionPreview(entries) {
+    return entries.map(({ original, edited }) => {
+      const changes = correctionChanges(original, edited);
+      return { id: original.id, version: original.version, changes,
+        fields: Object.keys(changes).map(key => ({ key, label: correctionFields[key], before: original[key], after: changes[key] })) };
+    }).filter(item => item.fields.length);
+  }
+  function correctedAfterSigning(record) {
+    const checked = path => {
+      const value = path.split('.').reduce((at, key) => at?.[key], record.internalReview);
+      return value === true || value?.checked === true;
+    };
+    const control = record.documentControl || {};
+    const marked = new Set(control.correctedSignatures || control.lastDeveloperCorrection?.retainedSignatures || []);
+    return [...new Set([...marked, ...Object.keys(control.signatureBindings || {})])].some(path => {
+      if (!checked(path)) return false;
+      const hash = control.signatureBindings?.[path]?.contentHash;
+      return hash && control.contentHash ? hash !== control.contentHash : marked.has(path);
+    });
+  }
   function isDeveloper(user) {
     return Boolean(user?.isActive === true && Array.isArray(user.roles) && user.roles.length === 1
       && typeof user.roles[0] === 'string' && user.roles[0].toLowerCase() === 'developer'
@@ -96,6 +138,285 @@
   function personName(person) {
     return typeof person === 'string' ? person : person?.displayName || person?.name || 'Not signed';
   }
+  function mountCorrections(root, hooks) {
+    const { el, node, deny, changed } = hooks;
+    const state = { choices: [], selected: new Set(), entries: [], loadedSelection: [], stage: 'select', generation: 0, busy: false, active: false, pending: null, unsign: null };
+    const fetch = (url, options) => root.PCN_SESSION.fetch(url, options);
+    const message = text => { el('correctionResults').textContent = text; };
+    const hasPendingEdits = () => state.entries.length > 0 && (correctionPreview(state.entries).length > 0 || Boolean(el('correctionReason').value.trim()));
+    const sameSelection = () => state.entries.length > 0 && state.entries.length === state.selected.size && state.entries.every(entry => state.selected.has(entry.original.id));
+    const canResume = () => state.entries.length > 0 && state.loadedSelection.length === state.selected.size && state.loadedSelection.every(id => state.selected.has(id));
+    function updateProgress() {
+      const changed = correctionPreview(state.entries).length, reason = el('correctionReason').value.trim();
+      const selectionText = `${state.selected.size} selected`;
+      if (el('correctionSelectionCount').textContent !== selectionText) el('correctionSelectionCount').textContent = selectionText;
+      el('correctionLoadedSummary').textContent = `${state.entries.length} document${state.entries.length === 1 ? '' : 's'} loaded`;
+      const changedText = `${changed} document${changed === 1 ? '' : 's'} changed`;
+      if (el('correctionChangeCount').textContent !== changedText) el('correctionChangeCount').textContent = changedText;
+      el('loadCorrections').disabled = state.busy || !state.active || !state.selected.size;
+      el('previewCorrections').disabled = state.busy || !state.active || !changed || !reason;
+      el('setSharedCorrection').disabled = state.busy || !state.active || !state.entries.length;
+      el('resumeCorrectionEditing').hidden = !canResume();
+      el('resumeCorrectionEditing').disabled = state.busy;
+      el('changeCorrectionSelection').disabled = state.busy;
+      el('discardCorrections').hidden = !hasPendingEdits(); el('discardCorrections').disabled = state.busy;
+      el('correctionSelectionHelp').hidden = !hasPendingEdits();
+      el('correctionReviewHint').textContent = !changed ? 'Change at least one field to review.' : !reason ? 'Enter a reason to review your changes.' : 'Ready to review. Signatures stay in place.';
+      for (const entry of state.entries) if (entry.summaryNode) {
+        const count = Object.keys(correctionChanges(entry.original, entry.edited)).length;
+        const text = `${entry.original.id} · ${String(entry.original.documentType || 'Legacy').toUpperCase()} · ${String(entry.original.status).replace(/_/g, ' ')} · ${count ? `${count} field${count === 1 ? '' : 's'} changed` : 'No changes'}`;
+        if (entry.summaryNode.textContent !== text) entry.summaryNode.textContent = text;
+      }
+    }
+    function step(name) {
+      for (const [id, value] of [['correctionStepSelect','select'],['correctionStepEdit','edit'],['correctionStepReview','review']]) el(id).setAttribute('aria-current', name === value ? 'step' : 'false');
+    }
+    function focusVisible(target) {
+      target?.focus();
+      const bounds = target?.getBoundingClientRect?.(), header = root.document.querySelector?.('.developer-topbar')?.getBoundingClientRect();
+      if (bounds && header && bounds.top < header.bottom + 12) root.scrollBy?.(0, bounds.top - header.bottom - 12);
+    }
+    function stage(name, focus = false) {
+      state.stage = name;
+      el('correctionSelectionStage').hidden = name !== 'select'; el('correctionEditStage').hidden = name !== 'edit';
+      step(name);
+      renderChoices(); updateProgress();
+      if (focus) focusVisible(el(name === 'select' ? 'correctionSelectionHeading' : 'correctionEditHeading'));
+    }
+    function busy(value) {
+      state.busy = value;
+      for (const id of ['correctionsControls', 'correctionPreviewDialog', 'unsignDialog']) {
+        el(id).setAttribute('aria-busy', String(value));
+        el(id).querySelectorAll?.('input,textarea,select,button').forEach(control => { control.disabled = value; });
+      }
+      updateProgress();
+      if (!value && state.stage === 'select') renderChoices();
+    }
+    function renderChoices() {
+      const query = el('correctionSearch').value.trim().toLowerCase();
+      el('correctionChoices').replaceChildren();
+      const matches = state.choices.filter(item => !query || [item.id, item.supplierName, item.materialName]
+        .some(value => String(value || '').toLowerCase().includes(query)) || state.selected.has(item.id));
+      if (!matches.length) el('correctionChoices').appendChild(node('p', 'No documents match your search.', 'developer-correction-help'));
+      for (const record of matches) {
+        const label = node('label', undefined, 'developer-correction-choice'), check = node('input');
+        check.type = 'checkbox'; check.value = record.id; check.checked = state.selected.has(record.id); check.disabled = state.busy || hasPendingEdits();
+        check.addEventListener('change', () => {
+          if (state.busy) return;
+          if (hasPendingEdits()) { check.checked = state.selected.has(record.id); message('Your edits are kept. Discard edits before choosing different documents.'); return; }
+          if (check.checked && state.selected.size >= 20) { check.checked = false; message('Select up to 20 documents.'); return; }
+          check.checked ? state.selected.add(record.id) : state.selected.delete(record.id);
+          ++state.generation;
+          updateProgress();
+        });
+        const identity = node('span', undefined, 'developer-correction-identity'), type = pcnTypes.typeOf(record);
+        identity.appendChild(node('strong', record.id)); identity.appendChild(node('span', type?.toUpperCase() || 'Legacy', 'developer-correction-type'));
+        const description = node('span', undefined, 'developer-correction-description');
+        description.appendChild(node('strong', record.supplierName || 'No supplier')); description.appendChild(node('small', record.materialName || 'No material entered'));
+        label.appendChild(check); label.appendChild(identity); label.appendChild(description);
+        label.appendChild(node('span', String(record.status || 'Not recorded').replace(/_/g, ' '), 'developer-correction-status'));
+        el('correctionChoices').appendChild(label);
+      }
+    }
+    function editor(labelText, value, onInput, options = {}) {
+      const label = node('label', labelText), input = node(options.values ? 'select' : options.single ? 'input' : 'textarea');
+      if (options.values) for (const value of options.values) {
+        const option = node('option', value); option.value = value; input.appendChild(option);
+      }
+      input.value = value ?? ''; input.maxLength = options.max || 2000;
+      if (!options.values && !options.single) input.rows = 2;
+      if (options.key) input.setAttribute('data-correction-field', options.key);
+      if (options.row !== undefined) input.setAttribute('data-correction-row', String(options.row));
+      input.addEventListener(options.values ? 'change' : 'input', () => { onInput(input.value); updateProgress(); });
+      label.appendChild(input); return label;
+    }
+    function renderEntry(entry, entryIndex) {
+      const { original } = entry;
+      const section = node('details', undefined, 'developer-correction-document'); section.open = entryIndex === 0;
+      section.setAttribute('data-pcn-id', original.id);
+      entry.summaryNode = node('summary'); section.appendChild(entry.summaryNode);
+      if (entry.correctionNotice) section.appendChild(node('p', 'Corrected after signing. Retained signatures refer to earlier content.', 'developer-correction-notice'));
+      function group(key, title, open = false) {
+        const details = node('details', undefined, `developer-correction-group${key === 'signatures' ? ' developer-correction-danger' : ''}`);
+        details.setAttribute('data-correction-group', key); details.open = open; details.appendChild(node('summary', title)); return details;
+      }
+      function addFields(parent, keys) {
+        const fields = node('div', undefined, 'developer-correction-fields');
+        for (const key of keys) {
+        const values = key === 'sampleSubmitted' ? ['yes', 'no', 'pending'] : key === 'priceLevel' ? ['no-change', 'decreasing', 'increasing'] : null;
+        fields.appendChild(editor(correctionFields[key], entry.edited[key], value => { entry.edited = editCorrectionField(entry.edited, key, value); },
+          { key, values, single: ['supplierName', 'manufacturerName', 'materialName', 'desiredStart', 'sampleSubmittedDate', 'sampleLocation'].includes(key) }));
+        }
+        parent.appendChild(fields);
+      }
+      function changeRow(row, index) {
+        const rowFields = node('fieldset', undefined, 'developer-correction-row'); rowFields.appendChild(node('legend', `${row.risk} · ${row.optionText}`));
+        for (const key of ['text', 'currentCondition', 'newCondition']) rowFields.appendChild(editor(
+          key === 'text' ? 'Content of Changes' : correctionFields[key], row[key], value => { entry.edited = editCorrectionRow(entry.edited, index, key, value); }, { key, row: index, max: key === 'text' ? 500 : 2000 }));
+        return rowFields;
+      }
+      const content = group('content', 'Content of Changes', true), rows = entry.edited.changeRows || [];
+      let selected = rows.findIndex(row => row.text === entry.edited.selectedChange && (!entry.edited.riskLevel || row.risk === entry.edited.riskLevel));
+      if (selected < 0 && rows.length) selected = 0;
+      if (selected >= 0) content.appendChild(changeRow(rows[selected], selected));
+      else addFields(content, ['currentCondition', 'newCondition']);
+      if (rows.length > 1) {
+        const others = group('otherChanges', `Other change items (${rows.length - 1})`);
+        rows.forEach((row,index) => { if(index !== selected) others.appendChild(changeRow(row,index)); }); content.appendChild(others);
+      }
+      section.appendChild(content);
+      const supplier = group('supplier', 'Supplier details'); addFields(supplier, ['supplierName', 'manufacturerName', 'materialName']); section.appendChild(supplier);
+      const additional = group('additional', 'Additional information');
+      addFields(additional, ['desiredStart', 'sampleSubmitted', 'sampleSubmittedDate', 'reason', 'identification', 'sampleLocation', 'priceLevel']); section.appendChild(additional);
+      const signatures = group('signatures', `Signature management (${entry.signatures.length})`);
+      if (entry.signatures.length) {
+        const removal = node('div', undefined, 'developer-correction-unsign'), label = node('label', 'Signed step'), select = node('select');
+        select.setAttribute('data-unsign-select', '');
+        for (const signature of entry.signatures) { const option = node('option', signature.label); option.value = signature.path; select.appendChild(option); }
+        label.appendChild(select); removal.appendChild(label);
+        const button = node('button', 'Remove signature…', 'developer-button'); button.type = 'button'; button.setAttribute('data-unsign-preview', '');
+        button.addEventListener('click', () => previewUnsign(entry, select.value, button)); removal.appendChild(button); signatures.appendChild(removal);
+      } else signatures.appendChild(node('p', 'No signatures recorded.', 'developer-correction-help'));
+      section.appendChild(signatures);
+      return section;
+    }
+    function renderEditors() {
+      el('correctionEditors').replaceChildren();
+      state.entries.forEach((entry,index) => el('correctionEditors').appendChild(renderEntry(entry,index))); updateProgress();
+    }
+    async function loadSelected() {
+      if (state.busy || !state.active) return;
+      if (!state.selected.size) { message('Select at least one document.'); return; }
+      if (sameSelection() || hasPendingEdits() && canResume()) { stage('edit',true); return; }
+      if (hasPendingEdits()) { message('Your edits are kept. Discard edits before loading different documents.'); return; }
+      const generation = ++state.generation, ids = [...state.selected]; busy(true); message('Loading selected documents…');
+      try {
+        const results = await Promise.allSettled(ids.map(id => fetch(`/api/developer/pcns/${encodeURIComponent(id)}/correction`)));
+        if (generation !== state.generation) return;
+        const entries = [], errors = [];
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            if ([401, 403].includes(result.reason.status)) throw result.reason;
+            errors.push(`${ids[index]}: ${result.reason.message || 'Could not load document.'}`); return;
+          }
+          const data = result.value;
+          if (data?.record?.id !== ids[index]) { errors.push(`${ids[index]}: The server returned a different document.`); return; }
+          entries.push({ original: data.record, edited: structuredClone(data.record), signatures: data.signatures || [], correctionNotice: data.correctionNotice });
+        });
+        state.entries = entries; state.loadedSelection = ids; renderEditors(); stage(entries.length ? 'edit' : 'select', true);
+        message(errors.length ? errors.join('\n') : '');
+      } catch (error) { if ([401, 403].includes(error.status)) deny(); else message(error.message); }
+      finally { if (generation === state.generation) busy(false); }
+    }
+    function close(dialog, focus) { dialog.close(); step(state.stage); focusVisible(focus); }
+    function preview() {
+      if (state.busy || !state.active) return;
+      const reason = el('correctionReason').value.trim(), items = correctionPreview(state.entries);
+      if (!reason) { message('Enter a reason for the audit history.'); el('correctionReason').focus(); return; }
+      if (!items.length) { message('Change at least one document field first.'); return; }
+      state.pending = { reason, items };
+      el('correctionPreviewReason').textContent = `Audit reason: ${reason}`; el('correctionPreviewChanges').replaceChildren();
+      for (const item of items) {
+        const section = node('section'); section.appendChild(node('h3', item.id));
+        for (const field of item.fields) {
+          const block = node('div', undefined, 'developer-correction-diff'); block.appendChild(node('h4', field.label));
+          block.appendChild(node('p', `Before: ${readableValue(field.before)}`)); block.appendChild(node('p', `After: ${readableValue(field.after)}`)); section.appendChild(block);
+        }
+        el('correctionPreviewChanges').appendChild(section);
+      }
+      step('review'); el('correctionPreviewDialog').showModal(); el('cancelCorrectionPreview').focus();
+    }
+    async function apply() {
+      if (state.busy || !state.active || !state.pending) return;
+      const pending = state.pending; busy(true);
+      try {
+        const response = await fetch('/api/developer/pcns/corrections', { method: 'POST', body: JSON.stringify({ reason: pending.reason,
+          items: pending.items.map(({ id, version, changes }) => ({ id, version, changes })) }) });
+        if (!state.active) return;
+        if (!Array.isArray(response?.results)) throw new Error('The save result is unavailable. Reload these documents and check audit history before trying again.');
+        const results = new Map(response.results.map(result => [result.id, result])), output = [];
+        for (const item of pending.items) {
+          const result = results.get(item.id), entry = state.entries.find(entry => entry.original.id === item.id);
+          if (result?.success && entry) {
+            entry.original = { ...structuredClone(entry.edited), version: result.version }; entry.edited = structuredClone(entry.original);
+            if (result.changed !== false) entry.correctionNotice = entry.signatures.length
+              ? { retainedSignatures: entry.signatures.map(signature => signature.path) } : null;
+            output.push(`${item.id}: ${result.changed === false ? 'No change needed.' : 'Saved. Signatures retained.'}`);
+          } else output.push(`${item.id}: ${result?.error || 'Result unavailable; check audit history before retrying.'}${result?.status === 409 ? ' Your edits are kept. Discard edits and load the latest version to review the conflict.' : ''}`);
+        }
+        if (!correctionPreview(state.entries).length) el('correctionReason').value = '';
+        message(output.join('\n')); renderEditors(); state.pending = null; busy(false);
+        close(el('correctionPreviewDialog'), el('correctionResults')); changed();
+      } catch (error) {
+        if ([401, 403].includes(error.status)) deny();
+        else { message(`${error.message || 'Could not save corrections.'} Your edits are kept.`); busy(false); close(el('correctionPreviewDialog'), el('previewCorrections')); }
+      } finally { busy(false); }
+    }
+    function previewUnsign(entry, path, opener) {
+      if (state.busy || !state.active) return;
+      if (correctionPreview([entry]).length) { message('Apply or discard this document’s content edits before removing signatures.'); return; }
+      const signature = entry.signatures.find(item => item.path === path); if (!signature) return;
+      state.unsign = { entry, signature, opener };
+      el('unsignImpact').replaceChildren(node('p', `${entry.original.id}: ${signature.label}`));
+      const list = node('ul');
+      for (const cleared of signature.clears || [path]) list.appendChild(node('li', entry.signatures.find(item => item.path === cleared)?.label || cleared));
+      el('unsignImpact').appendChild(node('p', 'This removes the selected signature and these later sign-offs:')); el('unsignImpact').appendChild(list);
+      if (signature.reopens) el('unsignImpact').appendChild(node('p', 'This completed document will reopen for review.', 'developer-correction-notice'));
+      el('unsignReason').value = ''; el('unsignDialog').showModal(); el('unsignReason').focus();
+    }
+    async function unsign() {
+      if (state.busy || !state.active || !state.unsign) return;
+      const reason = el('unsignReason').value.trim(); if (!reason) { el('unsignReason').focus(); return; }
+      const { entry, signature } = state.unsign; busy(true);
+      try {
+        const result = await fetch(`/api/developer/pcns/${encodeURIComponent(entry.original.id)}/unsign`, { method: 'POST',
+          body: JSON.stringify({ version: entry.original.version, reason, path: signature.path }) });
+        if (!state.active) return;
+        if (result?.id !== entry.original.id || !Array.isArray(result.cleared) || !result.version) throw new Error('The removal result is unavailable. Check audit history before making another change.');
+        entry.original = { ...entry.original, version: result.version, status: result.status }; entry.edited = structuredClone(entry.original);
+        entry.signatures = entry.signatures.filter(item => !result.cleared.includes(item.path)).map(item => ({ ...item, reopens: false,
+          clears: item.clears.filter(path => !result.cleared.includes(path)) }));
+        if (entry.correctionNotice) {
+          const retainedSignatures = (entry.correctionNotice.retainedSignatures || []).filter(path => !result.cleared.includes(path));
+          entry.correctionNotice = retainedSignatures.length ? { ...entry.correctionNotice, retainedSignatures } : null;
+        }
+        renderEditors(); message(`${entry.original.id}: removed ${result.cleared.length} signatures.${result.reopened ? ' Document reopened for review.' : ''}`); busy(false);
+        close(el('unsignDialog'), entry.summaryNode); state.unsign = null; changed();
+      } catch (error) { if ([401, 403].includes(error.status)) deny(); else message(`${error.message || 'Could not remove signatures.'} Reload to verify the current signatures before retrying.`); }
+      finally { busy(false); }
+    }
+    el('correctionSearch').addEventListener('input', renderChoices);
+    el('loadCorrections').addEventListener('click', loadSelected);
+    el('changeCorrectionSelection').addEventListener('click', () => { if (!state.busy) stage('select',true); });
+    el('resumeCorrectionEditing').addEventListener('click', () => { if (!state.busy && canResume()) stage('edit',true); });
+    el('correctionReason').addEventListener('input', updateProgress);
+    el('discardCorrections').addEventListener('click', () => {
+      if (state.busy) return; ++state.generation; state.entries = []; state.loadedSelection = []; state.pending = null; el('correctionReason').value = '';
+      renderEditors(); stage('select',true); message('Edits discarded. Select documents to edit.');
+    });
+    for (const key of Object.keys(correctionFields).filter(key => !['selectedChange', 'changeRows', 'sampleSubmitted', 'priceLevel'].includes(key))) {
+      const option = node('option', correctionFields[key]); option.value = key; el('sharedCorrectionField').appendChild(option);
+    }
+    el('setSharedCorrection').addEventListener('click', () => {
+      if (state.busy) return;
+      const key = el('sharedCorrectionField').value;
+      if (!Object.hasOwn(correctionFields, key) || ['selectedChange', 'changeRows', 'sampleSubmitted', 'priceLevel'].includes(key)) return;
+      state.entries.forEach(entry => { entry.edited = editCorrectionField(entry.edited, key, el('sharedCorrectionValue').value); }); renderEditors(); message(`Value set on ${state.entries.length} loaded documents. Preview to save.`);
+    });
+    el('previewCorrections').addEventListener('click', preview); el('applyCorrections').addEventListener('click', apply);
+    el('cancelCorrectionPreview').addEventListener('click', () => { if (!state.busy) close(el('correctionPreviewDialog'), el('previewCorrections')); });
+    el('confirmUnsign').addEventListener('click', unsign);
+    el('cancelUnsign').addEventListener('click', () => { if (!state.busy) close(el('unsignDialog'), state.unsign?.opener); });
+    for (const id of ['correctionPreviewDialog', 'unsignDialog']) {
+      el(id).addEventListener('cancel', event => { if (state.busy) event.preventDefault(); else step(state.stage); });
+      el(id).addEventListener('close', () => step(state.stage));
+    }
+    stage('select');
+    return { state, loadSelected, setChoices(choices) { state.active = true; state.choices = choices; renderChoices(); updateProgress(); },
+      clear() { ++state.generation; state.active = false; state.entries = []; state.loadedSelection = []; state.choices = []; state.selected.clear(); state.pending = null; state.unsign = null; renderChoices(); renderEditors();
+        el('correctionReason').value = ''; stage('select');
+        for (const id of ['correctionPreviewDialog', 'unsignDialog']) if (el(id).open) el(id).close(); } };
+  }
   async function mount(root) {
     const doc = root.document;
     const el = id => doc.getElementById(id);
@@ -107,6 +428,8 @@
       if (className) element.className = className;
       return element;
     };
+    const corrections = mountCorrections(root, { el, node, deny: denyAccess,
+      changed: () => { if (state.selected) loadDetails(state.selected); } });
     function status(message, error = false) {
       el('developerStatus').textContent = message;
       el('developerStatus').setAttribute('data-state', error ? 'error' : 'info');
@@ -127,6 +450,7 @@
       transactionControls(); renderTransactions();
     }
     function denyAccess() {
+      corrections.clear();
       state.authorized = false;
       ++state.detailGeneration; ++state.listGeneration;
       state.list = []; state.selected = '';
@@ -279,6 +603,7 @@
         const data = await root.PCN_SESSION.fetch('/api/developer/pcns');
         if (generation !== state.listGeneration) return;
         state.list = (Array.isArray(data?.items) ? data.items : []).filter(item => validPcn(item.id));
+        corrections.setChoices(state.list);
         state.selected = state.list.some(item => item.id === preferredId) ? preferredId : '';
         renderChoices();
         lock(false);
@@ -297,8 +622,8 @@
       }
     }
     function chooseTab(target, focus = false) {
-      el('developerPcnPicker').hidden = target === 'adminTools';
-      el('refreshDeveloper').hidden = target === 'adminTools';
+      el('developerPcnPicker').hidden = ['adminTools', 'corrections'].includes(target);
+      el('refreshDeveloper').hidden = ['adminTools', 'corrections'].includes(target);
       for (const name of tabNames) {
         const active = name === target, tab = el(`${name}Tab`);
         tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
@@ -334,11 +659,20 @@
       state.authorized = true; el('developerMain').hidden = false;
       root.PCN_SESSION.mountProfile?.(session.user, error => status(error.message, true));
       bind(); await refresh(requestedPcn(root.location.search));
+      if (root.location.hash === '#corrections' && state.authorized) {
+        chooseTab('corrections');
+        const id = requestedPcn(root.location.search);
+        if (id && state.list.some(record => record.id === id)) {
+          corrections.state.selected.add(id); corrections.setChoices(state.list);
+          el('correctionSelectionCount').textContent = '1 selected'; await corrections.loadSelected();
+        }
+      }
     } catch (error) {
       el('developerMain').hidden = true;
       status(error.message || 'Developer access could not be verified. Reload to try again.', true);
     }
-    return { refresh, loadDetails, state };
+    return { refresh, loadDetails, state, corrections };
   }
-  return { isDeveloper, requestedPcn, readableValue, valuePresentation, flattenTransactions, filterTransactions, pageTransactions, mount };
+  return { isDeveloper, requestedPcn, readableValue, valuePresentation, flattenTransactions, filterTransactions, pageTransactions,
+    correctionChanges, editCorrectionRow, editCorrectionField, correctionPreview, correctedAfterSigning, mount };
 });

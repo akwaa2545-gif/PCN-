@@ -5,7 +5,7 @@ const {settingsVersion}=require('./mailRouting');
 const {lockUserMailRouting,assertCurrentUser}=require('./userMailRouting');
 const {hasRole}=require('./workflowAccess');
 const {readNotificationPreferenceUsers}=require('./notificationPreferenceUsers');
-const {readNotificationPreferences,validateNotificationPreferences,notificationPreferencesView}=require('./notificationPreferences');
+const {readNotificationPreferences,validateNotificationPreferences,notificationPreferencesView,assertGroupExclusionCompatibility}=require('./notificationPreferences');
 
 function storedSettings(row) {
   if(!row) return {};
@@ -42,10 +42,11 @@ class SqlNotificationPreferences {
       const result=await tx.request().query('SELECT SettingsJson FROM pcn.NotificationSettings WITH(UPDLOCK,HOLDLOCK) WHERE Id=1');
       const before=storedSettings(result.recordset[0]);
       if(settingsVersion(before)!==validated.version)throw new ApiError(409,'Notification settings changed; reload before saving');
+      assertGroupExclusionCompatibility(validated,before);
       const users=await readNotificationPreferenceUsers(tx);
       const checked=validateNotificationPreferences(validated,users);
       const updatedBy=typeof actor==='string'?actor:`user:${user.id}`;
-      const preferences={schemaVersion:1,rules:checked.rules,updatedAt:new Date().toISOString(),updatedBy};
+      const preferences=readNotificationPreferences({schemaVersion:1,rules:checked.rules,updatedAt:new Date().toISOString(),updatedBy});
       const after={...before,notificationPreferences:preferences};
       await tx.request().input('json',sql.NVarChar(sql.MAX),JSON.stringify(after)).query(`
         IF EXISTS(SELECT 1 FROM pcn.NotificationSettings WITH(UPDLOCK,HOLDLOCK) WHERE Id=1)

@@ -6,6 +6,9 @@ const { NotificationService } = require('../../src/notificationService');
 const { fieldChanges, snapshot } = require('../../src/documentControl');
 const { defaultWorkflowSettings, validateWorkflowSettings } = require('../../src/workflowSettings');
 const { normalizeType, typeOf, formatCode, bangkokDay } = require('../../pcn-types');
+const masterData = require('../../src/masterData');
+const { validateChangeCategories, categorySettings, buildDefinition } = require('../../src/changeCategories');
+const { hasRole } = require('../../src/workflowAccess');
 const TEST_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_NEW_PASSWORD = crypto.randomBytes(24).toString('hex');
 const TEST_ACCESS_VERSION = '0000000000000001';
@@ -35,6 +38,8 @@ function memoryRepository() {
   let revisions = {};
   let settings = { groups: [] };
   let workflowSettings = defaultWorkflowSettings();
+  let activeMaster = 1;
+  let masters = { 1: { ...Object.fromEntries(Object.entries(masterData).filter(([, value]) => typeof value !== 'function')), versionId: 1 } };
   let counter = 0;
   let typedCounters = {};
   let deletedCreationKeys = new Set();
@@ -110,7 +115,22 @@ function memoryRepository() {
     },
     async getAudit() { return []; },
     async getNotificationStatus() { return []; },
-    async getMasterData() { return { versionId: 1, formDefinitions: {}, statusDefinitions: [] }; },
+    async getMasterData(versionId) {
+      const master = masters[versionId ?? activeMaster];
+      if (!master) throw new ApiError(503, 'Master data snapshot is unavailable');
+      return structuredClone(master);
+    },
+    async saveChangeCategories(input, actor, user) {
+      if (!user || user.isActive === false || !hasRole(user, 'admin')) throw new ApiError(403, 'Administrator access required');
+      const validated = validateChangeCategories(input);
+      if (validated.versionId !== activeMaster) throw new ApiError(409, 'Content of Changes settings changed; reload before saving');
+      const current = masters[activeMaster];
+      if (JSON.stringify(categorySettings(current).forms) === JSON.stringify(validated.forms)) return categorySettings(current);
+      const next = buildDefinition(current, validated, { id: crypto.randomUUID(), time: new Date().toISOString(), actor });
+      activeMaster = Math.max(...Object.keys(masters).map(Number)) + 1;
+      masters = { ...masters, [activeMaster]: { ...next, versionId: activeMaster } };
+      return categorySettings(masters[activeMaster]);
+    },
     async readiness() {}
   };
 }

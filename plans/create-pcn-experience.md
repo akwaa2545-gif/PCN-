@@ -2,6 +2,14 @@
 
 Status: implemented locally, 2026-10-15. This plan describes authorized local development; it does not authorize publishing, deployment, host configuration changes or operational test mail.
 
+## Risk descriptions — local follow-up, 2026-11-24
+
+The Create PCN risk picker shows only its selected code, such as RL2, while closed. Opening it shows four choices headed RL3, RL2, RL1 and RL0, each followed by the full list of change descriptions configured for that form and risk level. Clicking a group or confirming a keyboard choice selects its risk code and closes the picker. No unapproved generic High/Low risk definitions are introduced.
+
+The grouped list changes with the form and applicable master-data snapshot. New documents use enabled current categories; resumed drafts retain their pinned wording. Empty groups explain that no descriptions are configured. Browsing with arrows, opening the popup, Escape, Tab and outside dismissal do not change the committed value. Enter/Space or a direct choice commits through the existing risk-field change handler. The visible trigger carries the field label, current value, expanded state, validation error references and focus target. Descriptions render as text in a keyboard-accessible, height-bounded popup. Codes, risk classification, approval routing, signatures and saves retain their existing behavior. No deployment or push is authorized.
+
+Verified locally with **62 focused creation/model/autosave/master frontend tests**, **four dedicated browser groups**, **15 existing creation browser groups** and **seven master/category browser groups**. Tests cover code-only collapsed display, complete grouped descriptions, keyboard browsing and cancellation, same-code selection as a no-op, empty groups, latest versus pinned master data, literal HTML-like wording and 320px popup containment. A queued opening-scroll race was reproduced and fixed by distinguishing unchanged scroll notifications from actual anchor/page movement. Dedicated risk-picker browser interactions perform no writes and leave the saved draft and audit history unchanged after an autosave clock flush. Desktop/mobile screenshots were inspected; code, JavaScript and accessibility reviews have no unresolved findings. No live business data, mail, deployment or push was performed.
+
 ## Agreed experience
 
 **Create PCN opens a dedicated page** with four stages: **Details → Changes → Documents → Review & Submit**. A readable form is the primary editing surface. The existing official PCN sheet remains the preview, print and signing document.

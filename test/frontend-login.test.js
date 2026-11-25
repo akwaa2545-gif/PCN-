@@ -27,90 +27,102 @@ test('employee sign-in preserves leading zeroes and sends no password or directo
   }
 });
 
-test('employee form shows seven PIN-style digit slots and retains explicit password maintenance', () => {
+test('employee form uses seven Employee ID boxes and a normal password control with maintenance access', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'login.html'), 'utf8');
-  const employeeForm = html.match(/<form id="employeeLoginForm"[\s\S]*?<\/form>/)?.[0];
-  assert.ok(employeeForm);
-  assert.match(employeeForm, /<h1 class="employee-entry-title" id="employeeEntryTitle">Enter your Employee ID<\/h1>/);
-  assert.match(employeeForm, /<label[^>]*for="employeeCode">Employee ID<\/label>/);
-  assert.match(employeeForm, /id="employeeCode"[^>]*maxlength="7"/);
-  assert.match(employeeForm, /id="employeeCode"[^>]*aria-describedby="employeeEntryHelp employeeAuthMessage"/);
-  assert.match(employeeForm, /pattern="\[0-9\]\{7\}"/);
-  assert.ok(employeeForm.indexOf('id="employeeCode"') < employeeForm.indexOf('id="employeeAuthMessage"'));
-  assert.ok(employeeForm.indexOf('id="employeeAuthMessage"') < employeeForm.indexOf('type="submit"'));
-  assert.equal((employeeForm.match(/class="employee-pin-slot"/g) || []).length, 7);
-  assert.match(employeeForm, /class="employee-lock-icon"/);
-  assert.match(employeeForm, /id="employeePasswordField" hidden/);
-  assert.match(employeeForm, /id="employeePassword"[^>]*type="password"[^>]*disabled/);
-  assert.match(employeeForm, /id="employeeRemember"[^>]*type="checkbox"[^>]*disabled/);
+  const form = html.match(/<form id="employeeLoginForm"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(form);
+  assert.match(form, /<label[^>]*for="employeeCode"[^>]*>Employee ID<\/label>/);
+  assert.match(form, /<label[^>]*for="employeePassword"[^>]*>Password<\/label>/);
+  assert.match(form, /id="employeeCode"[^>]*maxlength="7"/);
+  assert.match(form, /id="employeePassword"[^>]*type="password"[^>]*autocomplete="current-password"/);
+  assert.match(form, /id="employeeRemember"[^>]*type="checkbox"/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'auth.css'), 'utf8');
+  assert.equal((form.match(/class="employee-pin-slot"/g) || []).length, 7);
+  assert.doesNotMatch(css, /\.employee-password-mode \.employee-pin-slots[^{]*\{[^}]*display:\s*none/);
+  assert.match(css, /\.employee-password-mode #employeePassword\s*\{[\s\S]*?position:\s*static;[\s\S]*?opacity:\s*1;/);
   assert.doesNotMatch(html, /windowsLoginForm|Continue with Windows|SamAccountName/);
-  assert.match(html, /id="loginForm" hidden/);
+  assert.match(html, /id="loginForm"[^>]*hidden/);
   assert.match(fs.readFileSync(path.join(__dirname, '..', 'auth.css'), 'utf8'), /\.auth-card \[hidden\]/);
 });
 
-test('PIN-style slots display pasted digits and clear when the Employee ID is edited', async () => {
-  const page = await loginPage();
-  page.element('employeeCode').value = '01a2345678';
-  page.element('employeeCode').events.input();
-  assert.equal(page.element('employeeCode').value, '0123456');
-  assert.equal(Array.from({ length: 7 }, (_, index) => page.element(`employeeDigit${index + 1}`).textContent).join(''), '0123456');
-  page.element('employeeCode').value = '01';
-  page.element('employeeCode').events.input();
-  assert.equal(page.element('employeeDigit3').textContent, '');
-  assert.equal(page.element('employeeDigit7').textContent, '');
+test('partial Employee IDs preserve leading zeroes and completing seven digits checks the account only', async () => {
+  const page = await loginPage({ mode: 'employee-password' });
+  for (const value of ['0', '00123', '001234']) {
+    page.element('employeeCode').value = value;
+    page.element('employeeCode').events.input();
+    page.element('employeeCode').events.change();
+    assert.equal(page.element('employeeCode').value, value);
+    assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 0);
+  }
+  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input(); page.element('employeeCode').events.change();
+  await nextLoginTurn();
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(passwordRequests(page).length, 0);
+  assert.deepEqual(page.redirects, []);
 });
 
-test('focused Employee ID highlights the next empty slot and clears it on blur', async () => {
-  const page = await loginPage();
-  const input = page.element('employeeCode');
-  assert.equal(page.element('employeeDigit1').classList.contains('is-active'), false);
-  input.events.focus();
-  assert.equal(page.element('employeeDigit1').classList.contains('is-active'), true);
-  input.value = '12';
-  input.events.input();
-  assert.equal(page.element('employeeDigit1').classList.contains('is-active'), false);
-  assert.equal(page.element('employeeDigit3').classList.contains('is-active'), true);
-  input.value = '1234567';
-  input.events.input();
-  assert.equal(page.element('employeeDigit7').classList.contains('is-active'), false);
-  input.events.blur();
-  assert.equal(page.element('employeeDigit3').classList.contains('is-active'), false);
+test('plain password editing retains partial values and never authenticates on input or change', async () => {
+  const page = await loginPage({ mode: 'employee-password' });
+  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input();
+  const password = page.element('employeePassword');
+  for (const value of ['A', 'Ab12', 'Ab12Cd34']) {
+    password.value = value; password.events.input(); password.events.change();
+    assert.equal(password.value, value);
+  }
+  await nextLoginTurn();
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(passwordRequests(page).length, 0);
 });
 
 async function loginPage(config = { mode: 'employee-code' }, {
   search = '', authenticated = false, loginError = null,
-  user = { mustChangePassword: false, roles: ['supplier'] }, loginResponse = null, initialCode = '', setupError = null, setupResponse = null,
+  user = { mustChangePassword: false, roles: ['supplier'] }, loginResponse = null, initialCode = '', initialPassword = '', setupError = null, setupResponse = null,
   identifyResponse = null, identifyError = null
 } = {}) {
   const elements = new Map();
+  let activeElement = null;
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
-      value: '', checked: false, hidden: true, disabled: false, textContent: '', events: {},
+      value: '', checked: false, hidden: true, disabled: false, textContent: '', events: {}, requestSubmitCalls: 0,
       classList: {
         values: new Set(),
         toggle(name, active) { if (active) this.values.add(name); else this.values.delete(name); },
         contains(name) { return this.values.has(name); }
       },
       addEventListener(name, handler) { this.events[name] = handler; },
+      requestSubmit() { this.requestSubmitCalls++; this.events.submit?.({ preventDefault() {} }); },
       attributes: {}, setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
       querySelectorAll(selector) { return id==='employeeLoginForm' && selector==='button'
         ? [element(`${id}Submit`),element('employeePasswordToggle')]
         : id==='passwordSetupForm' && selector==='button'
           ? [element(`${id}Submit`),element('setupPasswordToggle'),element('setupConfirmPasswordToggle'),element('setupSignOutButton')]
-          : [element(`${id}Submit`)]; }, focus() { this.focused = true; }, reset() {}
+          : [element(`${id}Submit`)]; }, focus() {
+        if (activeElement) activeElement.focused = false;
+        activeElement = this; this.focused = true;
+      }, reset() {}
     });
     return elements.get(id);
   }
   const calls = [];
   element('employeeCode').value = initialCode;
+  element('employeePassword').value = initialPassword;
   element('employeeLoginFormSubmit').textContent = 'Sign in';
   const redirects = [];
+  const navigationCredentials = [];
   let init;
   const events = {};
   const window = {
     addEventListener(name,handler){events[name]=handler;},
-    location: { origin: 'https://pcn.example', pathname: '/login', search, hash: '', assign(url) { redirects.push(url); } }
+    location: { origin: 'https://pcn.example', pathname: '/login', search, hash: '', assign(url) {
+      navigationCredentials.push({ employeeCode: element('employeeCode').value, password: element('employeePassword').value,
+        usernameDisabled: element('employeeCode').disabled, passwordDisabled: element('employeePassword').disabled });
+      redirects.push(url);
+    } }
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'session-client.js'), 'utf8'), { window, URL, Headers });
   window.PCN_SESSION = {
@@ -136,10 +148,10 @@ async function loginPage(config = { mode: 'employee-code' }, {
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'login.js'), 'utf8'), {
     window, URLSearchParams, URL,
-    document: { getElementById: element, addEventListener(name, handler) { if (name === 'DOMContentLoaded') init = handler; } }
+    document: { get activeElement() { return activeElement; }, getElementById: element, addEventListener(name, handler) { if (name === 'DOMContentLoaded') init = handler; } }
   }, { filename: path.resolve(__dirname, '../login.js') });
   await init();
-  return { element, calls, redirects, events, setConfig(value) { config = value; }, setLoginResponse(value) { loginResponse = value; } };
+  return { element, calls, redirects, navigationCredentials, events, get activeElement() { return activeElement; }, setConfig(value) { config = value; }, setLoginResponse(value) { loginResponse = value; } };
 }
 
 const nextLoginTurn = () => new Promise(setImmediate);
@@ -148,6 +160,133 @@ const identifyEmployee = async (page, code = '0012345') => {
   page.element('employeeCode').value = code; page.element('employeeCode').events.input(); await nextLoginTurn();
 };
 const passwordRequests = page => page.calls.filter(call => call.url === '/api/auth/login' && !JSON.parse(call.options.body).identifyOnly);
+
+test('password manager form metadata pairs stable Employee ID and password fields with POST submission', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'login.html'), 'utf8');
+  const form = html.match(/<form id="employeeLoginForm"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(form);
+  assert.match(form.match(/<form[^>]*>/)?.[0] || '', /method="post"/);
+  assert.match(form.match(/<form[^>]*>/)?.[0] || '', /action="\/api\/auth\/login"/);
+  assert.match(form, /id="employeeCode"[^>]*name="employeeCode"[^>]*autocomplete="username"/);
+  assert.match(form, /id="employeePassword"[^>]*name="password"[^>]*autocomplete="current-password"/);
+  assert.match(form, /<button[^>]*type="submit"/);
+});
+
+test('password manager cold autofill checks Employee ID only and retains credentials until explicit Sign in', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, { initialCode: '0012345', initialPassword: 'Ab12Cd34' });
+  assert.equal(page.element('employeePassword').value, 'Ab12Cd34', 'Cold initialization must not discard native autofill');
+  assert.equal(page.element('employeePasswordField').hidden, false, 'Password is visible beside the Employee ID from the start');
+  assert.equal(page.element('employeePassword').disabled, false);
+  assert.equal(page.element('employeeRemember').disabled, false);
+  await nextLoginTurn();
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(passwordRequests(page).length, 0);
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true },
+    { employeeCode: '0012345', password: 'Ab12Cd34' }
+  ]);
+  assert.deepEqual(page.redirects, ['/admin']);
+});
+
+test('automatic Employee ID checking never forwards autofilled passwords and keeps password controls available', async () => {
+  for (const focusId of ['employeeCode', 'employeeRemember', 'employeePasswordToggle']) {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { identifyResponse: () => pending });
+  page.element('employeeCode').focus();
+  page.element('employeeCode').value = '0012345';
+  page.element('employeePassword').value = 'abcdefgh';
+  page.element('employeeCode').events.input();
+  page.element('employeeCode').events.change();
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(page.element('employeeCode').disabled, false);
+  assert.equal(page.element('employeeCode').readOnly, true);
+  assert.equal(page.element('employeePassword').disabled, false);
+  assert.equal(page.element('employeeRemember').disabled, false);
+  assert.equal(page.element('employeeLoginFormSubmit').disabled, true);
+  await submitLoginForm(page, 'employeeLoginForm');
+  const password = page.element('employeePassword');
+  password.value = 'abcdefgh';
+  password.events.change();
+  assert.equal(passwordRequests(page).length, 0, 'No credentials may bypass the pending identity check');
+  page.element(focusId).focus();
+  release({ authenticated: false, passwordRequired: true });
+  await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 0);
+  assert.equal(page.element('employeeCode').readOnly, false);
+  assert.equal(password.value, 'abcdefgh');
+  assert.equal(page.element('employeePasswordField').hidden, false);
+  assert.equal(page.activeElement, page.element(focusId === 'employeeCode' ? 'employeePassword' : focusId), 'A delayed account check may advance ID focus but must not steal focus from Remember me or Show password');
+  page.element('employeeLoginForm').requestSubmit();
+  await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 1);
+  assert.deepEqual(JSON.parse(passwordRequests(page)[0].options.body), { employeeCode: '0012345', password: 'abcdefgh' });
+  assert.equal(page.element('employeeLoginForm').requestSubmitCalls, 1);
+  assert.deepEqual(page.redirects, ['/admin']);
+  }
+});
+
+test('a first-time account automatically opens restricted password setup after Employee ID completion', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, { identifyResponse: () => ({
+    authenticated: true, user: { employeeCode: '0012345', roles: ['admin'], passwordSetupRequired: true }
+  }) });
+  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input(); page.element('employeeCode').events.change();
+  await nextLoginTurn();
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(page.element('passwordSetupForm').hidden, false);
+  assert.equal(page.element('employeeLoginForm').hidden, true);
+  assert.equal(page.element('setupEmployeeCode').value, '0012345');
+  assert.equal(passwordRequests(page).length, 0); assert.deepEqual(page.redirects, []);
+});
+
+test('password manager receives explicit native submission and populated enabled credentials before successful navigation', async () => {
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { loginResponse: () => pending });
+  await identifyEmployee(page);
+  const password = page.element('employeePassword');
+  password.value = 'Ab12Cd34';
+  password.events.input();
+  password.events.change();
+  assert.equal(passwordRequests(page).length, 0, 'Typing and browser autofill must not automatically send credentials');
+  page.element('employeeLoginForm').requestSubmit();
+  assert.equal(page.element('employeeLoginForm').requestSubmitCalls, 1);
+  assert.equal(passwordRequests(page).length, 1);
+  release({ authenticated: true, user: { roles: ['qa'] } });
+  await nextLoginTurn();
+  assert.deepEqual(page.navigationCredentials, [{ employeeCode: '0012345', password: 'Ab12Cd34', usernameDisabled: false, passwordDisabled: false }]);
+  password.events.input(); password.events.change();
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(passwordRequests(page).length, 1, 'A completed sign-in cannot restart while navigation is pending');
+  page.events.pagehide();
+  assert.equal(password.value, '', 'Leaving the page still removes credentials from the old document');
+});
+
+test('password manager setup form associates the new password with the checked Employee ID without expanding the API body', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'login.html'), 'utf8');
+  const form = html.match(/<form id="passwordSetupForm"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(form);
+  assert.match(form.match(/<form[^>]*>/)?.[0] || '', /method="post"/);
+  assert.match(form.match(/<form[^>]*>/)?.[0] || '', /action="\/api\/auth\/setup-password"/);
+  assert.match(form, /<input[^>]*id="setupEmployeeCode"[^>]*autocomplete="username"[^>]*readonly[^>]*hidden/);
+  const page = await loginPage({ mode: 'employee-password' }, { authenticated: true,
+    user: { roles: [], employeeCode: '0012345', passwordSetupRequired: true } });
+  assert.equal(page.element('setupEmployeeCode').value, '0012345');
+  page.element('setupPassword').value = 'Ab12Cd34'; page.element('setupConfirmPassword').value = 'Ab12Cd34';
+  await submitLoginForm(page, 'passwordSetupForm');
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/auth/setup-password').options.body), {
+    newPassword: 'Ab12Cd34', confirmPassword: 'Ab12Cd34'
+  });
+  assert.equal(page.element('setupPassword').value, '');
+  assert.equal(page.element('setupConfirmPassword').value, '');
+});
 
 test('employee password visibility toggles without changing its value and remasks on pagehide',async()=>{
   const page=await loginPage({mode:'employee-password'});
@@ -161,75 +300,58 @@ test('employee password visibility toggles without changing its value and remask
   toggle.events.click();page.events.pagehide();assert.equal(password.value,'');assert.equal(password.type,'password');
 });
 
-test('eight password circles mirror editing without exposing masked characters or retaining cleared values',async()=>{
-  const page=await loginPage({mode:'employee-password'}),input=page.element('employeePassword');
+test('ordinary password remains masked during editing and clears on pagehide', async () => {
+  const page = await loginPage({ mode: 'employee-password' });
   await identifyEmployee(page);
-  const slots=Array.from({length:8},(_,index)=>page.element(`employeePasswordDigit${index+1}`));
-  input.value='Ab12';input.events.input();input.events.focus();
-  assert.deepEqual(slots.map(slot=>slot.classList.contains('is-filled')),[true,true,true,true,false,false,false,false]);
-  assert.equal(slots.map(slot=>slot.textContent).join(''),'');
-  assert.equal(slots[4].classList.contains('is-active'),true);
+  const input = page.element('employeePassword');
+  input.value = 'Ab12Cd34'; input.events.input(); input.events.change();
+  assert.equal(input.type, 'password');
+  assert.equal(input.value, 'Ab12Cd34');
+  assert.equal(passwordRequests(page).length, 0);
   page.element('employeePasswordToggle').events.click();
-  assert.equal(slots.map(slot=>slot.textContent).join(''),'Ab12');
-  page.element('employeePasswordToggle').events.click();
-  assert.equal(slots.map(slot=>slot.textContent).join(''),'');
-  assert.equal(input.value,'Ab12');
-  input.value='A';input.events.input();assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,1);
-  input.value='abcd1234';input.events.change();assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,8);
-  page.element('employeePasswordToggle').events.click();page.events.pagehide();
-  assert.equal(input.value,'');assert.equal(slots.map(slot=>slot.textContent).join(''),'');
-  assert.equal(slots.filter(slot=>slot.classList.contains('is-filled')).length,0);
+  assert.equal(input.type, 'text'); assert.equal(input.value, 'Ab12Cd34');
+  page.events.pagehide();
+  assert.equal(input.value, ''); assert.equal(input.type, 'password');
 });
 
-test('setup password circles reveal independently and clear/remask both fields after mismatch and pagehide',async()=>{
-  const page=await loginPage({mode:'employee-password'}, {authenticated:true,user:{passwordSetupRequired:true}});
-  const digits=id=>Array.from({length:8},(_,index)=>page.element(`${id}Digit${index+1}`));
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    const input=page.element(id);input.value=id==='setupPassword'?'Ab12Cd34':'12345678';input.events.input();
-    assert.equal(digits(id).filter(slot=>slot.classList.contains('is-filled')).length,8);
-    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
-  }
+test('setup password controls reveal independently and clear both fields after mismatch and pagehide', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, { authenticated: true, user: { passwordSetupRequired: true } });
+  const first = page.element('setupPassword'), confirmation = page.element('setupConfirmPassword');
+  first.value = 'Ab12Cd34'; confirmation.value = '12345678';
   page.element('setupPasswordToggle').events.click();
-  assert.equal(digits('setupPassword').map(slot=>slot.textContent).join(''),'Ab12Cd34');
-  assert.equal(digits('setupConfirmPassword').map(slot=>slot.textContent).join(''),'');
+  assert.equal(first.type, 'text'); assert.equal(confirmation.type, 'password');
   page.element('setupConfirmPasswordToggle').events.click();
-  assert.equal(digits('setupConfirmPassword').map(slot=>slot.textContent).join(''),'12345678');
-  assert.equal(page.calls.some(call=>call.url==='/api/auth/setup-password'),false);
-  await submitLoginForm(page,'passwordSetupForm');
-  assert.match(page.element('authMessage').textContent,/do not match/);
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    assert.equal(page.element(id).value,'');assert.equal(page.element(id).type,'password');
-    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
-    assert.equal(digits(id).filter(slot=>slot.classList.contains('is-filled')).length,0);
-    assert.equal(page.element(`${id}Toggle`).attributes['aria-pressed'],'false');
-    page.element(id).value='abcdefgh';page.element(id).events.change();page.element(`${id}Toggle`).events.click();
+  assert.equal(confirmation.type, 'text');
+  assert.equal(page.calls.some(call => call.url === '/api/auth/setup-password'), false);
+  await submitLoginForm(page, 'passwordSetupForm');
+  assert.match(page.element('authMessage').textContent, /do not match/);
+  for (const id of ['setupPassword', 'setupConfirmPassword']) {
+    assert.equal(page.element(id).value, ''); assert.equal(page.element(id).type, 'password');
+    assert.equal(page.element(id + 'Toggle').attributes['aria-pressed'], 'false');
+    page.element(id).value = 'abcdefgh'; page.element(id + 'Toggle').events.click();
   }
   page.events.pagehide();
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    assert.equal(page.element(id).value,'');assert.equal(page.element(id).type,'password');
-    assert.equal(digits(id).map(slot=>slot.textContent).join(''),'');
+  for (const id of ['setupPassword', 'setupConfirmPassword']) {
+    assert.equal(page.element(id).value, ''); assert.equal(page.element(id).type, 'password');
   }
 });
 
-test('setup request masks and disables both circle controls until its response',async()=>{
-  let finish;
-  const pending=new Promise(resolve=>{finish=resolve;});
-  const page=await loginPage({mode:'employee-password'}, {authenticated:true,user:{passwordSetupRequired:true},setupResponse:()=>pending});
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    page.element(id).value='Ab12Cd34';page.element(id).events.input();page.element(`${id}Toggle`).events.click();
+test('setup request masks and disables both password controls until its response', async () => {
+  let finish; const pending = new Promise(resolve => { finish = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { authenticated: true, user: { passwordSetupRequired: true }, setupResponse: () => pending });
+  for (const id of ['setupPassword', 'setupConfirmPassword']) {
+    page.element(id).value = 'Ab12Cd34'; page.element(id + 'Toggle').events.click();
   }
-  await submitLoginForm(page,'passwordSetupForm');
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    assert.equal(page.element(id).disabled,true);assert.equal(page.element(id).type,'password');
-    assert.equal(page.element(`${id}Toggle`).disabled,true);
-    assert.equal(page.element(`${id}ToggleText`).textContent,'Show');
-    assert.equal(page.element(`${id}Digit1`).textContent,'');
+  await submitLoginForm(page, 'passwordSetupForm');
+  for (const id of ['setupPassword', 'setupConfirmPassword']) {
+    assert.equal(page.element(id).disabled, true); assert.equal(page.element(id).type, 'password');
+    assert.equal(page.element(id + 'Toggle').disabled, true);
+    assert.equal(page.element(id + 'ToggleText').textContent, 'Show');
   }
-  finish({authenticated:false,passwordSet:true});await nextLoginTurn();
-  assert.equal(page.element('employeeLoginForm').hidden,false);
-  for(const id of ['setupPassword','setupConfirmPassword']) {
-    assert.equal(page.element(id).value,'');assert.equal(page.element(id).disabled,false);
-    assert.equal(page.element(`${id}Digit1`).classList.contains('is-filled'),false);
+  finish({ authenticated: false, passwordSet: true }); await nextLoginTurn();
+  assert.equal(page.element('employeeLoginForm').hidden, false);
+  for (const id of ['setupPassword', 'setupConfirmPassword']) {
+    assert.equal(page.element(id).value, ''); assert.equal(page.element(id).disabled, false);
   }
 });
 
@@ -244,7 +366,8 @@ test('Remember me sends true only when selected and stays disabled in code-only 
     await submitLoginForm(page,'employeeLoginForm');
     const body=JSON.parse(passwordRequests(page)[0].options.body);
     assert.equal(body.remember,remember?true:undefined);
-    assert.equal(page.element('employeePassword').value,'');
+    assert.equal(page.element('employeePassword').value,'12345678');
+    page.events.pagehide(); assert.equal(page.element('employeePassword').value,'');
   }
   const legacy=await loginPage({mode:'employee-code'});
   assert.equal(legacy.element('employeeRemember').disabled,true);
@@ -268,131 +391,147 @@ test('pending sign-in masks and disables password controls without rewriting the
   assert.equal(page.element('employeePassword').value,'');
 });
 
-test('employee password mode starts with ID only, checks once at seven digits, then signs in at eight password characters', async () => {
+test('employee password mode starts with both fields, checks the ID and waits for explicit Sign in', async () => {
   const page = await loginPage({ mode: 'employee-password' });
   assert.equal(page.element('employeeLoginForm').hidden, false);
-  assert.equal(page.element('employeePasswordField').hidden, true);
-  assert.equal(page.element('employeePassword').disabled, true);
-  assert.equal(page.element('employeeLoginFormSubmit').textContent, 'Continue');
-  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input();
+  assert.equal(page.element('employeePasswordField').hidden, false);
+  assert.equal(page.element('employeePassword').disabled, false);
+  assert.equal(page.element('employeeRemember').disabled, false);
+  assert.equal(page.element('employeeLoginFormSubmit').textContent, 'Sign in');
+  page.element('employeeCode').value = '0012345'; page.element('employeeCode').events.input(); page.element('employeeCode').events.change();
+  page.element('employeePassword').value = '12345678'; page.element('employeePassword').events.input(); page.element('employeePassword').events.change();
   await nextLoginTurn();
-  assert.deepEqual(JSON.parse(page.calls.find(call=>call.url==='/api/auth/login').options.body), {employeeCode:'0012345',identifyOnly:true});
-  page.element('employeeCode').events.change(); await nextLoginTurn();
-  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
-  assert.equal(page.element('employeePasswordField').hidden,false);
-  assert.equal(page.element('employeePassword').focused,true);
-  assert.equal(page.element('employeeLoginFormSubmit').textContent,'Sign in');
-  assert.deepEqual(page.redirects,[]);
-  page.element('employeePassword').value = '12345678';
-  page.element('employeePassword').events.input(); await nextLoginTurn();
-  assert.equal(passwordRequests(page).length,1);
-  const request = passwordRequests(page)[0];
-  assert.deepEqual(JSON.parse(request.options.body), { employeeCode: '0012345', password: '12345678' });
-  assert.equal(page.element('employeePassword').value, '');
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }
+  ]);
+  assert.equal(passwordRequests(page).length, 0);
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true },
+    { employeeCode: '0012345', password: '12345678' }
+  ]);
+  assert.equal(page.element('employeePassword').value, '12345678');
   assert.deepEqual(page.redirects, ['/admin']);
+  page.events.pagehide(); assert.equal(page.element('employeePassword').value, '');
 });
 
-test('a complete password starts only one pending sign-in and preserves Remember me',async()=>{
-  let release;const pending=new Promise(resolve=>{release=resolve;});
-  const page=await loginPage({mode:'employee-password'},{loginResponse:()=>pending});
-  await identifyEmployee(page);page.element('employeeRemember').checked=true;
-  const input=page.element('employeePassword');
-  for(const value of ['A','Ab12Cd3']) {input.value=value;input.events.input();}
-  assert.equal(passwordRequests(page).length,0);
-  input.value='Ab12Cd34';input.events.input();input.events.change();
-  await submitLoginForm(page,'employeeLoginForm');
-  assert.equal(passwordRequests(page).length,1);
-  assert.deepEqual(JSON.parse(passwordRequests(page)[0].options.body),{employeeCode:'0012345',password:'Ab12Cd34',remember:true});
-  assert.equal(input.disabled,true);
-  release({authenticated:true,user:{roles:['qa']}});await nextLoginTurn();
-  assert.deepEqual(page.redirects,['/admin']);assert.equal(input.value,'');
+test('explicit password submission starts one pending sign-in and preserves Remember me', async () => {
+  let release; const pending = new Promise(resolve => { release = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { loginResponse: () => pending });
+  await identifyEmployee(page); page.element('employeeRemember').checked = true;
+  const input = page.element('employeePassword');
+  input.value = 'Ab12Cd34'; input.events.input(); input.events.change();
+  assert.equal(passwordRequests(page).length, 0);
+  await submitLoginForm(page, 'employeeLoginForm');
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(passwordRequests(page).length, 1);
+  assert.deepEqual(JSON.parse(passwordRequests(page)[0].options.body), { employeeCode: '0012345', password: 'Ab12Cd34', remember: true });
+  assert.equal(input.disabled, true);
+  release({ authenticated: true, user: { roles: ['qa'] } }); await nextLoginTurn();
+  assert.deepEqual(page.redirects, ['/admin']); assert.equal(input.value, 'Ab12Cd34');
+  page.events.pagehide(); assert.equal(input.value, '');
 });
 
-test('failed automatic password sign-in waits for deliberate re-entry and accepts a native autofill change',async()=>{
-  const page=await loginPage({mode:'employee-password'},{loginError:new Error('Invalid employee code or password')});
-  await identifyEmployee(page);const input=page.element('employeePassword');
-  input.value='12345678';input.events.change();await nextLoginTurn();
-  assert.equal(passwordRequests(page).length,1);assert.equal(input.value,'');
-  for(const event of ['focus','blur','keyup','input','change']) input.events[event]();await nextLoginTurn();
-  assert.equal(passwordRequests(page).length,1);
-  assert.match(page.element('employeeAuthMessage').textContent,/Invalid/);
-  input.value='abcdefgh';input.events.input();await nextLoginTurn();
-  assert.equal(passwordRequests(page).length,2);
+test('failed password sign-in clears credentials and waits for deliberate explicit retry', async () => {
+  const page = await loginPage({ mode: 'employee-password' }, { loginError: new Error('Invalid employee code or password') });
+  await identifyEmployee(page); const input = page.element('employeePassword');
+  input.value = '12345678'; input.events.change(); await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 0);
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(passwordRequests(page).length, 1); assert.equal(input.value, '');
+  for (const event of ['input', 'change']) input.events[event](); await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 1); assert.match(page.element('employeeAuthMessage').textContent, /Invalid/);
+  input.value = 'abcdefgh'; input.events.input(); await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 1);
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(passwordRequests(page).length, 2);
 });
 
-test('automatic password submission ignores invalid values and rejects paste before maxlength can truncate it',async()=>{
-  const page=await loginPage({mode:'employee-password'});await identifyEmployee(page);
-  const input=page.element('employeePassword');
-  for(const value of ['1234567','123456789','abcd123!']) {input.value=value;input.events.input();}
-  assert.equal(passwordRequests(page).length,0);
-  for(const text of ['123456789','abcd123!',' abcd1234']) {
-    let prevented=false;input.value='';
-    input.events.paste({clipboardData:{getData:()=>text},preventDefault(){prevented=true;}});
-    assert.equal(prevented,true);
+test('explicit password submission rejects invalid values and paste before maxlength can truncate it', async () => {
+  const page = await loginPage({ mode: 'employee-password' }); await identifyEmployee(page);
+  const input = page.element('employeePassword');
+  for (const value of ['1234567', '123456789', 'abcd123!']) {
+    input.value = value; input.events.input(); await submitLoginForm(page, 'employeeLoginForm');
+    assert.equal(passwordRequests(page).length, 0, value);
   }
-  let prevented=false;input.events.paste({clipboardData:{getData:()=>'Ab12Cd34'},preventDefault(){prevented=true;}});
-  assert.equal(prevented,false);assert.equal(passwordRequests(page).length,0);
-  input.value='Ab12Cd34';input.events.input();await nextLoginTurn();
-  assert.equal(passwordRequests(page).length,1);
-});
-
-test('editing the identified Employee ID resets password, reveal and Remember me before another lookup',async()=>{
-  const page=await loginPage({mode:'employee-password'});await identifyEmployee(page);
-  page.element('employeePassword').value='Ab12Cd34';page.element('employeePasswordToggle').events.click();
-  page.element('employeeRemember').checked=true;
-  page.element('employeeCode').value='001234';page.element('employeeCode').events.input();
-  assert.equal(page.element('employeePasswordField').hidden,true);
-  assert.equal(page.element('employeePassword').value,'');assert.equal(page.element('employeePassword').type,'password');
-  assert.equal(page.element('employeeRemember').checked,false);assert.equal(page.element('employeeRemember').disabled,true);
-  await identifyEmployee(page,'0012346');
-  assert.equal(page.element('employeePasswordField').hidden,false);
-  assert.equal(passwordRequests(page).length,0);
-});
-
-test('pending identification blocks duplicates, ignores stale codes and allows an explicit retry',async()=>{
-  let release;const pending=new Promise(resolve=>{release=resolve;});
-  const page=await loginPage({mode:'employee-password'},{identifyResponse:()=>pending});
-  const input=page.element('employeeCode');input.value='0012345';input.events.input();input.events.change();
-  await submitLoginForm(page,'employeeLoginForm');
-  assert.equal(input.disabled,true);assert.equal(page.element('employeeLoginFormSubmit').textContent,'Checking…');
-  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
-  input.value='0012346';release({authenticated:false,passwordRequired:true});await nextLoginTurn();
-  assert.equal(page.element('employeePasswordField').hidden,true);assert.equal(input.disabled,false);
-  assert.deepEqual(page.redirects,[]);
-  await submitLoginForm(page,'employeeLoginForm');
-  assert.equal(page.element('employeePasswordField').hidden,false);
-});
-
-test('identification rejects malformed/full-access replies and never retries automatically after an error',async()=>{
-  for(const response of [{authenticated:false},{authenticated:true,user:{roles:['admin']}},{authenticated:false,passwordRequired:'true'}]) {
-    const page=await loginPage({mode:'employee-password'},{identifyResponse:()=>response});await identifyEmployee(page);
-    assert.equal(page.element('employeePasswordField').hidden,true);assert.deepEqual(page.redirects,[]);
-    assert.match(page.element('employeeAuthMessage').textContent,/did not complete/);
+  for (const text of ['123456789', 'abcd123!', ' abcd1234']) {
+    let prevented = false; input.value = '';
+    input.events.paste({ clipboardData: { getData: () => text }, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true);
   }
-  const page=await loginPage({mode:'employee-password'},{identifyError:new Error('Too many sign-in attempts. Try again shortly')});
-  await identifyEmployee(page);page.element('employeeCode').events.input();page.element('employeeCode').events.change();await nextLoginTurn();
-  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
-  assert.match(page.element('employeeAuthMessage').textContent,/Too many/);
-  await submitLoginForm(page,'employeeLoginForm');assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,2);
+  let prevented = false;
+  input.events.paste({ clipboardData: { getData: () => 'Ab12Cd34' }, preventDefault() { prevented = true; } });
+  assert.equal(prevented, false);
+  input.value = 'Ab12Cd34'; input.events.input(); await nextLoginTurn();
+  assert.equal(passwordRequests(page).length, 0);
+  await submitLoginForm(page, 'employeeLoginForm'); assert.equal(passwordRequests(page).length, 1);
 });
 
-test('a restored Employee ID waits for Continue and pagehide invalidates a pending lookup',async()=>{
-  let release;const pending=new Promise(resolve=>{release=resolve;});
-  const page=await loginPage({mode:'employee-password'},{initialCode:'0012345',identifyResponse:()=>pending});
-  page.element('employeeCode').events.change();assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,0);
-  await submitLoginForm(page,'employeeLoginForm');page.events.pagehide();
-  release({authenticated:true,user:{passwordSetupRequired:true}});await nextLoginTurn();
-  assert.equal(page.element('passwordSetupForm').hidden,true);assert.deepEqual(page.redirects,[]);
+test('editing Employee ID resets prior credentials before automatically checking the next complete ID', async () => {
+  const page = await loginPage({ mode: 'employee-password' }); await identifyEmployee(page);
+  page.element('employeePassword').value = 'Ab12Cd34'; page.element('employeePasswordToggle').events.click();
+  page.element('employeeRemember').checked = true;
+  page.element('employeeCode').value = '001234'; page.element('employeeCode').events.input();
+  assert.equal(page.element('employeePasswordField').hidden, false);
+  assert.equal(page.element('employeePassword').value, ''); assert.equal(page.element('employeePassword').type, 'password');
+  assert.equal(page.element('employeeRemember').checked, false); assert.equal(page.element('employeeRemember').disabled, false);
+  await identifyEmployee(page, '0012346');
+  assert.equal(page.element('employeePasswordField').hidden, false);
+  assert.deepEqual(page.calls.filter(call => call.url === '/api/auth/login').map(call => JSON.parse(call.options.body)), [
+    { employeeCode: '0012345', identifyOnly: true }, { employeeCode: '0012346', identifyOnly: true }
+  ]);
+  assert.equal(passwordRequests(page).length, 0);
 });
 
-test('Continue checks an autofilled ID once even if a delayed change event follows the challenge',async()=>{
-  const page=await loginPage({mode:'employee-password'});
-  page.element('employeeCode').value='0012345';
-  await submitLoginForm(page,'employeeLoginForm');
-  assert.equal(page.element('employeePasswordField').hidden,false);
-  page.element('employeeCode').events.change();await nextLoginTurn();
-  assert.equal(page.calls.filter(call=>call.url==='/api/auth/login').length,1);
-  assert.equal(page.element('employeePasswordField').hidden,false);
+test('automatic identification blocks duplicates and ignores stale Employee ID responses', async () => {
+  let release; const pending = new Promise(resolve => { release = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { identifyResponse: () => pending });
+  const input = page.element('employeeCode'); input.value = '0012345'; input.events.input(); input.events.change();
+  assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 1);
+  await submitLoginForm(page, 'employeeLoginForm'); await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(input.disabled, false); assert.equal(input.readOnly, true);
+  assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 1);
+  input.value = '0012346'; release({ authenticated: false, passwordRequired: true }); await nextLoginTurn();
+  assert.equal(page.element('employeePasswordField').hidden, false);
+  assert.match(page.element('employeeAuthMessage').textContent, /changed/);
+  assert.deepEqual(page.redirects, []); assert.equal(page.element('passwordSetupForm').hidden, true);
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 2);
+});
+
+test('automatic identification rejects malformed full-access replies and does not retry from unchanged input', async () => {
+  for (const response of [{ authenticated: false }, { authenticated: true, user: { roles: ['admin'] } }, { authenticated: false, passwordRequired: 'true' }]) {
+    const page = await loginPage({ mode: 'employee-password' }, { identifyResponse: () => response });
+    await identifyEmployee(page);
+    assert.deepEqual(page.redirects, []); assert.equal(page.element('passwordSetupForm').hidden, true);
+    assert.match(page.element('employeeAuthMessage').textContent, /did not complete/);
+  }
+  const page = await loginPage({ mode: 'employee-password' }, { identifyError: new Error('Too many sign-in attempts. Try again shortly') });
+  await identifyEmployee(page);
+  page.element('employeeCode').events.input(); page.element('employeeCode').events.change(); await nextLoginTurn();
+  assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 1);
+  assert.match(page.element('employeeAuthMessage').textContent, /Too many/);
+  await submitLoginForm(page, 'employeeLoginForm'); assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 2);
+});
+
+test('restored Employee ID auto-checks once and pagehide invalidates its pending response', async () => {
+  let release; const pending = new Promise(resolve => { release = resolve; });
+  const page = await loginPage({ mode: 'employee-password' }, { initialCode: '0012345', identifyResponse: () => pending });
+  page.element('employeeCode').events.change(); assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 1);
+  await submitLoginForm(page, 'employeeLoginForm'); page.events.pagehide();
+  release({ authenticated: true, user: { passwordSetupRequired: true } }); await nextLoginTurn();
+  assert.equal(page.element('passwordSetupForm').hidden, true); assert.deepEqual(page.redirects, []);
+});
+
+test('blank-password Sign in still checks event-free autofill and focuses the ordinary password field', async () => {
+  const page = await loginPage({ mode: 'employee-password' });
+  page.element('employeeCode').value = '0012345';
+  await submitLoginForm(page, 'employeeLoginForm');
+  assert.deepEqual(JSON.parse(page.calls.find(call => call.url === '/api/auth/login').options.body), { employeeCode: '0012345', identifyOnly: true });
+  assert.equal(page.element('employeePasswordField').hidden, false); assert.equal(page.element('employeePassword').focused, true);
+  page.element('employeeCode').events.change(); await nextLoginTurn();
+  assert.equal(page.calls.filter(call => call.url === '/api/auth/login').length, 1);
+  assert.equal(page.element('employeePasswordField').hidden, false); assert.deepEqual(page.redirects, []);
 });
 
 test('first employee password sign-in opens setup and requires a fresh password sign-in afterward', async () => {

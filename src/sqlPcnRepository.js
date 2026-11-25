@@ -7,6 +7,7 @@ const { settingsVersion, normalizeMailRouting } = require('./mailRouting');
 const { lockUserMailRouting, readUserMailAssignments, applyUserMailRouting, assertCurrentUser } = require('./userMailRouting');
 const { SqlRevisions } = require('./sqlRevisions');
 const { SqlWorkflowSettings } = require('./sqlWorkflowSettings');
+const { SqlChangeCategories } = require('./sqlChangeCategories');
 const { SqlNotificationPreferences } = require('./sqlNotificationPreferences');
 const { readNotificationPreferences } = require('./notificationPreferences');
 const { normalizeType, typeOf, parseCode, isCode, formatCode, bangkokDay } = require('../pcn-types');
@@ -172,7 +173,7 @@ class SqlPcnRepository {
       if (!parent) return null;
       this.checkVersion(parent, expectedVersion);
       const current = await this.readAggregate(tx, parent);
-      const proposed = await updater(current, { listAttachments: async () => {
+      const proposed = await updater(current, { getMasterData: versionId => this.getMasterData(versionId, tx), listAttachments: async () => {
         const result = await tx.request().input('code', sql.NVarChar(32), code)
           .query('SELECT Id,RequirementName,ScanStatus,FileName,ContentRevision FROM pcn.PcnDocumentFiles WHERE PcnCode=@code AND DeletedAt IS NULL');
         return result.recordset.map(row => ({ id: row.Id, requirementName: row.RequirementName, scanStatus: row.ScanStatus, fileName: row.FileName, contentRevision: row.ContentRevision }));
@@ -319,23 +320,31 @@ class SqlPcnRepository {
     }
   }
 
-  async getMasterData(versionId) {
-    const result = await this.pool.request().input('version', sql.Int, versionId || null)
+  async getMasterData(versionId, source = this.pool) {
+    const result = await source.request().input('version', sql.Int, versionId || null)
       .query('SELECT TOP(1) Id,DefinitionJson FROM pcn.MasterDataVersions WHERE (@version IS NULL AND IsActive=1) OR Id=@version ORDER BY Id DESC');
     if (!result.recordset[0]) throw new ApiError(503, 'SQL master data is not initialized');
     return { ...JSON.parse(result.recordset[0].DefinitionJson), versionId: result.recordset[0].Id };
   }
+
+  async getChangeCategories() { return new SqlChangeCategories(this.pool).get(); }
+
+  async saveChangeCategories(input, actor, user) { return new SqlChangeCategories(this.pool).save(input, actor, user); }
 
   async seedMasterData(definition) {
     const serialized = JSON.stringify(definition);
     const hash = crypto.createHash('sha256').update(serialized).digest('hex');
     return this.transaction(async tx => {
       const result = await tx.request().input('hash', sql.Char(64), hash).input('json', sql.NVarChar(sql.MAX), serialized).query(`
-        UPDATE pcn.MasterDataVersions WITH (UPDLOCK,HOLDLOCK) SET IsActive=0 WHERE IsActive=1;
-        IF NOT EXISTS(SELECT 1 FROM pcn.MasterDataVersions WHERE DefinitionHash=@hash)
-          INSERT pcn.MasterDataVersions(DefinitionHash,DefinitionJson,IsActive) VALUES(@hash,@json,1);
-        ELSE UPDATE pcn.MasterDataVersions SET IsActive=1 WHERE DefinitionHash=@hash;
-        SELECT Id FROM pcn.MasterDataVersions WHERE DefinitionHash=@hash;`);
+        DECLARE @active int;
+        SELECT TOP(1) @active=Id FROM pcn.MasterDataVersions WITH (UPDLOCK,HOLDLOCK) WHERE IsActive=1 ORDER BY Id DESC;
+        IF @active IS NOT NULL SELECT @active AS Id;
+        ELSE BEGIN
+          IF NOT EXISTS(SELECT 1 FROM pcn.MasterDataVersions WHERE DefinitionHash=@hash)
+            INSERT pcn.MasterDataVersions(DefinitionHash,DefinitionJson,IsActive) VALUES(@hash,@json,1);
+          ELSE UPDATE pcn.MasterDataVersions SET IsActive=1 WHERE DefinitionHash=@hash;
+          SELECT Id FROM pcn.MasterDataVersions WHERE DefinitionHash=@hash;
+        END;`);
       return result.recordset[0].Id;
     });
   }

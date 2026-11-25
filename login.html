@@ -31,7 +31,7 @@
       </div>
       <p id="authMessage" role="status" aria-live="polite"></p>
       <button class="ghost-button" id="authRetryButton" type="button" hidden>Retry sign-in setup</button>
-      <form id="employeeLoginForm" hidden>
+      <form id="employeeLoginForm" method="post" action="/api/auth/login" autocomplete="on" hidden>
         <div class="employee-entry">
           <svg class="employee-lock-icon" viewBox="0 0 128 128" aria-hidden="true" focusable="false">
             <circle cx="64" cy="64" r="56" fill="#edf4fa" />
@@ -55,7 +55,7 @@
               <span class="employee-pin-slot" id="employeeDigit6"></span>
               <span class="employee-pin-slot" id="employeeDigit7"></span>
             </div>
-            <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeEntryHelp employeeAuthMessage" required />
+            <input id="employeeCode" class="employee-pin-input" name="employeeCode" type="text" inputmode="numeric" autocomplete="username" autocapitalize="none" spellcheck="false" pattern="[0-9]{7}" maxlength="7" title="Enter your 7-digit Employee ID" aria-describedby="employeeEntryHelp employeeAuthMessage" required />
           </div>
           <div class="employee-password-field" id="employeePasswordField" hidden>
             <div class="employee-password-heading">
@@ -63,7 +63,7 @@
               <button id="employeePasswordToggle" class="employee-password-toggle" type="button" aria-label="Show password" aria-controls="employeePassword" aria-pressed="false" disabled><span id="employeePasswordToggleText">Show</span></button>
             </div>
             <div class="employee-password-control">
-              <input id="employeePassword" class="password-circle-input" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" aria-describedby="employeePasswordHelp employeeAuthMessage" disabled />
+              <input id="employeePassword" class="password-circle-input" name="password" type="password" autocomplete="current-password" minlength="8" maxlength="8" pattern="[A-Za-z0-9]{8}" aria-describedby="employeePasswordHelp employeeAuthMessage" />
               <div class="employee-password-circles" aria-hidden="true">
                 <span id="employeePasswordDigit1"></span>
                 <span id="employeePasswordDigit2"></span>
@@ -75,7 +75,7 @@
                 <span id="employeePasswordDigit8"></span>
               </div>
             </div>
-            <p id="employeePasswordHelp">Sign-in starts automatically after 8 letters or numbers.</p>
+            <p id="employeePasswordHelp">Use your 8-character password and select Sign in.</p>
             <div class="employee-signin-options">
               <label class="employee-remember"><input id="employeeRemember" name="remember" type="checkbox" aria-describedby="employeeRememberHelp" disabled /><span>Remember me</span></label>
               <span id="employeeRememberHelp">Stay signed in for 30 days</span>
@@ -84,10 +84,11 @@
           <p id="employeeAuthMessage" role="alert"></p>
         </div>
         <button class="primary-button auth-submit" type="submit">
-          <span>Continue</span>
+          <span>Sign in</span>
         </button>
       </form>
-      <form id="passwordSetupForm" hidden>
+      <form id="passwordSetupForm" method="post" action="/api/auth/setup-password" autocomplete="on" hidden>
+        <input id="setupEmployeeCode" name="username" type="text" autocomplete="username" readonly hidden />
         <div class="employee-password-field">
           <div class="employee-password-heading">
             <label for="setupPassword">New password</label>

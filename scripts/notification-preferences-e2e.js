@@ -7,8 +7,11 @@ const { chromium, expect: browserExpect } = require('@playwright/test');
 const { createRequestHandler } = require('../src/httpServer');
 const { ApiError } = require('../src/apiError');
 const { memoryRepository, fakeAuthService, TEST_PASSWORD } = require('../test/helpers/apiHarness');
-const { settingsVersion } = require('../src/mailRouting');
-const { notificationPreferencesView, validateNotificationPreferences } = require('../src/notificationPreferences');
+const { settingsVersion, resolveNextMailTarget } = require('../src/mailRouting');
+const { notificationPreferencesView, validateNotificationPreferences, filterNotificationRecipients,
+  readNotificationPreferences, assertGroupExclusionCompatibility } = require('../src/notificationPreferences');
+const { preferenceBatches, defaultRoutingRecipients } = require('../src/notificationPreferenceRuntime');
+const { notificationRecipient } = require('../src/notificationUpdates');
 
 const expect = browserExpect.configure({ timeout: 12000 });
 const endpoint = '/api/admin/notification-preferences';
@@ -34,7 +37,8 @@ function fixtures() {
     verifiedRecipient(1, { displayName: maliciousName }),
     verifiedRecipient(2, { roles: ['qa'], department: 'qaTet', signingStep: 'approved' }),
     verifiedRecipient(3, { roles: [], department: null, signingStep: null }),
-    { username: 'preferences-developer', id: id(10), roles: ['developer'], department: 'developer', signingStep: null },
+    verifiedRecipient(4, { roles: ['reviewer'], department: 'qaTet', signingStep: null }),
+    verifiedRecipient(10, { username: 'preferences-developer', roles: ['developer'], department: 'developer', signingStep: null }),
     { username: 'preferences-viewer', id: id(11), roles: [], identityProvider: 'employee-code', employeeCode: '0011011' },
     { username: 'invalid-developer', id: id(12), roles: ['developer'], department: 'qaTet', signingStep: null }
   ] });
@@ -52,8 +56,9 @@ function fixtures() {
   repository.saveNotificationPreferences = async (input, actor, user) => {
     const users = await accounts(), validated = validateNotificationPreferences(input, users);
     const settings = await repository.getNotificationSettings();
-    const next = { ...settings, notificationPreferences: { schemaVersion: 1, rules: validated.rules,
-      updatedAt: new Date().toISOString(), updatedBy: actor } };
+    assertGroupExclusionCompatibility(validated, settings);
+    const next = { ...settings, notificationPreferences: readNotificationPreferences({ schemaVersion: 1, rules: validated.rules,
+      updatedAt: new Date().toISOString(), updatedBy: actor }) };
     await repository.saveNotificationSettings(next, actor, validated.version, user);
     return notificationPreferencesView(await repository.getNotificationSettings(), users);
   };
@@ -66,7 +71,11 @@ function fixtures() {
     return state.revokeAdmin && principal?.user.username === 'admin'
       ? { ...principal, user: { ...principal.user, roles: [], department: null } } : principal;
   };
-  return { repository, authService, state, initialRouting };
+  return { repository, authService, state, initialRouting,
+    setManualDeveloperRoute(enabled) {
+      raw = { ...raw, groups: enabled ? [...structuredClone(initialRouting.groups), { key: 'department.gscTet.checked', emails: 'recipient10@example.test', recipients: [] }]
+        : structuredClone(initialRouting.groups) };
+    } };
 }
 
 function assertPayload(body) {
@@ -74,13 +83,30 @@ function assertPayload(body) {
   assert.equal(body.schemaVersion, 1); assert.match(body.version, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(body.rules).sort(), [...types].sort());
   for (const rule of Object.values(body.rules)) {
-    assert.deepEqual(Object.keys(rule).sort(), ['enabled', 'excludedUserIds', 'groupKeys', 'includeDefaultRecipients', 'userIds']);
+    assert.deepEqual(Object.keys(rule).sort(), ['enabled', 'excludedUserIds', ...(Object.hasOwn(rule, 'excludedGroupKeys') ? ['excludedGroupKeys'] : []), 'groupKeys', 'includeDefaultRecipients', 'userIds'].sort());
     assert.equal(typeof rule.enabled, 'boolean'); assert.equal(typeof rule.includeDefaultRecipients, 'boolean');
-    for (const key of ['groupKeys', 'userIds', 'excludedUserIds']) assert(Array.isArray(rule[key]));
+    for (const key of ['groupKeys', 'userIds', 'excludedUserIds', ...(Object.hasOwn(rule, 'excludedGroupKeys') ? ['excludedGroupKeys'] : [])]) assert(Array.isArray(rule[key]));
     for (const userId of [...rule.userIds, ...rule.excludedUserIds]) assert.match(userId, /^[a-f0-9-]{36}$/);
     assert(!rule.userIds.some(userId => rule.excludedUserIds.includes(userId)));
   }
   assert(!JSON.stringify(body).includes('@'), 'Preferences submit stable identities and group keys, never free-form email recipients');
+}
+
+// Run the production recipient-batch selection without queuing or sending mail.
+async function recipientSelection(fixture, type, groupKey = 'department.gscTet.prepared') {
+  const settings = await fixture.repository.getNotificationSettings(), users = await fixture.authService.repository.listUsers();
+  const record = { id: 'T-24112601', documentType: 'ta', status: 'submitted', ownerUserId: 'supplier-id', riskLevel: 'RL2',
+    internalReview: groupKey === 'department.gscTet.checked' ? { signoff: { gscTet: { prepared: true } } } : {} };
+  if (['actionRequired', 'dueSoon', 'overdue'].includes(type)) assert.equal(resolveNextMailTarget(record).groupKey, groupKey);
+  const defaults = ['submitted', 'updated', 'completed'].includes(type)
+    ? users.map(user => notificationRecipient(user, record, ['gscTet'])).filter(Boolean)
+    : defaultRoutingRecipients(settings, users, groupKey);
+  const selected = preferenceBatches(settings, type, { record, users, defaultRecipients: defaults }, { subject: 'Fixture only', body: 'Never sent' });
+  return { settings, record, users, defaultRecipients: defaults, recipients: selected.batches.flatMap(batch => batch.notificationPreferenceSnapshot.recipients) };
+}
+async function recipientIds(fixture, type, groupKey) {
+  const selected = await recipientSelection(fixture, type, groupKey);
+  return [...new Set(selected.recipients.map(recipient => recipient.userId || recipient.email))].sort();
 }
 
 class PreferencesPage {
@@ -163,9 +189,12 @@ async function loadingAndDefaults(editor) {
   await expect(editor.field('GroupView')).toBeVisible(); await expect(editor.field('TypeView')).toBeHidden();
   await expect(editor.field('OverviewGroup').locator('option')).toHaveCount(37);
   await expect(editor.field('GroupRules')).toBeHidden();
-  await editor.overview('role.admin');
+  await editor.overview('role.developer');
   await expect(editor.field('GroupRules').locator('input[type="checkbox"]')).toHaveCount(6);
-  for (const type of types) await expect(editor.field(`GroupSelected-${type}`)).not.toBeChecked();
+  for (const type of types) {
+    if (['submitted', 'updated', 'completed'].includes(type)) await expect(editor.field(`GroupSelected-${type}`)).toBeChecked();
+    else await expect(editor.field(`GroupSelected-${type}`)).not.toBeChecked();
+  }
   for (const type of types) {
     await editor.type(type); await expect(editor.field('Enabled')).toBeChecked();
     await expect(editor.field('UseDefaults')).toBeChecked();
@@ -215,20 +244,20 @@ async function audienceAndPersistence(editor, fixture) {
 async function currentDefaultsJourney(editor, fixture) {
   const before = await fixture.repository.getNotificationPreferences();
   const writes = report.writes.length;
-  await editor.overview('role.tapbu');
+  const developer = before.options.groups.find(group => group.key === 'role.developer');
+  assert.deepEqual([...developer.defaultTypes].sort(), ['completed', 'submitted', 'updated']);
+  assert.deepEqual(developer.members, [id(10)]);
+  await editor.overview('role.developer');
   for (const type of types) {
     assert.equal(before.rules[type].enabled, true);
     assert.equal(before.rules[type].includeDefaultRecipients, true);
     assert.deepEqual(before.rules[type].groupKeys, []);
-    await expect(editor.field(`GroupSelected-${type}`)).not.toBeChecked();
-    await expect(editor.field(`GroupCurrent-${type}`)).toHaveText(['actionRequired', 'dueSoon', 'overdue'].includes(type)
-      ? 'When assigned to this review' : 'Current recipients enabled');
-    await expect(editor.field(`GroupCurrent-${type}`)).toHaveAttribute('data-state', 'current');
+    if (['submitted', 'updated', 'completed'].includes(type)) {
+      await expect(editor.field(`GroupSelected-${type}`)).toBeChecked();
+      assert((await recipientIds(fixture, type)).includes(id(10)), `${type} default audience includes Developer`);
+    } else await expect(editor.field(`GroupSelected-${type}`)).not.toBeChecked();
   }
-  await expect(editor.field('GroupStatus-actionRequired')).toContainText(/workflow|review|assigned/i);
-  await expect(editor.field('GroupSummary')).toContainText('6 email types enabled system-wide');
-  await expect(editor.field('GroupSummary')).toContainText('6 use current recipients');
-  await expect(editor.field('GroupSummary')).toContainText('0 additional group selections');
+  await expect(editor.field('GroupSummary')).toContainText('3');
   for (const width of [1440, 320]) {
     await editor.page.setViewportSize({ width, height: width === 320 ? 844 : 1000 });
     assert(await editor.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -243,54 +272,80 @@ async function currentDefaultsJourney(editor, fixture) {
   await expect(editor.field('Save')).toBeDisabled();
   assert.equal(report.writes.length, writes);
   assert.deepEqual((await fixture.repository.getNotificationPreferences()).rules, before.rules);
-  checked('TaPBU shows current/default recipients and review-assignment conditions before any additional subscription; summary and unchecked subscription boxes do not imply mail is off');
+  checked('Developer shows three effective default general notifications checked and workflow mail off; production recipient batching confirms the default Developer audience without adding group subscriptions');
+}
+
+async function manualRoutingJourney(editor, fixture) {
+  fixture.setManualDeveloperRoute(true); await editor.reload(); await editor.overview('role.developer');
+  const view = await fixture.repository.getNotificationPreferences();
+  const group = view.options.groups.find(item => item.key === 'role.developer');
+  assert.equal(group.defaultModes.actionRequired, 'routing');
+  await expect(editor.field('GroupSelected-actionRequired')).toBeChecked();
+  await expect(editor.field('GroupCurrent-actionRequired')).toContainText(/routing/i);
+  assert((await recipientIds(fixture, 'actionRequired', 'department.gscTet.checked')).includes(id(10)));
+  assert(!(await recipientIds(fixture, 'actionRequired', 'department.gscTet.prepared')).includes(id(10)), 'Manual routing remains conditional on the active review step');
+  await editor.field('GroupSelected-actionRequired').uncheck(); const off = await editor.save();
+  assert(off.rules.actionRequired.excludedGroupKeys.includes('role.developer'));
+  assert(!(await recipientIds(fixture, 'actionRequired', 'department.gscTet.checked')).includes(id(10)));
+  await editor.field('GroupSelected-actionRequired').check(); const on = await editor.save();
+  assert(!(on.rules.actionRequired.excludedGroupKeys || []).includes('role.developer'));
+  assert(!on.rules.actionRequired.groupKeys.includes('role.developer'), 'On restores matched defaults instead of broadening all action requests');
+  fixture.setManualDeveloperRoute(false); await editor.reload(); await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-actionRequired')).not.toBeChecked();
+  checked('Known manual Developer routing displays conditional workflow Receive, Off blocks that real route, and On restores defaults without subscribing the role to unrelated review steps');
 }
 
 async function groupFirstJourney(editor, fixture) {
   const before = (await fixture.repository.getNotificationPreferences()).rules;
+  const original = await recipientSelection(fixture, 'submitted');
+  const originalIds = original.recipients.map(recipient => recipient.userId || recipient.email).sort();
   const writes = report.writes.length;
-  await editor.overview('role.admin');
-  await expect(editor.field('GroupSelected-actionRequired')).toBeChecked();
-  await expect(editor.field('GroupStatus-actionRequired')).toContainText(/exclusions/i);
-  await expect(editor.field('GroupCurrent-actionRequired')).toHaveText('Group subscription enabled');
-  await expect(editor.field('GroupStatus-updated')).toContainText(/off for everyone/i);
-  await expect(editor.field('GroupCurrent-updated')).toHaveText('Off for everyone');
-  await expect(editor.field('GroupCurrent-submitted')).toHaveText('Current recipients enabled');
-  await editor.field('GroupSelected-dueSoon').check();
-  await editor.field('GroupSelected-updated').check();
-  await editor.field('GroupSelected-actionRequired').uncheck();
-  await expect(editor.field('GroupCurrent-actionRequired')).toHaveText('Custom recipients only');
-  await expect(editor.field('GroupStatus-actionRequired')).toContainText(/overlapping groups|individual choices/i);
-  await expect(editor.field('GroupStatus-updated')).toContainText(/off for everyone/i);
-  await expect(editor.field('GroupCurrent-updated')).toHaveText('Off for everyone');
-  await editor.type('actionRequired');
-  await expect(editor.field('SelectedGroups')).not.toContainText('PCN role — Administrator');
-  await expect(editor.field('SelectedGroups')).toContainText('PCN role — Developer');
-  await expect(editor.field('SelectedUsers')).toContainText(maliciousName);
   await editor.overview('role.developer');
-  await expect(editor.field('GroupSelected-actionRequired')).toBeChecked();
-  await expect(editor.field('GroupSelected-dueSoon')).not.toBeChecked();
-  await editor.overview('role.admin');
-  await expect(editor.field('GroupSelected-dueSoon')).toBeChecked();
-  await expect(editor.field('GroupSelected-updated')).toBeChecked();
-  assert.equal(report.writes.length, writes, 'Group/view changes share one unsaved draft without automatic writes');
-  const body = await editor.save();
-  for (const type of types) {
-    assert.equal(body.rules[type].enabled, before[type].enabled, 'Group membership never flips the global enabled flag');
-    assert.equal(body.rules[type].includeDefaultRecipients, before[type].includeDefaultRecipients);
-    assert.deepEqual(body.rules[type].userIds, before[type].userIds);
-    assert.deepEqual(body.rules[type].excludedUserIds, before[type].excludedUserIds);
-    const expected = type === 'actionRequired' ? before[type].groupKeys.filter(key => key !== 'role.admin')
-      : ['dueSoon', 'updated'].includes(type) ? [...before[type].groupKeys, 'role.admin'].sort() : before[type].groupKeys;
-    assert.deepEqual(body.rules[type].groupKeys, expected, 'Only the selected group changes in each notification rule');
-  }
-  await editor.reload(); await editor.overview('role.admin');
-  await expect(editor.field('GroupSelected-dueSoon')).toBeChecked();
-  await expect(editor.field('GroupSelected-updated')).toBeChecked();
-  await expect(editor.field('GroupSelected-actionRequired')).not.toBeChecked();
-  await editor.field('GroupSelected-submitted').focus(); await editor.page.keyboard.press('Space');
   await expect(editor.field('GroupSelected-submitted')).toBeChecked();
-  await editor.page.keyboard.press('Space'); await expect(editor.field('GroupSelected-submitted')).not.toBeChecked();
+  await expect(editor.field('GroupSelected-updated')).toBeDisabled();
+  await expect(editor.field('GroupSelected-updated')).not.toBeChecked();
+  await expect(editor.field('GroupCurrent-updated')).toContainText(/off for everyone/i);
+  await editor.field('GroupSelected-submitted').uncheck();
+  await editor.type('submitted');
+  await expect(editor.field('ExcludedGroups')).toContainText('Developer');
+  await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-submitted')).not.toBeChecked();
+  assert.equal(report.writes.length, writes, 'Effective group edits stay unsaved until Save');
+  const off = await editor.save();
+  assert.deepEqual(off.rules.submitted.excludedGroupKeys, ['role.developer']);
+  assert.equal(off.rules.submitted.includeDefaultRecipients, true);
+  assert.equal(off.rules.submitted.enabled, true);
+  assert.deepEqual(off.rules.submitted.groupKeys, before.submitted.groupKeys);
+  const afterIds = await recipientIds(fixture, 'submitted');
+  assert(!afterIds.includes(id(10)));
+  assert.deepEqual(afterIds, originalIds.filter(value => value !== id(10)), 'Developer Off leaves all other roles unchanged');
+  const current = await recipientSelection(fixture, 'submitted');
+  const pending = filterNotificationRecipients(current.settings, 'submitted', original.recipients, current);
+  assert(!pending.recipients.some(recipient => recipient.userId === id(10)), 'Send-time policy also blocks previously selected Developer mail');
+  await editor.reload(); await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-submitted')).not.toBeChecked();
+  await editor.field('GroupSelected-submitted').check(); const on = await editor.save();
+  assert(!(on.rules.submitted.excludedGroupKeys || []).includes('role.developer'));
+  assert(!on.rules.submitted.groupKeys.includes('role.developer'));
+  assert.deepEqual(await recipientIds(fixture, 'submitted'), originalIds);
+  await editor.reload(); await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-submitted')).toBeChecked();
+  checked('Developer Receive Off saves an explicit group exclusion and blocks fresh/send-time default mail without affecting other roles; On restores defaults without adding an extra role subscription');
+
+  await editor.type('updated'); await editor.field('Enabled').check();
+  await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-updated')).toBeChecked();
+  await expect(editor.field('GroupSelected-updated')).toBeEnabled();
+  await editor.type('updated'); await editor.field('Enabled').uncheck();
+  await editor.overview('role.developer');
+  await expect(editor.field('GroupSelected-updated')).not.toBeChecked();
+  await expect(editor.field('GroupSelected-updated')).toBeDisabled();
+  await expect(editor.field('Save')).toBeDisabled();
+  const keyboardWrites = report.writes.length;
+  await editor.field('GroupSelected-submitted').focus(); await editor.page.keyboard.press('Space');
+  await expect(editor.field('GroupSelected-submitted')).not.toBeChecked();
+  await editor.page.keyboard.press('Space'); await expect(editor.field('GroupSelected-submitted')).toBeChecked();
+  await expect(editor.field('Save')).toBeDisabled(); assert.equal(report.writes.length, keyboardWrites);
   for (const width of [1440, 320]) {
     await editor.page.setViewportSize({ width, height: width === 320 ? 844 : 1000 });
     assert(await editor.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
@@ -298,8 +353,29 @@ async function groupFirstJourney(editor, fixture) {
     await editor.page.screenshot({ path: artifact(`group-first-${width === 1440 ? 'desktop' : 'mobile-320'}.png`), fullPage: true });
   }
   await editor.page.setViewportSize({ width: 1440, height: 1000 });
-  checked('Group-first view reads six explicit memberships with accurate conditional/off/exclusion statuses; checkbox edits share the type draft and preserve global flags, other groups and individual overrides');
-  checked('Group membership saves and reloads by selected role; keyboard toggles and desktop/320px group summaries remain usable');
+  checked('Global Off disables Receive; changing type-wide enabled state updates role checkboxes immediately, and keyboard/default toggles remain usable at desktop and 320px');
+}
+
+async function overlappingGroupJourney(editor, fixture) {
+  await editor.type('updated'); await editor.field('Enabled').check(); await editor.group('role.gsc');
+  await editor.overview('department.gscTet.any'); await expect(editor.field('GroupSelected-updated')).toBeChecked();
+  await editor.field('GroupSelected-updated').uncheck(); const off = await editor.save();
+  assert(off.rules.updated.excludedGroupKeys.includes('department.gscTet.any'));
+  assert(off.rules.updated.groupKeys.includes('role.gsc'));
+  assert(!(await recipientIds(fixture, 'updated')).includes(id(1)), 'Department Off beats an overlapping role subscription');
+  await editor.type('updated'); await editor.user(id(1)); await editor.save();
+  assert((await recipientIds(fixture, 'updated')).includes(id(1)), 'Individual Receive overrides group Off');
+  await editor.overview('department.gscTet.any');
+  await expect(editor.field('GroupSelected-updated')).not.toBeChecked();
+  await expect(editor.field('GroupStatus-updated')).toContainText(/individual|exception/i);
+  await editor.type('updated'); await editor.user(id(1), true); await editor.save();
+  assert(!(await recipientIds(fixture, 'updated')).includes(id(1)), 'Individual Exclude wins over overlapping groups and defaults');
+  await expect(editor.field('ExcludedGroups')).toContainText('GSC/TET');
+  await editor.field('ExcludedGroups').getByRole('button', { name: /remove/i }).click();
+  const cleared = await editor.save();
+  assert(!(cleared.rules.updated.excludedGroupKeys || []).includes('department.gscTet.any'));
+  assert(!(await recipientIds(fixture, 'updated')).includes(id(1)), 'Clearing group Off retains the individual Exclude');
+  checked('Department Off beats overlapping role subscriptions; individual Receive can override it, individual Exclude wins, and Details can clear group blocks without erasing user exclusions');
 }
 
 async function conflictAndDiscard(editor, second) {
@@ -388,8 +464,8 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     const admin = await openContext(browser, origin, 'admin', contexts);
     page = await admin.newPage(); const editor = new PreferencesPage(page, origin);
-    await loadingAndDefaults(editor); await currentDefaultsJourney(editor, fixture); await audienceAndPersistence(editor, fixture);
-    await rejectFreeEmail(admin, origin, fixture); await groupFirstJourney(editor, fixture);
+    await loadingAndDefaults(editor); await currentDefaultsJourney(editor, fixture); await manualRoutingJourney(editor, fixture); await audienceAndPersistence(editor, fixture);
+    await rejectFreeEmail(admin, origin, fixture); await groupFirstJourney(editor, fixture); await overlappingGroupJourney(editor, fixture);
     const second = new PreferencesPage(await admin.newPage(), origin); await conflictAndDiscard(editor, second);
     await responsive(editor); await permissions(browser, origin, contexts, fixture, editor);
     for (const body of report.writes) assertPayload(body);

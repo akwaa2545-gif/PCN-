@@ -7,6 +7,7 @@
   'use strict';
   const KEYS = Object.freeze(['submitted','actionRequired','updated','completed','dueSoon','overdue']);
   const RULE_FIELDS = ['enabled','includeDefaultRecipients','groupKeys','userIds','excludedUserIds'];
+  const MODES = ['general','departmentEvents','ownPcns','assigned','routing','conditional','none'];
   const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
   const strings = value => Array.isArray(value) && value.length <= 2000
@@ -16,29 +17,52 @@
     if (value?.schemaVersion !== 1 || typeof value.version !== 'string' || !/^[a-f0-9]{64}$/i.test(value.version) || !exact(value.rules, KEYS)) invalid();
     for (const key of KEYS) {
       const rule = value.rules[key];
-      if (!exact(rule, RULE_FIELDS) || typeof rule.enabled !== 'boolean' || typeof rule.includeDefaultRecipients !== 'boolean'
+      if ((!exact(rule, RULE_FIELDS) && !exact(rule, [...RULE_FIELDS,'excludedGroupKeys'])) || typeof rule.enabled !== 'boolean' || typeof rule.includeDefaultRecipients !== 'boolean'
         || !strings(rule.groupKeys) || !strings(rule.userIds) || !strings(rule.excludedUserIds)
-        || rule.userIds.some(id => rule.excludedUserIds.includes(id))) invalid();
+        || rule.userIds.some(id => rule.excludedUserIds.includes(id))
+        || rule.excludedGroupKeys !== undefined && (!strings(rule.excludedGroupKeys) || rule.groupKeys.some(key => rule.excludedGroupKeys.includes(key)))) invalid();
     }
     const options = value.options;
     if (!options || !Array.isArray(options.types) || options.types.length !== KEYS.length
       || new Set(options.types.map(type => type?.key)).size !== KEYS.length
       || options.types.some(type => !KEYS.includes(type?.key) || typeof type.label !== 'string' || typeof type.description !== 'string')
       || !Array.isArray(options.groups) || options.groups.length > 200
-      || options.groups.some(group => typeof group?.key !== 'string' || typeof group.label !== 'string')
+      || options.groups.some(group => typeof group?.key !== 'string' || typeof group.label !== 'string'
+        || group.defaultTypes !== undefined && (!strings(group.defaultTypes) || group.defaultTypes.some(key => !KEYS.includes(key)))
+        || group.defaultModes !== undefined && (!exact(group.defaultModes,KEYS) || Object.values(group.defaultModes).some(mode => !MODES.includes(mode)))
+        || group.members !== undefined && !strings(group.members))
       || new Set(options.groups.map(group => group.key)).size !== options.groups.length
       || !Array.isArray(options.users) || options.users.length > 2000
-      || options.users.some(user => typeof user?.id !== 'string' || typeof user.displayName !== 'string' || typeof user.email !== 'string')
+      || options.users.some(user => typeof user?.id !== 'string' || typeof user.displayName !== 'string' || typeof user.email !== 'string'
+        || user.roles !== undefined && !strings(user.roles))
       || new Set(options.users.map(user => user.id)).size !== options.users.length) invalid();
     return { schemaVersion:1, version:value.version, rules:copyRules(value.rules),
-      options:{ types:options.types.map(type => ({ key:type.key, label:type.label, description:type.description })),
-        groups:options.groups.map(group => ({key:group.key,label:group.label})),
-        users:options.users.map(user => ({id:user.id,displayName:user.displayName,email:user.email,employeeCode:user.employeeCode || '',department:user.department || ''})) },
+      options:{ types:options.types.map(type => ({ key:type.key, label:type.key === 'submitted' ? 'New PCN submitted' : type.label,
+          description:type.key === 'submitted' ? 'When a draft is submitted for review.' : type.description })),
+        groups:options.groups.map(group => groupMetadata(group,options.users)),
+        users:options.users.map(user => ({id:user.id,displayName:user.displayName,email:user.email,employeeCode:user.employeeCode || '',department:user.department || '',
+          roles:[...(user.roles || [])],signingStep:user.signingStep || null})) },
       updatedAt:typeof value.updatedAt === 'string' ? value.updatedAt : null, updatedBy:typeof value.updatedBy === 'string' ? value.updatedBy : null };
   }
   function copyRules(rules) {
     return Object.fromEntries(KEYS.map(key => [key, { enabled:rules[key].enabled, includeDefaultRecipients:rules[key].includeDefaultRecipients,
-      groupKeys:[...rules[key].groupKeys].sort(), userIds:[...rules[key].userIds].sort(), excludedUserIds:[...rules[key].excludedUserIds].sort() }]));
+      groupKeys:[...rules[key].groupKeys].sort(), excludedGroupKeys:[...(rules[key].excludedGroupKeys || [])].sort(),
+      userIds:[...rules[key].userIds].sort(), excludedUserIds:[...rules[key].excludedUserIds].sort() }]));
+  }
+  function groupMetadata(group,users) {
+    const role = group.role || (group.key.startsWith('role.') ? group.key.slice(5) : '');
+    const departmentKey = group.departmentKey || (group.key.startsWith('department.') ? group.key.split('.')[1] : '');
+    const action = group.action || (departmentKey ? group.key.split('.')[2] : null);
+    const matches = user => role ? (user.roles || []).some(value => String(value).toLowerCase() === role.toLowerCase())
+      : user.department === departmentKey && (!action || action === 'any' || user.signingStep === action);
+    const members = group.members || users.filter(matches).map(user => user.id);
+    const internal = departmentKey || ['admin','developer','reviewer','gsc','productionengineering','qa','tapbu','supplier'].includes(role.toLowerCase());
+    const assigned = departmentKey || role !== 'developer' && role !== 'supplier'
+      && users.some(user => members.includes(user.id) && ['prepared','checked','approved'].includes(user.signingStep));
+    const defaultTypes = group.defaultTypes || KEYS.filter(key => ['submitted','updated','completed'].includes(key) ? internal : assigned);
+    const defaultModes = group.defaultModes || Object.fromEntries(KEYS.map(key => [key,!defaultTypes.includes(key) ? 'none'
+      : ['submitted','updated','completed'].includes(key) ? role === 'admin' ? 'departmentEvents' : role === 'supplier' ? 'ownPcns' : 'general' : 'assigned']));
+    return {key:group.key,label:group.label,role,departmentKey,action,defaultTypes:[...defaultTypes],defaultModes:{...defaultModes},members:[...members]};
   }
   function create(root, hooks) {
     const el = id => root.document.getElementById(id);
@@ -55,7 +79,7 @@
       el('notificationIncludeUser').disabled = !editing || !userId || snapshot.rules[selected].userIds.includes(userId);
       el('notificationExcludeUser').disabled = !editing || !userId || snapshot.rules[selected].excludedUserIds.includes(userId);
       for (const key of KEYS) {
-        el(`notificationGroupSelected-${key}`).disabled = !editing || !selectedGroup;
+        el(`notificationGroupSelected-${key}`).disabled = !editing || !selectedGroup || !snapshot.rules[key].enabled;
         el(`notificationGroupConfigure-${key}`).disabled = !editing;
       }
       el('notificationEditor').setAttribute('aria-busy', String(busy));
@@ -73,13 +97,13 @@
       const user = snapshot.options.users.find(item => item.id === id);
       return user ? `${user.displayName}${user.employeeCode ? ` · ${user.employeeCode}` : ''} · ${user.email}` : `Unavailable user · ${id}`;
     }
-    function chips(container, entries, remove, fallbackFocus) {
+    function chips(container, entries, remove, fallbackFocus, removeLabel = 'Remove') {
       const items = entries.map(({id,label,kind}) => {
         const item = element('li', undefined, 'notification-recipient');
         const text = element('span', label); item.append(text);
         if (kind) item.append(element('span', kind, 'notification-recipient-kind'));
-        const button = element('button', 'Remove', 'notification-remove'); button.type = 'button';
-        button.setAttribute('aria-label', `Remove ${kind ? `${kind.toLowerCase()} override for ` : ''}${label}`);
+        const button = element('button', removeLabel, 'notification-remove'); button.type = 'button';
+        button.setAttribute('aria-label', removeLabel === 'Remove block' ? `Remove block for ${label}` : `Remove ${kind ? `${kind.toLowerCase()} override for ` : ''}${label}`);
         button.addEventListener('click', () => {
           if (!allowed() || busy) return;
           remove(id); renderRule(); changed(); status(`${label} removed from this notification rule.`);
@@ -94,22 +118,22 @@
       snapshot = { ...snapshot, rules:{ ...snapshot.rules, [key]:{...snapshot.rules[key],...patch} } };
     }
     function setRule(patch) { updateRule(selected, patch); }
-    function groupDelivery(key, rule, included) {
-      if (!rule.enabled) return { label:'Off for everyone', state:'off', detail:'Off for everyone. This email type is disabled.' };
-      if (included) return { label:rule.includeDefaultRecipients ? 'Current + group recipients' : 'Group subscription enabled', state:'custom',
-        detail:'Explicitly included. Eligible members can receive this email; individual exclusions still apply.' };
-      if (rule.includeDefaultRecipients) {
-        if (['submitted','updated','completed'].includes(key)) {
-          const detail = selectedGroup === 'role.admin' ? 'Administrator delivery follows the department responsible for this PCN event.'
-            : selectedGroup === 'role.supplier' ? 'Suppliers receive these updates only for PCNs they own.'
-              : 'General PCN updates for eligible internal members; individual exclusions still apply.';
-          return { label:'Current recipients enabled', state:'current', detail };
-        }
-        return { label:'When assigned to this review', state:'current', detail:'Uses current Mail Routing for the active workflow step. Review reminders also follow the configured day limits.' };
-      }
-      if (rule.groupKeys.length || rule.userIds.length) return { label:'Custom recipients only', state:'custom',
-        detail:'Not explicitly included. Members may receive through overlapping groups or individual choices.' };
-      return { label:'No recipients selected', state:'off', detail:'No recipients selected. This type sends no email.' };
+    function groupDelivery(key, rule, group) {
+      const included = rule.groupKeys.includes(group.key), blocked = rule.excludedGroupKeys.includes(group.key);
+      const defaults = rule.includeDefaultRecipients && group.defaultTypes.includes(key);
+      const checked = rule.enabled && !blocked && (included || defaults);
+      const members = group.members, receive = rule.userIds.filter(id => members.includes(id)).length;
+      const excluded = rule.excludedUserIds.filter(id => members.includes(id)).length;
+      const otherBlocks = snapshot.options.groups.filter(item => item.key !== group.key && rule.excludedGroupKeys.includes(item.key));
+      const overlap = members.filter(id => otherBlocks.some(item => item.members.includes(id)) && !rule.userIds.includes(id) && !rule.excludedUserIds.includes(id)).length;
+      const exceptions = [receive ? `${receive} individual Receive override${receive === 1 ? '' : 's'}` : '',
+        excluded ? `${excluded} individual exclusion${excluded === 1 ? '' : 's'}` : '', overlap ? `${overlap} blocked through another group` : ''].filter(Boolean);
+      const modes = {general:'General updates',departmentEvents:'Responsible department',ownPcns:'Own PCNs',assigned:'Assigned review',routing:'Mail Routing',conditional:'Conditional delivery',none:'Not selected'};
+      const label = !rule.enabled ? 'Off for everyone' : blocked ? 'Off for this group' : !checked ? 'Not selected'
+        : included ? 'Selected group' : modes[group.defaultModes[key]] || 'On for this group';
+      const detail = checked && !included && group.defaultModes[key] === 'conditional' ? ['Depends on each member’s role, department or own PCNs.',...exceptions] : exceptions;
+      return {checked,label,state:!checked ? 'off' : included ? 'custom' : 'current',
+        detail:!rule.enabled ? 'This notification type is disabled.' : detail.join(' · ')};
     }
     function renderGroupView() {
       el('notificationView').value = view;
@@ -120,21 +144,20 @@
       el('notificationOverviewGroup').value = group ? selectedGroup : '';
       el('notificationGroupRules').hidden = !group;
       el('notificationOverviewTitle').textContent = group ? group.label : 'Select a role or group';
-      const included = KEYS.filter(key => snapshot.rules[key].groupKeys.includes(selectedGroup)).length;
-      const enabled = KEYS.filter(key => snapshot.rules[key].enabled).length;
-      const defaults = KEYS.filter(key => snapshot.rules[key].enabled && snapshot.rules[key].includeDefaultRecipients).length;
-      el('notificationGroupSummary').textContent = group ? `${enabled} email types enabled system-wide · ${defaults} use current recipients · ${included} additional group selections`
+      const enabled = group ? KEYS.filter(key => groupDelivery(key,snapshot.rules[key],group).checked).length : 0;
+      el('notificationGroupSummary').textContent = group ? `${enabled} of ${KEYS.length} notification types enabled for this group`
         : 'Choose a role or group to see its six email settings.';
       for (const key of KEYS) {
         const type = snapshot.options.types.find(item => item.key === key), rule = snapshot.rules[key];
         el(`notificationGroupType-${key}`).textContent = type.label;
         el(`notificationGroupDescription-${key}`).textContent = type.description;
-        el(`notificationGroupSelected-${key}`).checked = Boolean(group && rule.groupKeys.includes(selectedGroup));
-        el(`notificationGroupSelected-${key}`).setAttribute('aria-label', `Include group ${group?.label || ''} for ${type.label}`);
-        const delivery = group ? groupDelivery(key, rule, rule.groupKeys.includes(selectedGroup)) : null;
+        const delivery = group ? groupDelivery(key, rule, group) : null;
+        el(`notificationGroupSelected-${key}`).checked = delivery?.checked || false;
+        el(`notificationGroupSelected-${key}`).setAttribute('aria-label', `Receive ${type.label} for ${group?.label || 'selected group'}`);
         el(`notificationGroupCurrent-${key}`).textContent = delivery?.label || '';
         el(`notificationGroupCurrent-${key}`).setAttribute('data-state', delivery?.state || 'off');
         el(`notificationGroupStatus-${key}`).textContent = delivery?.detail || '';
+        el(`notificationGroupStatus-${key}`).hidden = !delivery?.detail;
         el(`notificationGroupConfigure-${key}`).setAttribute('aria-label', `Edit ${type.label} details`);
       }
     }
@@ -158,12 +181,15 @@
       const selectedCount = rule.groupKeys.length + rule.userIds.length;
       el('notificationAudienceSummary').textContent = !rule.enabled ? 'Off · No emails of this type will be sent.'
         : !rule.includeDefaultRecipients && selectedCount === 0 ? 'No recipients selected · This type will send no emails.'
-          : `${rule.includeDefaultRecipients ? 'Current recipients' : 'Custom recipients'} · ${rule.groupKeys.length} groups · ${rule.userIds.length} individual users · ${rule.excludedUserIds.length} excluded users`;
+          : `${rule.includeDefaultRecipients ? 'Current recipients' : 'Custom recipients'} · ${rule.groupKeys.length} groups${rule.excludedGroupKeys.length ? ` · ${rule.excludedGroupKeys.length} blocked groups` : ''} · ${rule.userIds.length} individual users · ${rule.excludedUserIds.length} excluded users`;
       el('notificationGroupPicker').replaceChildren(option('', 'Select a department or role'),
         ...snapshot.options.groups.filter(group => !rule.groupKeys.includes(group.key)).map(group => option(group.key, group.label)));
       el('notificationGroupPicker').value = '';
       chips('notificationSelectedGroups', rule.groupKeys.map(id => ({id,label:snapshot.options.groups.find(group => group.key === id)?.label || id})),
         id => setRule({groupKeys:rule.groupKeys.filter(key => key !== id)}), 'notificationGroupPicker');
+      chips('notificationExcludedGroups', rule.excludedGroupKeys.map(id => ({id,label:snapshot.options.groups.find(group => group.key === id)?.label || id,kind:'Blocked'})),
+        id => setRule({excludedGroupKeys:rule.excludedGroupKeys.filter(key => key !== id)}), 'notificationGroupPicker','Remove block');
+      el('notificationExcludedGroupsSection').hidden = rule.excludedGroupKeys.length === 0;
       chips('notificationSelectedUsers', [...rule.userIds.map(id => ({id,label:userName(id),kind:'Receive'})),
         ...rule.excludedUserIds.map(id => ({id,label:userName(id),kind:'Exclude'}))],
         id => setRule({userIds:rule.userIds.filter(key => key !== id),excludedUserIds:rule.excludedUserIds.filter(key => key !== id)}), 'notificationUserPicker');
@@ -187,7 +213,8 @@
     function clear() {
       epoch++; active = false; busy = false; baseline = null; snapshot = null; selected = KEYS[0]; view = 'group'; selectedGroup = '';
       el('notificationEditor').hidden = true;
-      for (const id of ['notificationType','notificationGroupPicker','notificationUserPicker','notificationSelectedGroups','notificationSelectedUsers','notificationOverviewGroup']) el(id).replaceChildren?.();
+      el('notificationExcludedGroupsSection').hidden = true;
+      for (const id of ['notificationType','notificationGroupPicker','notificationUserPicker','notificationSelectedGroups','notificationExcludedGroups','notificationSelectedUsers','notificationOverviewGroup']) el(id).replaceChildren?.();
       for (const id of ['notificationUserSearch','notificationType','notificationGroupPicker','notificationUserPicker']) el(id).value = '';
       for (const id of ['notificationTypeTitle','notificationTypeDescription','notificationAudienceSummary','notificationSearchCount','notificationSaved','notificationTotalEnabled']) el(id).textContent = '';
       el('notificationEnabled').checked = false; el('notificationUseDefaults').checked = false; changed();
@@ -198,7 +225,7 @@
         el(`notificationGroupSelected-${key}`).checked = false;
         for (const prefix of ['notificationGroupType-','notificationGroupDescription-','notificationGroupCurrent-','notificationGroupStatus-']) el(`${prefix}${key}`).textContent = '';
         el(`notificationGroupCurrent-${key}`).setAttribute('data-state', 'off');
-        el(`notificationGroupSelected-${key}`).setAttribute('aria-label', 'Include group');
+        el(`notificationGroupSelected-${key}`).setAttribute('aria-label', 'Receive notification');
         el(`notificationGroupConfigure-${key}`).setAttribute('aria-label', 'Edit notification details');
       }
     }
@@ -251,9 +278,13 @@
     for (const key of KEYS) {
       el(`notificationGroupSelected-${key}`).addEventListener('change', () => {
         if (!allowed() || busy || !snapshot || !snapshot.options.groups.some(group => group.key === selectedGroup)) return;
-        const groupKeys = snapshot.rules[key].groupKeys;
-        updateRule(key, { groupKeys:el(`notificationGroupSelected-${key}`).checked ? [...new Set([...groupKeys, selectedGroup])].sort() : groupKeys.filter(group => group !== selectedGroup) });
-        renderRule(); status(`${snapshot.options.groups.find(group => group.key === selectedGroup).label} ${el(`notificationGroupSelected-${key}`).checked ? 'included for' : 'removed from'} ${snapshot.options.types.find(type => type.key === key).label}. Save settings to apply.`);
+        const rule = snapshot.rules[key], group = snapshot.options.groups.find(group => group.key === selectedGroup);
+        if (!rule.enabled) { renderRule(); return; }
+        const checked = el(`notificationGroupSelected-${key}`).checked;
+        const defaults = rule.includeDefaultRecipients && group.defaultTypes.includes(key);
+        updateRule(key, { groupKeys:checked && !defaults ? [...new Set([...rule.groupKeys,selectedGroup])].sort() : rule.groupKeys.filter(value => value !== selectedGroup),
+          excludedGroupKeys:checked ? rule.excludedGroupKeys.filter(value => value !== selectedGroup) : [...new Set([...rule.excludedGroupKeys,selectedGroup])].sort() });
+        renderRule(); status(`${group.label}: ${snapshot.options.types.find(type => type.key === key).label} ${checked ? 'on' : 'off'}. Save settings to apply.`);
       });
       el(`notificationGroupConfigure-${key}`).addEventListener('click', () => {
         if (!allowed() || busy || !snapshot) return;
@@ -274,7 +305,7 @@
       if (!allowed() || busy || !snapshot) return;
       const key = el('notificationGroupPicker').value;
       if (!snapshot.options.groups.some(group => group.key === key)) return;
-      setRule({groupKeys:[...new Set([...snapshot.rules[selected].groupKeys,key])].sort()}); renderRule();
+      setRule({groupKeys:[...new Set([...snapshot.rules[selected].groupKeys,key])].sort(),excludedGroupKeys:snapshot.rules[selected].excludedGroupKeys.filter(value => value !== key)}); renderRule();
       status('Department / role group added.'); el('notificationGroupPicker').focus();
     });
     for (const [id,field,opposite] of [['notificationIncludeUser','userIds','excludedUserIds'],['notificationExcludeUser','excludedUserIds','userIds']]) {
@@ -283,7 +314,7 @@
         const userId = el('notificationUserPicker').value;
         if (!snapshot.options.users.some(user => user.id === userId)) return;
         setRule({[field]:[...new Set([...snapshot.rules[selected][field],userId])].sort(),[opposite]:snapshot.rules[selected][opposite].filter(key => key !== userId)});
-        renderRule(); status(`User ${field === 'userIds' ? 'will receive' : 'is excluded from'} this notification type.`); el('notificationUserPicker').focus();
+        renderRule(); status(`Individual ${field === 'userIds' ? 'Receive' : 'Exclude'} choice added.`); el('notificationUserPicker').focus();
       });
     }
     el('notificationForm').addEventListener('submit', event => { event.preventDefault(); return save(); });

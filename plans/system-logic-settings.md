@@ -1,5 +1,19 @@
 # Admin system logic settings — design
 
+## Content of Changes master data — local follow-up, 2026-11-24
+
+The user approved editing category wording, adding options, disabling/re-enabling options and assigning RL0–RL3 through **System Settings → Content of Changes**, for both Raw Material and Packaging. Administrator and valid Developer accounts can publish these settings. Saving requires a reason and the current master version; stale editors keep their changes and must reload deliberately.
+
+Within each form, larger RL3, RL2, RL1 and RL0 headers group the options. Each risk group expands/collapses, shows option/enabled counts and provides an Add option action that assigns that group’s risk level. Grouping is a presentation detail; it must preserve each option’s underlying identity and values during risk changes.
+
+Each publication creates an immutable `MasterDataVersions` snapshot and an audit entry in one transaction. Only category lists are writable; workflow stages, statuses, form identity and headings remain outside this settings API. Each form needs at least one enabled category, unique nonblank wording of at most 500 characters, and at most 100 options. Disabled options stay visible in the editor and disappear from new-document selection.
+
+New documents use the current enabled master data. Existing documents—including drafts and signed legacy, TA and SC records—continue to validate, render and print using their saved `masterDataVersionId`. Legacy records without a version use the packaged baseline. A missing pinned version fails closed rather than substituting current defaults. Copying an old document into a new one uses current defaults and requires category selection if the former option is no longer available. Restarting or running initialization must preserve an existing active publication.
+
+No schema migration or deployment is part of this local follow-up. The earlier dated review-limit decisions below remain applicable.
+
+Verified locally with **1,418 passing unit/API tests**, **90.49% line, 91.28% branch and 94.47% function coverage**, and 7 isolated browser groups covering publication, grouped risk editing, new versus historical documents, conflicts, authorization and 320px layout. The browser checks confirm keyboard collapse/expand, per-risk Add, and risk changes moving the same option without losing focus. Existing creation, Developer correction and single-page A4 print journeys also passed. Code, JavaScript and security reviews have no unresolved findings. Local health/readiness checks returned `ok` and `ready`. Tests used disposable memory storage or SQL mocks; no live business records were modified by these checks. No deployment or push was performed.
+
 Date: 2026-10-21. Status: implemented and verified locally; the user also approved migration 008 for the reported startup failure.
 
 ## Intended behavior

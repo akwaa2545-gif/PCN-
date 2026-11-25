@@ -1,5 +1,23 @@
 # Developer access
 
+## Developer corrections — local follow-up, 2026-11-24
+
+The user authorized bulk document corrections without manually starting a revision, retaining existing signatures and recording corrections in audit history. Developer must also be able to remove a signature separately. This follow-up is local only; deployment and push remain on hold. The earlier dated checkpoints below describe their own implementation stages.
+
+Add a **Corrections** tab to Developer Tools. Select up to 20 legacy, TA or SC documents, edit their content, supply a reason and review the before/after preview before applying. Corrections preserve the document code, type, form, risk, workflow status, document revision number and existing signature evidence. Code/type/form/risk, attachments and signing fields cannot be changed through the correction payload. Newly submitted documents with automatic GSC/TET Prepared signatures are included.
+
+The subsequent usability update separates selection, editing and review. The selection screen has compact code/type/status rows and one primary Edit selected documents action. The editor opens the first document and shows its selected change item first. Other change items, supplier details, additional information and signature management are expandable sections. A footer shows the number of changed documents, the required audit reason and Review changes. Returning to selection preserves edits and the reason; choosing different documents requires explicitly discarding pending work. Shared-field actions apply to the loaded documents, independently of search results or checkbox selection.
+
+Usability verification passed **1,423 unit/API tests** (`test-results/corrections-ux-full-unit.log`) and **32 focused frontend tests**. Seven isolated browser groups check the staged workflow, all 14 stored change rows with the selected row displayed first, preservation of hidden rows and signatures, dirty Back/Resume behavior, partial conflicts, signature removal, and 320px keyboard/focus visibility. A scoped focus helper prevents stage headings and dialog-return targets from being hidden behind the portal header. Code, JavaScript and source-level accessibility reviews found no unresolved issues. The work remains local; no deployment or push was performed.
+
+Retained signatures continue to identify the content originally signed. Current content hashes may change, but original signature bindings must not be rewritten. Show a corrected-after-signing notice and keep the reason, acting Developer, time and full before/after snapshots in existing transaction history. This is an explicit Developer capability; normal document editing and Administrator access retain their existing rules.
+
+Signature removal is a separate action with a required reason and a preview listing the chosen signature and downstream signatures to clear. Earlier signatures remain. Removing a signature from an approved, rejected or closed document explicitly reopens it for review; the preview must state this before applying. Signature names, dates and bindings for cleared steps must also be removed. Normal signing prerequisites apply again afterward.
+
+Use strict server-side exclusive Developer authorization, existing current-account transaction checks, CSRF protection and per-document version checks. Each document save is atomic with its history and notification preparation. A bulk request reports individual successes and failures; it does not promise one transaction across the entire batch. Conflicts preserve entered changes for deliberate review rather than automatic retry. No schema migration is planned.
+
+Implemented and verified locally. The full unit/API suite passed **1,418 tests**, with **90.49% line, 91.28% branch and 94.47% function coverage** (`test-results/pcn-corrections-master-final-coverage.log`). Isolated browser acceptance passed 6 correction groups, 7 master-data groups, 8 existing Developer Tools groups and 15 creation groups. Single-page A4 print acceptance also passed. Code, JavaScript and security reviews have no unresolved findings. Existing local Employee Number/password-manager changes were preserved; no deployment or push was performed.
+
 Updated: 2026-10-15.
 
 Status: implemented and verified locally. Developer has Administrator-equivalent access and the shared password is required when saving Developer in **access settings**, not during sign-in. Deployment remains on hold until the user explicitly says **deploy**. Runtime `pcn-test-17-1` and its host configuration are unchanged. The Records dashboard checkpoint is also local; neither feature has been released by this work.

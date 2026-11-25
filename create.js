@@ -15,6 +15,82 @@
     return ['blank','starter','copy','resume'].includes(choices[0])?choices[0]:null;
   }
   const labels = {details:'Details',changes:'Changes',documents:'Documents',review:'Review & submit'};
+  function riskDescriptions(master, form, risk) {
+    return (master?.formDefinitions?.[form]?.riskOptions || []).filter(option => option?.enabled !== false
+      && option?.risk === risk && typeof option.text === 'string' && option.text.trim()).map(option => option.text);
+  }
+  function describeField(control, field, errorId, visibleControl) {
+    const help = field === 'documentType' ? 'documentTypeHelp' : field === 'riskLevel' ? 'riskLevelHelp' : null;
+    const descriptions = [...new Set([help,...String(errorId || '').split(/\s+/)].filter(Boolean))];
+    for(const target of [control,visibleControl].filter(Boolean)) {
+      if(descriptions.length)target.setAttribute('aria-describedby',descriptions.join(' '));else target.removeAttribute('aria-describedby');
+    }
+    return descriptions;
+  }
+  function createRiskPicker(root) {
+    const doc=root.document,el=id=>doc.getElementById(id),select=el('riskLevel'),trigger=el('riskLevelTrigger'),popup=el('riskLevelOptions');
+    const codes=['RL3','RL2','RL1','RL0'];let open=false,active=0,locked=true,items=[],anchor=null;
+    const disabled=()=>locked||select.disabled||trigger.matches?.(':disabled')||select.matches?.(':disabled');
+    function close(focus=false) {open=false;anchor=null;popup.hidden=true;trigger.setAttribute('aria-expanded','false');trigger.removeAttribute('aria-activedescendant');if(focus&&!disabled())trigger.focus({preventScroll:true});}
+    function paint() {
+      items.forEach((item,index)=>{item.node.setAttribute('aria-selected',String(codes[index]===select.value));item.node.setAttribute('data-active',String(open&&active===index));item.check.hidden=codes[index]!==select.value;});
+      if(!open)return;
+      trigger.setAttribute('aria-activedescendant',`riskLevelOption-${codes[active]}`);
+      const heading=items[active].heading.getBoundingClientRect(),bounds=popup.getBoundingClientRect();
+      if(heading.top<bounds.top+8)popup.scrollTop-=bounds.top+8-heading.top;
+      else if(heading.bottom>bounds.bottom-8)popup.scrollTop+=heading.bottom-bounds.bottom+8;
+    }
+    function show() {
+      if(disabled())return;
+      open=true;active=Math.max(0,codes.indexOf(select.value));popup.hidden=false;trigger.setAttribute('aria-expanded','true');trigger.focus({preventScroll:true});
+      const rect=trigger.getBoundingClientRect(),width=Math.min(Math.max(rect.width,480),620,root.innerWidth-32);
+      anchor={top:rect.top,left:rect.left,x:root.scrollX||0,y:root.scrollY||0};
+      const above=Math.max(1,rect.top-16),below=Math.max(1,root.innerHeight-rect.bottom-16),up=below<240&&above>below;
+      Object.assign(popup.style,{left:`${Math.max(16,Math.min(rect.right-width,root.innerWidth-width-16))}px`,width:`${width}px`,maxHeight:`${Math.min(480,up?above:below)}px`});
+      const height=popup.getBoundingClientRect().height;popup.style.top=`${up?rect.top-height-6:rect.bottom+6}px`;paint();
+    }
+    function commit(index) {
+      if(disabled())return;
+      const code=codes[index];
+      if(select.value!==code){select.value=code;el('riskLevelValue').textContent=code;paint();select.dispatchEvent(new root.Event('change',{bubbles:true}));}
+      close(true);
+    }
+    const click=()=>{if(open)close();else show();};
+    const key=event=>{
+      if(disabled())return;
+      if(event.key==='Escape'){if(open){event.preventDefault();close(true);}return;}
+      if(event.key==='Tab'){close();return;}
+      if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)) {
+        event.preventDefault();const wasOpen=open;if(!open)show();
+        active=event.key==='Home'?0:event.key==='End'?3:wasOpen?Math.max(0,Math.min(3,active+(event.key==='ArrowDown'?1:-1))):active;paint();
+      }else if(event.key==='Enter'||event.key===' '){event.preventDefault();if(open)commit(active);else show();}
+    };
+    const outside=event=>{if(open&&!popup.contains(event.target)&&!trigger.contains(event.target))close();};
+    const scroll=event=>{
+      if(!open||event.target===popup||popup.contains(event.target)||!anchor)return;
+      const rect=trigger.getBoundingClientRect();
+      if(Math.abs(rect.top-anchor.top)>.5||Math.abs(rect.left-anchor.left)>.5||(root.scrollX||0)!==anchor.x||(root.scrollY||0)!==anchor.y)close();
+    };
+    const resize=()=>close();
+    trigger.addEventListener('click',click);trigger.addEventListener('keydown',key);
+    doc.addEventListener('pointerdown',outside,true);doc.addEventListener('scroll',scroll,true);root.addEventListener('resize',resize);
+    function setDisabled(value){locked=value;trigger.disabled=value||select.disabled;if(disabled())close();}
+    return {close,setDisabled,render(master,record,value){
+      close();setDisabled(value);el('riskLevelValue').textContent=record.riskLevel || 'Select risk level';
+      trigger.setAttribute('aria-invalid',select.getAttribute('aria-invalid') || 'false');
+      describeField(select,'riskLevel',select.getAttribute('aria-describedby'),trigger);
+      items=codes.map((code,index)=>{
+        const node=doc.createElement('div');node.id=`riskLevelOption-${code}`;node.className='create-risk-option';node.setAttribute('role','option');node.setAttribute('data-risk-value',code);
+        const heading=doc.createElement('strong');heading.id=`riskLevelHeading-${code}`;heading.textContent=code;
+        const check=doc.createElement('span');check.className='create-risk-check';check.textContent='✓';check.setAttribute('aria-hidden','true');
+        const texts=riskDescriptions(master,record.changeForm,code),list=doc.createElement(texts.length?'ul':'p');list.id=`riskLevelDescriptions-${code}`;
+        if(!texts.length)list.textContent='No change descriptions configured';
+        else texts.forEach(text=>{const item=doc.createElement('li');item.textContent=text;list.appendChild(item);});
+        node.setAttribute('aria-labelledby',heading.id);node.setAttribute('aria-describedby',list.id);node.append(heading,check,list);
+        node.addEventListener('click',()=>commit(index));return {node,heading,check};
+      });popup.replaceChildren(...items.map(item=>item.node));paint();
+    },destroy(){close();trigger.removeEventListener('click',click);trigger.removeEventListener('keydown',key);doc.removeEventListener('pointerdown',outside,true);doc.removeEventListener('scroll',scroll,true);root.removeEventListener('resize',resize);}};
+  }
   function completion(checks) {
     const items = (checks?.items || []).filter(item => item.blocking);
     return {complete:items.filter(item => item.complete).length,total:items.length,missing:items.filter(item => !item.complete)};
@@ -53,6 +129,24 @@
     return !['signoff.gscTet','signoff.prodEngTet','signoff.qaTet','tapbu.gsc','tapbu.qa','qateFinal.signoff'].some(path=>{
       const group=path.split('.').reduce((value,key)=>value?.[key],review);return actions.some(action=>group?.[action]===true);
     });
+  }
+  function masterForDocument(latest, capabilities, record) {
+    const master = record?.id ? capabilities.masterData : latest;
+    if (!master?.formDefinitions || !Object.keys(master.formDefinitions).length) throw new Error('The saved master data is unavailable. Reload this document.');
+    return master;
+  }
+  function refreshSavedMaster({read,current,loaded,failed}) {
+    return read().then(result=>{if(current())loaded(result);}).catch(error=>{if(current())failed(error);});
+  }
+  function templateForMaster(document, master) {
+    const options = master.formDefinitions[document.changeForm]?.riskOptions || [];
+    const original = document.changeRows || [];
+    const rows = original.filter(row => options.some(option => option.enabled !== false
+      && option.text === (row.optionText || row.text) && option.risk === row.risk));
+    const selected = rows.find(row => row.text === document.selectedChange && row.risk === document.riskLevel);
+    const requiresSelection = Boolean(document.selectedChange && !selected);
+    return { document: { ...document, changeRows: rows.map(row => ({ ...row })), ...(requiresSelection ? { selectedChange: '' } : {}) },
+      removed: original.length - rows.length, requiresSelection };
   }
   function savedDocument(model,current,update,serialize) {
     const record=update.record || update;
@@ -109,11 +203,12 @@
   function mount(root) {
     const doc = root.document, model = root.PCN_CREATE_MODEL, readiness = root.PCN_READINESS;
     const $ = id => doc.getElementById(id);
-    const state = {master:null,user:null,document:null,savedRecord:null,stage:'details',editable:true,
+    const state = {master:null,latestMaster:null,user:null,document:null,savedRecord:null,stage:'details',editable:true,entrySession:0,destroyed:false,
       canSetRequirements:false,scannerConfigured:false,documents:[],busy:false,errors:[],clientDraftKey:null,preflight:null};
     let autosave,documents,recovery,recoveryOffer,submission,receiptTimer,receiptPolls=0;
     let previewGeneration=0,previewExpected=null,previewTimer;
     const entryGuard=createEntryGuard(),receiptGuard=createEntryGuard();
+    const riskPicker=createRiskPicker(root);
     const api = (path,options) => root.PCN_SESSION.fetch(path,options);
     function node(tag,text,className) {
       const element = doc.createElement(tag);
@@ -161,6 +256,7 @@
       for (const id of ['saveDraftButton','nextStage','submitButton','previewDocument','refreshReview']) $(id).disabled=value||!state.editable;
       $('createEditor').setAttribute('aria-busy',String(value));
       renderTypeChoices();
+      riskPicker.setDisabled(value||!state.editable);
     }
     function saved(update) {
       const record=update.record || update;
@@ -176,10 +272,13 @@
       if(matches)recovery?.clear();else recovery?.schedule();renderProgress();renderErrors();
       if (matches) renderFields();
       if ($('documentType')) { $('documentType').value=state.document.documentType || ''; $('documentType').disabled=true; }
-      if(firstSave&&record.status==='draft') void api(`/api/pcn-drafts/${encodeURIComponent(record.id)}`).then(result=>{
-        if(state.savedRecord?.id!==record.id)return;
-        state.scannerConfigured=result.scannerConfigured===true;documents?.render();
-      }).catch(error=>notify('error','Document service status unavailable',error.message));
+      if(firstSave&&record.status==='draft') {
+        const session=state.entrySession;
+        void refreshSavedMaster({read:()=>api(`/api/pcn-drafts/${encodeURIComponent(record.id)}`),
+          current:()=>!state.destroyed&&state.entrySession===session&&state.savedRecord?.id===record.id,
+          loaded:result=>{useMaster(masterForDocument(state.latestMaster,result,record));state.scannerConfigured=result.scannerConfigured===true;documents?.render();renderFields();},
+          failed:error=>{state.editable=false;autosave?.stop();setBusy(false);notify('error','Draft saved; reload required',`The draft was saved, but its saved categories could not be loaded. Reload before editing. ${error.message}`);}});
+      }
       if(update.unsavedChanges){
         $('saveRecoveryCopy').hidden=false;$('canonicalDocumentLink').hidden=false;$('canonicalDocumentLink').href=`/form.html?id=${encodeURIComponent(record.id)}`;
         $('draftStatusBadge').textContent=record.status;setBusy(false);renderFields();recovery?.schedule();
@@ -224,7 +323,8 @@
         capture:()=>({document:model.toPayload(state.document),isTestDocument:state.document.isTestDocument===true}),
         restore:snapshot=>{
           const test=state.savedRecord?state.savedRecord.isTestDocument===true:snapshot.isTestDocument===true;
-          const restored=model.fromTemplate(snapshot.document,{canSetRequirements:state.canSetRequirements});
+          let restored=model.fromTemplate(snapshot.document,{canSetRequirements:state.canSetRequirements});
+          if(!state.savedRecord)restored=templateForMaster(restored,state.master).document;
           if(!state.canSetRequirements&&state.savedRecord)restored.internalReview=model.toPayload(state.savedRecord).internalReview;
           state.document={...restored,...(typeLocked()?{documentType:normalizeType(state.savedRecord?.documentType || state.document.documentType) || undefined}:{}),...(test?{isTestDocument:true}:{})};
           changed(state.document);renderFields();$('createRecovery').hidden=true;
@@ -258,8 +358,9 @@
         element.id=`${field}Error`;element.textContent=issue?`${issue.label || field} is required.`:'';
         const control=$(field);if(control){
           control.setAttribute('aria-invalid',String(Boolean(issue)));
-          const descriptions=[field==='documentType'?'documentTypeHelp':null,issue?element.id:null].filter(Boolean);
-          if(descriptions.length)control.setAttribute('aria-describedby',descriptions.join(' '));else control.removeAttribute('aria-describedby');
+          const visible=field==='riskLevel'?$('riskLevelTrigger'):null;
+          visible?.setAttribute('aria-invalid',String(Boolean(issue)));
+          const descriptions=describeField(control,field,issue?element.id:null,visible);
           if(field==='documentType') {
             $('documentTypeGroup')?.setAttribute('aria-invalid',String(Boolean(issue)));
             doc.querySelectorAll('[name="documentTypeChoice"]').forEach(choice=>{
@@ -292,6 +393,7 @@
     function renderFields() {
       doc.querySelectorAll('[data-field]').forEach(control=>{control.value=state.document[control.dataset.field] ?? '';control.disabled=!state.editable || control.dataset.field==='documentType'&&typeLocked();});
       renderTypeHelp();
+      riskPicker.render(state.master,state.document,state.busy||!state.editable);
       renderCategories();renderAdditionalRows();$('sampleDateField').hidden=state.document.sampleSubmitted!=='yes';
       $('testDocumentBadge').hidden=state.document.isTestDocument!==true;renderErrors();
     }
@@ -323,11 +425,12 @@
       const field=issue.field || issue.key;
       const control=(field==='documentType'
         ? doc.querySelector('[name="documentTypeChoice"]:checked:not(:disabled)') || doc.querySelector('[name="documentTypeChoice"]:not(:disabled)')
-        : $(field)) || (field.startsWith('changeRows')?$('currentCondition'):null) || $(`${stage}Title`);
+        : $(field==='riskLevel'?'riskLevelTrigger':field)) || (field.startsWith('changeRows')?$('currentCondition'):null) || $(`${stage}Title`);
       control?.focus();(control?.closest('.create-type-option') || control)?.scrollIntoView({block:'center',behavior:'auto'});
     }
     function showStage(stage,focus=true) {
       if(!stages.includes(stage))return;
+      riskPicker.close();
       state.stage=stage;
       doc.querySelectorAll('[data-panel]').forEach(panel=>{panel.hidden=panel.dataset.panel!==stage;});
       doc.querySelectorAll('[data-stage]').forEach(control=>{if(control.dataset.stage===stage)control.setAttribute('aria-current','step');else control.removeAttribute('aria-current');});
@@ -397,8 +500,21 @@
       catch(error){report(error);}
       finally{setBusy(false);}
     }
+    function useMaster(master) {
+      state.master=master;
+      $('changeForm').replaceChildren(...Object.values(master.formDefinitions).map(form=>{const option=node('option',form.label);option.value=form.id;return option;}));
+    }
     async function begin(document,record=null,capabilities={}) {
-      entryGuard.next();
+      const generation=entryGuard.next();
+      ++state.entrySession;
+      try {
+        if(record&&!capabilities.masterData)capabilities={...capabilities,masterData:await api(`/api/pcns/${encodeURIComponent(record.id)}/master-data`)};
+        if(!record)state.latestMaster=await api('/api/master-data');
+      } catch(error) { if(entryGuard.current(generation))report(error);return false; }
+      if(!entryGuard.current(generation))return;
+      useMaster(masterForDocument(state.latestMaster,capabilities,record));
+      const checked=record?{document,removed:0,requiresSelection:false}:templateForMaster(document,state.master);
+      document=checked.document;
       receiptGuard.next();clearTimeout(receiptTimer);
       state.document=document;state.savedRecord=record;state.documents=record?.documentAttachments || [];state.preflight=null;state.errors=[];state.unsavedAfterReplay=false;
       state.editable=capabilities.editable!==false;state.canSetRequirements=capabilities.canSetRequirements ?? state.canSetRequirements;
@@ -416,7 +532,9 @@
         else{$('draftSaveStatus').textContent='Saved draft';$('actionSaveStatus').textContent='Saved draft';}
       }else saveStatus({state:'idle'});
       renderFields();renderProgress();showStage('details');setBusy(false);
+      if(checked.removed||checked.requiresSelection)notify('info','Choose a current change category','Some copied categories are no longer enabled or have a different risk level. Select a current category before saving this new PCN.');
       if(record)await documents.refresh().catch(report);
+      return true;
     }
     async function replaceAllowed(message='Start a new document? Your saved draft remains available to resume.') {
       if(!state.document)return true;
@@ -427,8 +545,9 @@
       entryGuard.next();
       receiptGuard.next();clearTimeout(receiptTimer);
       if(!await replaceAllowed())return;
+      ++state.entrySession;
       autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);receiptPolls=0;
-      state.document=null;state.savedRecord=null;$('createEditor').hidden=true;$('submissionReceipt').hidden=true;$('createEntry').hidden=false;$('entryChoices').hidden=true;
+      state.document=null;state.savedRecord=null;useMaster(state.latestMaster);$('createEditor').hidden=true;$('submissionReceipt').hidden=true;$('createEntry').hidden=false;$('entryChoices').hidden=true;
       $('draftIdentity').textContent='New document';$('draftSaveStatus').textContent='Choose how to begin';$('testDocumentBadge').hidden=true;$('fillTestDocument').hidden=true;
       $('draftStatusBadge').textContent='Draft';$('saveRecoveryCopy').hidden=true;$('canonicalDocumentLink').hidden=true;
       root.history.replaceState(null,'','/create');
@@ -439,7 +558,7 @@
       const mode=testFillMode({savedRecord:state.savedRecord,hasContent:state.document&&model.hasMeaningfulContent(state.document,state.master)});
       if(mode!=='fill'&&!await confirm(mode==='confirm-new'?'Start a new testing document?':'Replace these values with test data?',mode==='confirm-new'?'A testing document needs a fresh draft. Your current draft remains available. No approval or file checks are skipped.':'Example values will replace the entered content. No approval or file checks are skipped.','Use test values'))return;
       root.history.replaceState(null,'','/create');
-      await begin(model.sample(state.master));changed(state.document);
+      if(!await begin(model.sample(state.master)))return;changed(state.document);
       notify('info','TESTING DOC','Example values are filled in. Review them before submitting; normal checks still apply.');
     }
     async function entryChoices(kind) {
@@ -450,7 +569,7 @@
         const action=button('Copy document content',async()=>{
           const id=input.value.trim().toUpperCase();if(!isCode(id)){notify('error','Enter a PCN number','Use a valid TA, SC, or legacy PCN number.');input.focus();return;}
           const request=entryGuard.next();action.disabled=true;
-          try{const projection=await api(`/api/pcns/${id}/template`);if(!entryGuard.current(request))return;await begin(model.fromTemplate(projection,{canSetRequirements:state.canSetRequirements}),null,{freshIdentity:true});changed(state.document);}
+          try{const projection=await api(`/api/pcns/${id}/template`);if(!entryGuard.current(request))return;if(await begin(model.fromTemplate(projection,{canSetRequirements:state.canSetRequirements}),null,{freshIdentity:true}))changed(state.document);}
           catch(error){if(entryGuard.current(request))report(error);}finally{action.disabled=false;}
         },'create-button create-primary');action.id='copyTemplate';container.append(label,action);input.focus();
       }else if(kind==='resume'){
@@ -461,10 +580,12 @@
           container.replaceChildren(summary,...(drafts.length?[list]:[]));container.focus();
         }catch(error){if(entryGuard.current(generation)){report(error);container.replaceChildren(node('p','Your drafts could not be loaded. Try again.'));}}
       }else{
+        try { const latest=await api('/api/master-data');if(!entryGuard.current(generation))return;state.latestMaster=latest;useMaster(latest); }
+        catch(error) { if(entryGuard.current(generation))report(error);return; }
         const label=node('label','Choose a common change'),select=node('select');select.id='starterOption';
         const options=Object.values(state.master.formDefinitions).flatMap(form=>form.riskOptions.map(option=>({form,option})));
         options.forEach(({form,option},index)=>{const entry=node('option',`${form.label} · ${option.risk} · ${option.text}`);entry.value=index;select.append(entry);});label.append(select);
-        const action=button('Use this starter',async()=>{const {form,option}=options[Number(select.value)];await begin(model.selectChange({...model.blank(state.master),changeForm:form.id},option),null,{freshIdentity:true});changed(state.document);},'create-button create-primary');action.id='useStarter';container.append(label,action);select.focus();
+        const action=button('Use this starter',async()=>{const {form,option}=options[Number(select.value)];if(await begin(model.selectChange({...model.blank(state.master),changeForm:form.id},option),null,{freshIdentity:true}))changed(state.document);},'create-button create-primary');action.id='useStarter';container.append(label,action);select.focus();
       }
     }
     function resetPreview() {
@@ -565,8 +686,7 @@
         const session=await root.PCN_SESSION.require(null,{requireRole:true});if(!session)return;state.user=session.user;
         root.PCN_SESSION.mountProfile(session.user,error=>report(error));
         state.canSetRequirements=(state.user.roles || []).some(role=>['admin','reviewer','gsc','developer'].includes(String(role).toLowerCase()));
-        state.master=await api('/api/master-data');
-        $('changeForm').replaceChildren(...Object.values(state.master.formDefinitions).map(form=>{const option=node('option',form.label);option.value=form.id;return option;}));
+        state.latestMaster=await api('/api/master-data');useMaster(state.latestMaster);
         const draft=new URLSearchParams(root.location.search).get('draft');
         if(draft){const result=await api(`/api/pcn-drafts/${encodeURIComponent(draft)}`);await begin(result.record,result.record,result);}
         else{
@@ -579,7 +699,7 @@
       finally{doc.querySelectorAll('#createEntry button').forEach(control=>control.disabled=!state.master);}
     }
     void init();
-    return {getState:()=>state,destroy(){entryGuard.next();receiptGuard.next();previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);root.removeEventListener('message',receivePreviewMessage);closePreview();$('documentPreviewFrame').removeAttribute('src');autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);}};
+    return {getState:()=>state,destroy(){riskPicker.destroy();state.destroyed=true;++state.entrySession;entryGuard.next();receiptGuard.next();previewGeneration++;previewExpected=null;root.clearTimeout(previewTimer);root.removeEventListener('message',receivePreviewMessage);closePreview();$('documentPreviewFrame').removeAttribute('src');autosave?.stop();documents?.destroy();recovery?.destroy();clearTimeout(receiptTimer);}};
   }
-  return Object.freeze({entryIntent,completion,stageForIssue,testFillMode,retryMode,isPreviewMessage,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,savedDocument,notificationLabel,createSubmission,mount});
+  return Object.freeze({entryIntent,riskDescriptions,describeField,createRiskPicker,completion,stageForIssue,testFillMode,retryMode,isPreviewMessage,canReuseClientKey,remainingErrors,createEntryGuard,notificationPreview,editableDraft,masterForDocument,refreshSavedMaster,templateForMaster,savedDocument,notificationLabel,createSubmission,mount});
 });

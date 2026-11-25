@@ -1,9 +1,10 @@
 const { ApiError } = require('./apiError');
-const { isDeveloperAssignment, actions, departments, stageDepartments } = require('./signingPermissions');
+const { actions, departments, stageDepartments } = require('./signingPermissions');
 const { routeGroups } = require('./workflowAccess');
 const { buildWorkflowProgress } = require('./masterData');
 const { buildAction, buildChecks } = require('./documentChecks');
 const { isCode, departmentForStage } = require('../pcn-types');
+const { requireDeveloper, loadCorrection, bulkCorrect, unsign } = require('./developerCorrections');
 
 const recordKeys = ['id','documentType','supplierName','materialName','status','riskLevel','updatedAt','isTestDocument'];
 const fields = new Set(['documentType','status','changeForm','riskLevel','selectedChange','supplierName','manufacturerName','materialName',
@@ -15,13 +16,6 @@ const privateKeys = new Set(['ownerUserId','userId','passwordHash','password','s
 const at = (object, path) => path.split('.').reduce((value,key) => value?.[key],object);
 const select = (object, keys) => Object.fromEntries(keys.filter(key => object[key] !== undefined).map(key => [key,object[key]]));
 const summary = record => ({...select(record,recordKeys),isTestDocument:record.isTestDocument === true});
-
-function requireDeveloper(user) {
-  if (!user || user.isActive !== true || !isDeveloperAssignment(user)
-    || user.roles.length !== 1 || typeof user.roles[0] !== 'string' || user.roles[0].toLowerCase() !== 'developer') {
-    throw new ApiError(403,'Developer access required');
-  }
-}
 
 function assertId(id) {
   if (!isCode(id)) throw new ApiError(400,'Invalid PCN id');
@@ -60,7 +54,8 @@ function fieldLabel(path, record) {
 function safeChange(change, record) {
   if (!change || typeof change.path !== 'string') throw new ApiError(503,'Document transaction history is unavailable');
   const segments=change.path.split('.');
-  if ((!fields.has(segments[0]) && change.path !== 'documentControl.revisionReason') || segments.some(key => privateKeys.has(key))) return null;
+  const correctionMetadata = /^documentControl\.lastDeveloperCorrection\.(reason|actor|time|kind)$/.test(change.path);
+  if ((!fields.has(segments[0]) && change.path !== 'documentControl.revisionReason' && !correctionMetadata) || segments.some(key => privateKeys.has(key))) return null;
   return {path:change.path,label:fieldLabel(change.path,record),before:safeValue(change.before,segments[0]),after:safeValue(change.after,segments[0])};
 }
 
@@ -122,10 +117,17 @@ async function inspectDeveloperPcn(context,user,id) {
   return {record:{...summary(record),version:record.version},workflow:workflow(record,user,users,files),transactions:transactions(revisions,users,record)};
 }
 
-async function handleDeveloperTools(method,url,context,user) {
+async function handleDeveloperTools(method,url,context,user,input) {
   requireDeveloper(user);
-  if (method !== 'GET') throw new ApiError(405,'Method not allowed');
   if (url.searchParams.size) throw new ApiError(400,'Developer tools request does not accept selectors');
+  if (url.pathname === '/api/developer/pcns/corrections' && method === 'POST') return bulkCorrect(context,user,input);
+  const correction=/^\/api\/developer\/pcns\/([^/]+)\/(correction|unsign)$/.exec(url.pathname);
+  if (correction) {
+    if (correction[2] === 'correction' && method === 'GET') return loadCorrection(context,user,correction[1]);
+    if (correction[2] === 'unsign' && method === 'POST') return unsign(context,user,correction[1],input);
+    throw new ApiError(405,'Method not allowed');
+  }
+  if (method !== 'GET') throw new ApiError(405,'Method not allowed');
   if (url.pathname === '/api/developer/pcns') return loadDeveloperPcns(context,user);
   const match=/^\/api\/developer\/pcns\/([^/]+)\/inspect$/.exec(url.pathname);
   if (match) return inspectDeveloperPcn(context,user,match[1]);

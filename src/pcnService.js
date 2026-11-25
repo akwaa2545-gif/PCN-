@@ -6,6 +6,7 @@ const { applyAutomaticClosure } = require('./automaticClosure');
 const { firstSubmissionPrepared } = require('./firstSubmissionPrepared');
 const { normalizeType, typeOf, isCode } = require('../pcn-types');
 const { isDeepStrictEqual } = require('node:util');
+const { recordMaster, publicMaster } = require('./changeCategories');
 const { mailGroups, normalizeMailRouting, settingsVersion } = require('./mailRouting');
 const { emailList } = require('./integrationService');
 const {
@@ -83,17 +84,18 @@ class PcnService {
     if (isEmployeeViewer(user)) throw new ApiError(403, 'A PCN role is required to create records');
     const now = this.clock().toISOString();
     assertWritablePayload(input);
-    const data = this.normalizeInput(input);
+    const master = options.replayMaster || await this.repository.getMasterData();
+    const definitions = publicMaster(master).formDefinitions;
+    const data = this.normalizeInput(input, definitions);
     if (!data.documentType) throw new ApiError(400, 'Choose TA or SC before creating a PCN');
     this.assertAllowedInitialStatus(data.status);
     if (user) assertReviewUpdate({}, data.internalReview, user, data.riskLevel, data);
-    const master = await this.repository.getMasterData();
     const record = {
       ownerUserId: user?.id || null,
       masterDataVersionId: master.versionId,
       status: data.status || "submitted",
-      sourceTemplate: formDefinitions[data.changeForm].sheet,
-      changeType: formDefinitions[data.changeForm].changeHeading,
+      sourceTemplate: definitions[data.changeForm].sheet,
+      changeType: definitions[data.changeForm].changeHeading,
       createdAt: now,
       updatedAt: now,
       submittedAt: data.status === "draft" ? null : now,
@@ -140,10 +142,11 @@ class PcnService {
         if (input.documentType !== undefined && normalizeType(input.documentType) !== typeOf(current)) {
           throw new ApiError(400, 'PCN type is locked after its code is issued');
         }
+        const definitions = publicMaster(await this.resolveRecordMaster(current, context)).formDefinitions;
         const review = mergeReview(current.internalReview || {}, input.internalReview || {});
-        const data = this.normalizeInput({ ...current, ...input, internalReview: review });
+        const data = this.normalizeInput({ ...current, ...input, internalReview: review }, definitions);
         if (user && !['draft','supplier_action'].includes(current.status)) {
-          const original = this.normalizeInput(current);
+          const original = this.normalizeInput(current, definitions);
           for (const key of Object.keys(data).filter(key => !['internalReview','status'].includes(key))) {
             if (!isDeepStrictEqual(data[key], original[key])) throw new ApiError(403, 'Submitted PCN content cannot be changed during review');
           }
@@ -167,8 +170,8 @@ class PcnService {
           updatedAt: now,
           status: nextStatus,
           submittedAt: current.submittedAt || (nextStatus !== "draft" ? now : null),
-          sourceTemplate: formDefinitions[data.changeForm].sheet,
-          changeType: formDefinitions[data.changeForm].changeHeading,
+          sourceTemplate: definitions[data.changeForm].sheet,
+          changeType: definitions[data.changeForm].changeHeading,
           route: buildWorkflow(data.riskLevel, current).map((step) => step.owner),
           internalReview: {
             ...submissionReview(current, { ...data, status:nextStatus }, user, now),
@@ -319,7 +322,11 @@ class PcnService {
     return updated;
   }
 
-  normalizeInput(input) {
+  async resolveRecordMaster(record, context) {
+    return recordMaster(context?.getMasterData ? context : this.repository, record);
+  }
+
+  normalizeInput(input, definitions = formDefinitions) {
     const documentType = input.documentType === undefined ? undefined : normalizeType(input.documentType);
     if (input.documentType !== undefined && !documentType) throw new ApiError(400, 'PCN type must be TA or SC');
     const status = sanitizeString(input.status || "submitted", "status", 1, 40);
@@ -328,7 +335,7 @@ class PcnService {
     const riskLevel = sanitizeString(input.riskLevel, "riskLevel", 1, 10);
     const selectedChange = sanitizeString(input.selectedChange, "selectedChange", minimumRequired, 500);
 
-    if (!formDefinitions[changeForm]) {
+    if (!definitions[changeForm]) {
       throw new ApiError(400, "Invalid change form");
     }
 
@@ -336,7 +343,7 @@ class PcnService {
       throw new ApiError(400, "Invalid risk level");
     }
 
-    const changeRows = sanitizeChangeRows(input.changeRows, changeForm, minimumRequired);
+    const changeRows = sanitizeChangeRows(input.changeRows, changeForm, minimumRequired, definitions);
     const validSelectedChange = changeRows.some(
       (row) => row.risk === riskLevel && row.text === selectedChange
     );
@@ -525,7 +532,7 @@ function assertValidId(id) {
   }
 }
 
-function sanitizeChangeRows(value, changeForm, minimumTextLength = 1) {
+function sanitizeChangeRows(value, changeForm, minimumTextLength = 1, definitions = formDefinitions) {
   if (value === undefined || value === null) {
     return [];
   }
@@ -534,7 +541,7 @@ function sanitizeChangeRows(value, changeForm, minimumTextLength = 1) {
     throw new ApiError(400, "changeRows must be an array");
   }
 
-  const validOptions = new Map(formDefinitions[changeForm].riskOptions.map((option) => [option.text, option]));
+  const validOptions = new Map(definitions[changeForm].riskOptions.map((option) => [option.text, option]));
 
   return value.map((row, index) => {
     const text = sanitizeString(row && row.text, `changeRows[${index}].text`, minimumTextLength, 500);
