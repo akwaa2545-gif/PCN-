@@ -11,6 +11,7 @@ const {memoryRepository,fakeAuthService,TEST_PASSWORD,unsignedPayload} = require
 const {NotificationService} = require('../src/notificationService');
 const {buildWorkflowNotificationMessage,buildPcnUpdateNotificationMessage} = require('../src/notificationTemplate');
 const masterData = require('../src/masterData');
+const { baselineDefinition } = require('../src/changeCategories');
 
 async function completeSubmissionFields(page) {
   if (await page.locator('#documentType').isEnabled()) await page.locator('#documentType').selectOption('ta');
@@ -155,6 +156,10 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
       const pathname=new URL(request.url()).pathname;
       requests.push({method:request.method(),path:pathname});
       if(request.method()==='GET') {
+        if(record && pathname===`/api/pcns/${record.id}/master-data`) {
+          assert.equal(new URL(request.url()).search,'','Pinned master reads do not accept selectors');
+          return route.fulfill({json:{success:true,data:baselineDefinition()}});
+        }
         const documentEndpoint = pathname.match(/\/(revisions|documents|checks|action)$/)?.[1];
         if(documentEndpoint) return route.fulfill({json:{success:true,data:documentEndpoint==='revisions' ? {items:[],capabilities:{canStartRevision:false}} : documentEndpoint==='documents' ? [] : documentEndpoint==='checks' ? {items:[],ready:true} : {people:[],label:'Isolated next action',canAct:false}}});
         if(pathname==='/api/pcns') {
@@ -272,6 +277,7 @@ async function verifySplitNotificationFeedback(browser, storageState, errors) {
     assert.equal(writes,4);
     assert.equal(refreshes,5,'Every write refreshes the list without losing its notification summary');
     assert.equal(requests.filter(request=>request.path.includes('/notifications/')).length,0,'No legacy notification request is emitted');
+    assert.equal(requests.filter(request=>request.method==='GET'&&request.path===`/api/pcns/${record.id}/master-data`).length,1,'The saved legacy fixture loads its pinned baseline once');
     assert.equal(await successPopup.isVisible(),false,'Workflow-only changes do not claim an Update PCN save');
     await page.getByRole('button',{name:'Submission',exact:true}).click();
     await page.emulateMedia({reducedMotion:'reduce'});
