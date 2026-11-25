@@ -1,10 +1,10 @@
 # Windows internal deployment and authentication cutover
 
-Updated: 2026-11-24. Signed `pcn-test-25-1` is installed at `http://tet-pcn.kemet.com:8443` with `AUTH_MODE=employee-password`. Release CI, exact-release identity, SQL/password-schema readiness and guarded public desktop/mobile browser acceptance passed. The protected consumer received only the reviewed asset allowlist update; the private configuration changed only `AUTH_MODE`, with a protected backup and existing ACL retained. Repeat checks returned `already_current`, and automatic deployment is enabled / Ready / last result 0. Earlier runtime evidence is historical.
+Updated: 2026-11-25. Signed `pcn-test-27-1` is installed at `http://tet-pcn.kemet.com:8443` with `AUTH_MODE=employee-password`. Release CI, signature/archive verification, exact runtime identity, SQL readiness and guarded public desktop/mobile acceptance passed. The private configuration, its ACL, proxy, IIS binding and deployment trust anchors were preserved. Repeat checks returned `already_current`, and automatic deployment is enabled / Ready / last result 0. Earlier runtime evidence is historical.
 
 ## Current release prerequisites
 
-Read-only preflight confirmed migrations **001–010** were already applied to the shared `SVR120A / Scn_DB`. This deployment ran no DDL, import, bootstrap, PCN/account write or operational test mail. Runtime archives still exclude migration SQL. The independently updated protected consumer now permits `pcn-types.js`, the System Settings assets, `notification-settings.js` and `pcn.png`; its verifier and pinned public key were unchanged. System Settings, notification preferences, TA/SC routing, automatic closure, compact Records and first-submission GSC Prepared signing are included in runtime 25.
+Runtime 27 uses the existing migrations **001–010** on shared `SVR120A / Scn_DB`; no new migration is required. Deployment ran no DDL, import, bootstrap, PCN/account write or operational test mail. Runtime archives still exclude migration SQL. The protected consumer already permits the required assets and source modules; its allowlist, verifier and pinned public key were unchanged. This release adds versioned Content of Changes settings, audited Developer corrections and signature removal, effective notification group controls, risk guidance, password-manager-compatible login and blue change descriptions.
 
 ## Scope and retained components
 
@@ -28,7 +28,7 @@ IIS on Windows 10 Professional permits ten concurrent requests, so this remains 
 
 | Component | Retained deployment layout |
 |---|---|
-| Current release | `C:\SupplierPCN\releases\pcn-test-25-1` |
+| Current release | `C:\SupplierPCN\releases\pcn-test-27-1` |
 | Release directories | `C:\SupplierPCN\releases\pcn-test-<runNumber>-<runAttempt>` |
 | WinSW service / logs | `C:\SupplierPCN\service` / `C:\SupplierPCN\logs` |
 | Private backend environment | `C:\ProgramData\SupplierPCN\config\pcn.env`, selected by absolute `PCN_ENV_FILE` |
@@ -52,7 +52,7 @@ INTERNAL_HTTP_HOSTNAME=tet-pcn.kemet.com
 ALLOW_INTERNAL_HTTP=true
 ```
 
-The code still defaults to `employee-code`; this pilot explicitly selects `employee-password`. Employee ID is checked first, followed by restricted first-use password setup or the enrolled account's password field. Passwords contain exactly eight letters/digits; profile settings provide Change password. Explicit `AUTH_MODE=password` remains maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings do not activate Windows mode.
+The code still defaults to `employee-code`; this pilot explicitly selects `employee-password`. Login shows seven Employee ID boxes backed by a native username input, a visible native password field and Remember me. Completing the ID checks the account and redirects first-time users to restricted password setup; enrolled users explicitly select Sign in. Passwords contain exactly eight letters/digits; profile settings provide Change password. Explicit `AUTH_MODE=password` remains maintenance access for eligible unlinked legacy accounts. Obsolete AD/Windows settings do not activate Windows mode.
 
 ## Internal DNS origin cutover
 
@@ -134,7 +134,19 @@ The first pipeline release `pcn-test-5-1` passed 134 tests / seven browser check
 
 ## Current acceptance and recovery
 
-### Current runtime — pcn-test-25-1; password sign-in and current PCN features
+### Current runtime — pcn-test-27-1; PCN administration and login
+
+[Actions 45527377826](https://github.com/akwaa2545-gif/PCN-/actions/runs/45527377826) passed all 28 configured steps and published signed [pcn-test-27-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-27-1) from `b19451ddac1db658b336b8cb75d1a4ea5d5f6916`. The 16,835,637-byte ZIP has SHA-256 `a8f5c5f9d30e6af9af40c7286b2f7b0157e1d6e8f250c756b59c794e28e20133`; signature, digest and exact source were independently verified using the host-pinned public key before activation. Local verification passed **1,453 unit/API tests**, with **90.73% line / 91.22% branch / 94.96% function coverage** and zero dependency vulnerabilities. Run 26 stopped on a browser fixture that omitted the new pinned-master GET; the six-line fixture correction changed no application code after `7700682`, and run 27 passed the full release gates.
+
+Validate-only retained runtime 25 and Node PID 1304. The protected consumer installed runtime 27 at observed host UTC `2026-11-25T01:58:46.3077635Z`, retaining the existing password-mode environment and its ACL. Configuration, proxy, IIS binding, consumer, verifier and public key were unchanged. Runtime 25 remains the compatible previous password-mode release; recovery to runtime 22 still requires the earlier environment restoration described below.
+
+Final independent checks at observed host UTC `2026-11-25T01:59:55.5046498Z` confirmed exact-release Node PID **7196**, WinSW parent PID **8380**, NetworkService ownership, the sole `127.0.0.1:3000` listener, public SQL readiness and password configuration. `PCNTest` retained HTTP `172.30.77.137:8443:`, and unrelated Default Web Site HTTP :80 returned 200. Repeat consumer and resumed SYSTEM task checks returned `already_current` without changing the runtime; the task is enabled / Ready / last result **0**.
+
+Guarded public browser acceptance passed **five groups**, **25 matching assets**, **five private-path denials** and **53 GETs**, with zero writes or errors. Inspected **1440/320-pixel** screenshots show the seven ID boxes, native password field, exact **Your Employee Number** hint, Remember me, Sign in, TOKIN logo and PCN favicon. These unauthenticated checks did not submit an employee ID, enroll or authenticate a real user, exercise business writes/integrations, or establish the native browser Save Password prompt.
+
+Ignored evidence under `test-results/`: `deploy-nov25-artifact.json`, `deploy-nov25-validated.json`, `deploy-nov25-activated.json`, `deploy-nov25-live-acceptance.json`, `deploy-nov25-resumed.json`, `deploy-nov25-identity-final.json`, `deploy-nov25-ci27-watch.log` and `release27/manifest.json`.
+
+### Historical runtime — pcn-test-25-1; password sign-in and current PCN features
 
 [Actions 45309203805](https://github.com/akwaa2545-gif/PCN-/actions/runs/45309203805) passed the configured security, unit/API and isolated browser gates and published signed [pcn-test-25-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-25-1) from commit `3a664b0100f523f76786a62dddbef985d07f7a0e`. The 16,808,284-byte ZIP has SHA-256 `80ac0fbce28d16347810efd771fc4620e9248a0ed32aa27fff317e662a38e08a`. Local validation passed **1,348 tests**, with **90.08% line / 91.81% branch / 95.13% function coverage**; the updated dependency audit reported zero vulnerabilities.
 

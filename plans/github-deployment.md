@@ -1,6 +1,6 @@
 # GitHub deployment to the internal Windows test host
 
-Updated: 2026-11-24. Signed `pcn-test-25-1` is installed at `http://tet-pcn.kemet.com:8443` with password sign-in enabled. Release CI, exact-release identity, SQL/password-schema readiness and guarded public browser acceptance passed. The protected consumer received the reviewed asset allowlist update; only `AUTH_MODE` changed in the private environment, with a protected backup and ACL retained. Repeat checks returned `already_current`, and the SYSTEM task is enabled / Ready / last result 0. See the [current Windows acceptance record](windows-test-deployment.md#current-runtime--pcn-test-25-1-password-sign-in-and-current-pcn-features) for host evidence and acceptance limits.
+Updated: 2026-11-25. Signed `pcn-test-27-1` is installed at `http://tet-pcn.kemet.com:8443` with password sign-in retained. Release CI, signature/archive verification, exact runtime identity, SQL readiness and guarded public browser acceptance passed. Configuration, ACL, proxy, IIS binding and deployment trust anchors were preserved. Repeat checks returned `already_current`, and the SYSTEM task is enabled / Ready / last result 0. See the [current Windows acceptance record](windows-test-deployment.md#current-runtime--pcn-test-27-1-pcn-administration-and-login) for host evidence and acceptance limits.
 
 The `PCN test deploy` workflow builds the public `akwaa2545-gif/PCN-` repository on a GitHub-hosted Windows runner. The internal PCN host checks GitHub for signed releases through outbound HTTPS every ten minutes. The host does not accept inbound GitHub SSH connections and does not run a self-hosted Actions runner.
 
@@ -14,11 +14,11 @@ Push main -> Windows Actions tests -> production runtime ZIP -> signed prereleas
                              failed check -> previous release
 ```
 
-## Runtime 25 prerequisites
+## Current runtime prerequisites
 
-Host preflight confirmed migrations **001–010** were already applied to the shared `SVR120A / Scn_DB`; this deployment ran no migration, import or bootstrap. The independently updated protected consumer permits the System Settings assets, `notification-settings.js`, `pcn-types.js` and `pcn.png`. Its verifier and pinned public key were retained. Migration SQL remains excluded from runtime archives and is never run by the consumer.
+Runtime 27 uses the existing migrations **001–010** on shared `SVR120A / Scn_DB` and the existing protected-consumer allowlist. No migration, import, bootstrap, account/PCN write or test mail was performed. Configuration and its ACL, proxy, IIS binding, consumer, verifier and pinned public key were retained. Migration SQL remains excluded from runtime archives and is never run by the consumer.
 
-Deploy the new signed runtime while retaining `AUTH_MODE=employee-code`, verify readiness and exact service identity, then back up the protected environment and switch only `AUTH_MODE=employee-password`. The consumer rolls back WinSW XML, not the external environment, so switching the mode before the new runtime is installed would prevent runtime 22 from restarting during rollback. Password-mode readiness verifies migration 010's checksum, columns and trusted constraints.
+Runtime 27 was deployed from runtime 25 while retaining `AUTH_MODE=employee-password`, so the previous runtime remains compatible with the unchanged environment. The historical runtime 25 transition first installed the new runtime in employee-code mode and only then switched the protected environment to employee-password. The consumer rolls back WinSW XML, not the external environment; recovery to runtime 22 therefore still requires restoring its employee-code configuration. Password-mode readiness verifies migration 010's checksum, columns and trusted constraints.
 
 ## Build and signing contract
 
@@ -104,9 +104,13 @@ Independently install the reviewed updated deployment consumer if its runtime al
 
 ## Acceptance evidence
 
-### Current runtime — pcn-test-25-1
+### Current runtime — pcn-test-27-1
 
-[Actions 45309203805](https://github.com/akwaa2545-gif/PCN-/actions/runs/45309203805) published signed [pcn-test-25-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-25-1), commit `3a664b0100f523f76786a62dddbef985d07f7a0e`, after the configured security, unit/API and isolated browser gates passed. The 16,808,284-byte ZIP SHA-256 is `80ac0fbce28d16347810efd771fc4620e9248a0ed32aa27fff317e662a38e08a`. The [Windows deployment record](windows-test-deployment.md#current-runtime--pcn-test-25-1-password-sign-in-and-current-pcn-features) contains the protected-consumer/environment changes, exact runtime identity, public browser checks and their unauthenticated scope. Runtime 22 and earlier evidence below is historical.
+[Actions 45527377826](https://github.com/akwaa2545-gif/PCN-/actions/runs/45527377826) passed all 28 configured steps and published signed [pcn-test-27-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-27-1), commit `b19451ddac1db658b336b8cb75d1a4ea5d5f6916`. The 16,835,637-byte ZIP SHA-256 is `a8f5c5f9d30e6af9af40c7286b2f7b0157e1d6e8f250c756b59c794e28e20133`; the signature, archive and exact source were independently verified before activation. Local checks passed 1,453 unit/API tests and the dependency audit reported zero vulnerabilities. The [Windows deployment record](windows-test-deployment.md#current-runtime--pcn-test-27-1-pcn-administration-and-login) records preserved host controls, exact service identity, 25 matching public assets, guarded desktop/mobile login checks and their unauthenticated scope. The repeat consumer and resumed SYSTEM task returned `already_current`, enabled / Ready / result 0. Earlier runtime evidence is historical.
+
+### Historical runtime — pcn-test-25-1
+
+[Actions 45309203805](https://github.com/akwaa2545-gif/PCN-/actions/runs/45309203805) published signed [pcn-test-25-1](https://github.com/akwaa2545-gif/PCN-/releases/tag/pcn-test-25-1), commit `3a664b0100f523f76786a62dddbef985d07f7a0e`, after the configured security, unit/API and isolated browser gates passed. The 16,808,284-byte ZIP SHA-256 is `80ac0fbce28d16347810efd771fc4620e9248a0ed32aa27fff317e662a38e08a`. The [historical Windows deployment record](windows-test-deployment.md#historical-runtime--pcn-test-25-1-password-sign-in-and-current-pcn-features) contains that rollout's protected-consumer/environment changes, exact runtime identity, public browser checks and their unauthenticated scope. Runtime 22 and earlier evidence below is historical.
 
 ### Historical runtime — pcn-test-22-2; internal DNS login origin
 
